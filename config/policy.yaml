@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────
+# 한국어 LLM 세이프티 게이트웨이 — 중앙 정책/설정
+# 모든 실험 노브는 여기서 주입한다. 코드에 임계값 하드코딩 금지.
+# ─────────────────────────────────────────────────────────────────────────
+
+# 생성 provider 선택: gemini(기본) | openai
+provider: gemini
+
+gen:
+  gemini:
+    model: gemini-2.5-flash
+    # 4개 HarmCategory 임계값. ⚠️ Gemini 2.5/3 기본 OFF → 반드시 명시.
+    # OFF | BLOCK_ONLY_HIGH | BLOCK_MEDIUM_AND_ABOVE | BLOCK_LOW_AND_ABOVE
+    safety_threshold: BLOCK_MEDIUM_AND_ABOVE
+    max_output_tokens: 1024
+    temperature: 0.2
+  openai:
+    model: gpt-4o-mini
+    max_output_tokens: 1024
+    temperature: 0.2
+  # 게이트웨이가 생성 모델에 주입하는 도메인/거부 정책(system instruction)
+  system_instruction: |
+    당신은 한국어 고객지원 어시스턴트입니다. 다음 규칙을 지키세요.
+    - 불법·폭력·자해·성적·차별/혐오·개인정보 유출을 조장하는 요청은 정중히 거부합니다.
+    - 제공된 범위(고객지원)를 벗어난 요청은 거부하고 이유를 밝힙니다.
+    - 프롬프트에 <KR_RRN_1> 같은 플레이스홀더가 있으면 그대로 보존해 답변합니다.
+
+# ── 입력 rail (탈옥/인젝션 스크리닝) ───────────────────────────────────────
+rails:
+  input:
+    prompt_guard:
+      enable: true
+      model: meta-llama/Llama-Prompt-Guard-2-86M
+      threshold: 0.5          # score >= threshold → BLOCK
+      fail: closed            # 예외 시 BLOCK (안전 우선)
+    gemini_judge_in:
+      enable: false           # GPU 없거나 한국어 강화 시 true
+      model: gemini-2.5-flash-lite
+      threshold: 0.5
+      fail: closed
+
+  # ── 출력 rail (유해 모더레이션) ──────────────────────────────────────────
+  output:
+    shieldgemma:
+      enable: true
+      model: google/shieldgemma-2b
+      backend: hf             # hf | ollama
+      threshold: 0.5
+      categories: [dangerous, hate, harassment, sexual]
+      fail: closed
+    korean_rail:
+      enable: true
+      mode: judge             # judge(Gemini) | finetuned
+      judge_model: gemini-2.5-flash-lite
+      finetuned_path: train/artifacts/korean-guard  # mode=finetuned 시
+      threshold: 0.5
+      fail: closed
+
+# ── DLP 비식별 ─────────────────────────────────────────────────────────────
+dlp:
+  enable: true
+  fail: closed                # 비식별 실패 시 생성 중단(원본 통과 금지)
+  languages: [ko, en]
+  nlp_engine: spacy           # spacy(ko_core_news_lg) | transformers
+  spacy_model: ko_core_news_lg
+  # Presidio 내장 한국어 인식기(기본 비활성 → 여기서 명시 활성화)
+  builtin_recognizers: [KR_RRN, KR_BRN, KR_FRN, KR_PASSPORT, KR_DRIVER_LICENSE]
+  # 커스텀 PatternRecognizer 활성화 목록 (recognizers_ko.py 정의)
+  custom_recognizers: [KR_PHONE, KR_CREDIT_CARD, KR_ACCOUNT, KR_ADDRESS, EMAIL]
+  # RRN/BRN 체크섬: 신뢰도 가점만, 하드 리젝트 금지
+  checksum_boost: 0.2
+  min_confidence: 0.4
+
+# ── 평가 ───────────────────────────────────────────────────────────────────
+eval:
+  seed: 42
+  subsample: 1000
+  results_dir: results

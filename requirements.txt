@@ -1,0 +1,46 @@
+# ── Core generation (Google 우선, OpenAI 대체) ─────────────────────────────
+google-genai>=1.0.0            # from google import genai  (구 google-generativeai 금지)
+openai>=1.30.0                # 대체/비교 provider
+
+# ── DLP / PII (한국어) ─────────────────────────────────────────────────────
+presidio-analyzer>=2.2.360    # 내장 한국어 인식기(KR_RRN 등) — 이 버전 이상 필수
+presidio-anonymizer>=2.2.360
+langchain-experimental>=0.3.0 # PresidioReversibleAnonymizer
+langchain-google-genai>=2.0.0
+python-stdnum>=1.20           # RRN/BRN 체크섬 검증
+spacy>=3.7.0                  # ko_core_news_lg (별도 다운로드)
+
+# ── 출력 모더레이션 / 가드 모델 ────────────────────────────────────────────
+transformers>=4.44.0
+torch>=2.2.0
+accelerate>=0.30.0
+
+# ── 평가 / 데이터 / 지표 ───────────────────────────────────────────────────
+datasets>=2.20.0
+scikit-learn>=1.4.0
+pandas>=2.2.0
+numpy>=1.26.0
+
+# ── UI / 설정 / 검증 ───────────────────────────────────────────────────────
+streamlit>=1.36.0
+pydantic>=2.7.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+tenacity>=8.3.0               # API 재시도
+
+# ── (선택) 관리형 비교 arm — GCP 과금 필요, 기본 미설치 ────────────────────
+# google-cloud-modelarmor>=0.1.0
+# google-cloud-dlp>=3.20.0
+
+# ── (선택) QLoRA 파인튜닝 — RunPod/Colab GPU에서 ───────────────────────────
+# trl>=0.9.0
+# peft>=0.11.0
+# bitsandbytes>=0.43.0
+
+# ── (선택) 레드팀 자동화 ──────────────────────────────────────────────────
+# garak>=0.9.0
+# (promptfoo 는 npm 설치)
+
+# ── 테스트 ─────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
