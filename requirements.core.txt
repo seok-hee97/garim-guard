@@ -1,0 +1,20 @@
+# ── D0 최소 설치 ───────────────────────────────────────────────────────
+# 런타임 골격(에이전트 루프 + 게이트 + 트레이스)과 데이터 스파이크에 필요한 것만.
+# presidio / torch / transformers 는 실제로 쓰는 날(D3 / D5)로 격리한다 —
+# D0 에 무거운 의존성을 깔다 반나절을 잃는 것이 이 일정에서 가장 흔한 사인이다.
+#   pip install -r requirements.core.txt
+
+google-genai>=1.0.0          # from google import genai (구 google-generativeai 금지)
+pydantic>=2.7.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+tenacity>=8.3.0              # API 재시도 / 429 백오프
+
+# 데이터 스파이크 — 6개 로더 관통 + 행수 실측
+datasets>=2.20.0
+duckdb>=1.0.0                # openpii-1.5m 에 language='ko' 푸시다운 (naive 로드는 4.27GB)
+pandas>=2.2.0
+
+# 테스트
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

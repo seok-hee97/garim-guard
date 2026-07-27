@@ -1,0 +1,26 @@
+{
+  "kr_recognizer_classes": [
+    "KrBrnRecognizer",
+    "KrDriverLicenseRecognizer",
+    "KrFrnRecognizer",
+    "KrPassportRecognizer",
+    "KrRrnRecognizer"
+  ],
+  "defect1_supported_language": {
+    "KrBrnRecognizer": "ko",
+    "KrDriverLicenseRecognizer": "ko",
+    "KrFrnRecognizer": "ko",
+    "KrPassportRecognizer": "kr",
+    "KrRrnRecognizer": "ko"
+  },
+  "defect1_confirmed": true,
+  "defect2_rrn_context": [
+    "Korean RRN",
+    "Korean Resident Registration Number",
+    "Resident Registration Number",
+    "RRN",
+    "rrn",
+    "rrn#"
+  ],
+  "defect2_has_hangul_context": false
+}

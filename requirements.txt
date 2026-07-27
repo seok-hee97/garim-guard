@@ -1,46 +1,42 @@
-# ── Core generation (Google 우선, OpenAI 대체) ─────────────────────────────
-google-genai>=1.0.0            # from google import genai  (구 google-generativeai 금지)
-openai>=1.30.0                # 대체/비교 provider
+# Ko-AgentGuard — 전체 의존성
+# D0 에는 requirements.core.txt 만 설치한다. 아래는 해당 컴포넌트를 만드는 날에 깐다.
 
-# ── DLP / PII (한국어) ─────────────────────────────────────────────────────
-presidio-analyzer>=2.2.360    # 내장 한국어 인식기(KR_RRN 등) — 이 버전 이상 필수
-presidio-anonymizer>=2.2.360
-langchain-experimental>=0.3.0 # PresidioReversibleAnonymizer
-langchain-google-genai>=2.0.0
-python-stdnum>=1.20           # RRN/BRN 체크섬 검증
-spacy>=3.7.0                  # ko_core_news_lg (별도 다운로드)
+-r requirements.core.txt
 
-# ── 출력 모더레이션 / 가드 모델 ────────────────────────────────────────────
+# ── 생성 provider (대체) ───────────────────────────────────────────────
+openai>=1.30.0                # 스왑 provider
+
+# ── DLP / PII 한국어 (D3~D4) ───────────────────────────────────────────
+# ⚠️ 2.2.360 은 KR_RRN 만 제공한다. KR_BRN / KR_FRN / KR_PASSPORT /
+#    KR_DRIVER_LICENSE 는 2.2.361 부터이므로 policy.yaml 의 5종을 쓰려면 필수.
+presidio-analyzer>=2.2.361
+presidio-anonymizer>=2.2.361
+python-stdnum>=1.20           # RRN/BRN 체크디지트. 골드셋 선교정에 반드시 필요.
+faker>=25.0.0                 # ko_KR 합성 골드셋 (유효 RRN 이 공개 코퍼스에 0건이므로 자체 생성)
+spacy>=3.7.0                  # Presidio NlpEngine. ko_core_news_lg 는 별도 다운로드:
+                              #   python -m spacy download ko_core_news_lg
+                              # D4 문맥 실험(교착어 표제어화)에만 필요 — 미설치 시 결함2만 skip.
+# ⛔ langchain-experimental 은 쓰지 않는다.
+#    유지보수가 중단됐고 presidio 2.2.361 / pydantic 2.x 에 대해 핀이 취약하다.
+#    PIIVault 는 Presidio API 로 직접 구현해 수명 의미론을 직접 통제한다.
+
+# ── 가드 모델 / 인코더 (D5, D7) ────────────────────────────────────────
 transformers>=4.44.0
 torch>=2.2.0
 accelerate>=0.30.0
+sentence-transformers>=3.0.0  # intfloat/multilingual-e5-small
 
-# ── 평가 / 데이터 / 지표 ───────────────────────────────────────────────────
-datasets>=2.20.0
+# ── 평가 / 통계 ────────────────────────────────────────────────────────
 scikit-learn>=1.4.0
-pandas>=2.2.0
 numpy>=1.26.0
+scipy>=1.13.0
+statsmodels>=0.14.0           # McNemar exact — 층별 한계 기여 검정 (대응 표본)
 
-# ── UI / 설정 / 검증 ───────────────────────────────────────────────────────
+# ── 데모 ───────────────────────────────────────────────────────────────
 streamlit>=1.36.0
-pydantic>=2.7.0
-pyyaml>=6.0
-python-dotenv>=1.0.0
-tenacity>=8.3.0               # API 재시도
 
-# ── (선택) 관리형 비교 arm — GCP 과금 필요, 기본 미설치 ────────────────────
-# google-cloud-modelarmor>=0.1.0
-# google-cloud-dlp>=3.20.0
-
-# ── (선택) QLoRA 파인튜닝 — RunPod/Colab GPU에서 ───────────────────────────
-# trl>=0.9.0
-# peft>=0.11.0
-# bitsandbytes>=0.43.0
-
-# ── (선택) 레드팀 자동화 ──────────────────────────────────────────────────
-# garak>=0.9.0
-# (promptfoo 는 npm 설치)
-
-# ── 테스트 ─────────────────────────────────────────────────────────────────
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
+# ── 명시적 미채택 (기획서 3장 근거) ────────────────────────────────────
+# google/shieldgemma-2b        : 모델카드가 영어 전용 자인 + manual gated + 비-OSI
+# meta-llama/Llama-Prompt-Guard-2-86M : 평가 언어에 한국어 부재
+# trl / peft / bitsandbytes    : QLoRA 미채택 (임베딩+LR 로 대체, bitsandbytes 는 MPS 미지원)
+# google-cloud-modelarmor/dlp  : GCP 과금 계정 범위 밖

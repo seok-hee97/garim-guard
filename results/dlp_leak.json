@@ -1,0 +1,32 @@
+{
+  "off": {
+    "n": 8,
+    "leaks": {
+      "rrn": 0,
+      "phone": 2,
+      "account": 4,
+      "email": 7
+    },
+    "leak_rate": {
+      "rrn": 0.0,
+      "phone": 0.25,
+      "account": 0.5,
+      "email": 0.875
+    }
+  },
+  "on": {
+    "n": 8,
+    "leaks": {
+      "rrn": 0,
+      "phone": 0,
+      "account": 0,
+      "email": 0
+    },
+    "leak_rate": {
+      "rrn": 0.0,
+      "phone": 0.0,
+      "account": 0.0,
+      "email": 0.0
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "model": "klue/roberta-small",
+  "entities": [
+    "GIVENNAME",
+    "SURNAME",
+    "CITY",
+    "STREET",
+    "BUILDINGNUM",
+    "ZIPCODE",
+    "EMAIL",
+    "DATE",
+    "AGE"
+  ],
+  "hparams": {
+    "lr": 3e-05,
+    "epochs": 3,
+    "batch": 16,
+    "max_len": 256,
+    "subsample": 20000,
+    "seed": 42
+  },
+  "eval": {
+    "eval_loss": 0.007,
+    "eval_span_precision": 0.9814,
+    "eval_span_recall": 0.9877,
+    "eval_span_f1": 0.9845,
+    "eval_runtime": 4.3537,
+    "eval_samples_per_second": 918.753,
+    "eval_steps_per_second": 28.711,
+    "epoch": 3.0
+  }
+}
