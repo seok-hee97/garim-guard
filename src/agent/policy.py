@@ -16,12 +16,18 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..providers.base import GenResult, Msg, ToolCall, ToolResult
 from ..rails.base import RailScorer
 from .hooks import Block, Rehydrated, Tainted_
 from .taint import sources_of
+
+# 엄격 스키마(서비스)용 상수
+_STR_TYPES = {"str", "email", "kr_rrn", "kr_phone", "kr_account"}
+_HIGH_RISK_TIERS = {"external", "irreversible", "exfiltration"}
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")   # 빈 로컬파트·공백·도메인 누락 거부
 
 
 def _dig(policy: dict, ref: str) -> Any:
@@ -119,12 +125,17 @@ class TierAGate:
 
     def _validate_args(self, name: str, spec: dict, args: dict) -> Block | None:
         arg_specs = spec.get("args", {}) or {}
-        # 엄격 모드(프로덕션): 선언되지 않은 인자를 실도구(fn(**args))에 넘기기 전에 거부.
+        # 엄격 모드(서비스): (1) 미선언 인자 거부, (2) 외부/비가역 도구는 선언 인자 전부 필수.
         if self.strict_schema:
             for k in args:
                 if k not in arg_specs:
                     return Block(rule=f"arg_schema.undeclared:{k}",
                                  reason=f"선언되지 않은 인자 {k}")
+            if spec.get("risk_tier") in _HIGH_RISK_TIERS:
+                for arg_name in arg_specs:
+                    if arg_name not in args:
+                        return Block(rule=f"arg_schema.required:{arg_name}",
+                                     reason=f"외부/비가역 도구 필수 인자 {arg_name} 누락")
         for arg_name, meta in arg_specs.items():
             if meta.get("required") and arg_name not in args:
                 return Block(rule=f"arg_schema.missing:{arg_name}",
@@ -133,6 +144,13 @@ class TierAGate:
                 continue
             val = args[arg_name]
             t = meta.get("type")
+            # 엄격 모드: str/email 계열은 실제 str 타입 강제(dict/list 거부) + 이메일 형식 검증.
+            if self.strict_schema and t in _STR_TYPES and not isinstance(val, str):
+                return Block(rule=f"arg_schema.type:{arg_name}",
+                             reason=f"{arg_name} 은 문자열이어야 함")
+            if self.strict_schema and t == "email" and not _EMAIL_RE.match(str(val)):
+                return Block(rule=f"arg_schema.format:{arg_name}",
+                             reason=f"{arg_name} 이메일 형식 위반(빈 로컬파트·공백 등)")
             if t == "int":
                 # 엄격 모드: float/불리언/'500000.9' 같은 암묵 절삭을 거부(중간 금액 우회 방지).
                 if self.strict_schema and (isinstance(val, bool) or isinstance(val, float)

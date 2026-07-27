@@ -32,7 +32,7 @@ from .toolworld import default_world
 # 서버 고정 방어(클라이언트가 못 끔). ★데모/프로토타입 기본값★ — "프로덕션 완제품" 아님.
 # 알려진 한계는 docs/PRODUCTION.md 참조(strict 스키마 미완, confused-deputy=Tier B off,
 # deadline soft-budget). tier_a+dlp_vault 합성 과차단은 egress 인자 사전복원으로 수정됨.
-SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True}
+SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True, "tier_b": True}
 
 _state: dict[str, Any] = {}
 

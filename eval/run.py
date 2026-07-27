@@ -45,14 +45,24 @@ def _load(split: str, kind: str) -> list[dict]:
     return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def _done() -> set[tuple[str, str]]:
+def _done() -> set[tuple]:
+    """완료 키 = (arm, case_id, provider, model, rail). provider/model/rail 을 포함해
+    조건을 바꿔 같은 파일에 이어붙여도 stale 결과를 재사용하지 않는다. finish_reason='error'
+    (일시 실패)는 완료로 굳히지 않아 재개 시 재시도된다. 손상 라인은 건너뛴다."""
     if not RUNS.exists():
         return set()
     out = set()
     for l in RUNS.read_text(encoding="utf-8").splitlines():
-        if l.strip():
+        if not l.strip():
+            continue
+        try:
             r = json.loads(l)
-            out.add((r["arm"], r["case_id"]))
+        except json.JSONDecodeError:
+            continue
+        if r.get("finish_reason") == "error":
+            continue
+        out.add((r["arm"], r["case_id"], r.get("provider", ""),
+                 r.get("model", ""), r.get("rail", "")))
     return out
 
 
@@ -129,6 +139,12 @@ async def main() -> int:
         attacks = attacks[: args.limit]
     done = _done()
     RUNS.parent.mkdir(parents=True, exist_ok=True)
+    # 실행 조건 메타 — 결과 행에 각인해 재현/재개 시 조건 혼입을 막는다.
+    model = policy["provider"].get(args.provider, {}).get("model", "")
+    run_meta = {"provider": args.provider, "model": model, "rail": args.rail, "split": args.split}
+
+    def _key(arm: str, cid: str) -> tuple:
+        return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"])
 
     total = len(arms) * (len(attacks) + len(utility))
     n = 0
@@ -137,12 +153,12 @@ async def main() -> int:
             defenses = ARMS[arm]
             for case in attacks:
                 n += 1
-                if (arm, case["case_id"]) in done:
+                if _key(arm, case["case_id"]) in done:
                     continue
                 ep = await _safe_run_case(case, provider, policy, defenses,
                                           rail=rail, customers=CUSTOMERS, arm=arm)
                 tf.write(json.dumps({"arm": arm, **ep.to_dict()}, ensure_ascii=False) + "\n"); tf.flush()
-                row = {"arm": arm, "kind": "attack", **score_attack(case, ep)}
+                row = {"arm": arm, "kind": "attack", **run_meta, **score_attack(case, ep)}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
                 mark = ("⚠️" if row["finish_reason"] == "error" else
                         "🛑" if (row["attempted"] and not row["executed"]) else
@@ -150,12 +166,12 @@ async def main() -> int:
                 print(f"[{n}/{total}] {arm:16s} {case['case_id']:44s} {mark} att={row['attempted']} exe={row['executed']}")
             for case in utility:
                 n += 1
-                if (arm, case["case_id"]) in done:
+                if _key(arm, case["case_id"]) in done:
                     continue
                 ep = await _safe_run_case(case, provider, policy, defenses,
                                           rail=rail, customers=CUSTOMERS, arm=arm)
                 tf.write(json.dumps({"arm": arm, **ep.to_dict()}, ensure_ascii=False) + "\n"); tf.flush()
-                row = {"arm": arm, "kind": "utility", **score_utility(case, ep)}
+                row = {"arm": arm, "kind": "utility", **run_meta, **score_utility(case, ep)}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
                 print(f"[{n}/{total}] {arm:16s} {case['case_id']:44s} util_done={row['completed']}")
     print(f"\n완료. → {RUNS.relative_to(ROOT)}")

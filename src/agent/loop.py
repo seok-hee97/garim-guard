@@ -27,6 +27,9 @@ from .trace import EpisodeTrace, HopTrace
 
 _log = alog.get_logger()
 
+# 한 모델 응답에서 처리할 최대 병렬 tool_call 수(무한 도구 폭주 방지).
+MAX_PARALLEL_CALLS = 8
+
 
 async def run_episode(
     user_input: str,
@@ -80,11 +83,11 @@ async def run_episode(
         if isinstance(bm, Redacted):
             messages = bm.messages
 
-        # ── 모델 호출 (provider 재시도 소진/영구실패 시 우아하게 error 종료) ──
+        # ── 모델 호출 (남은 벽시계 예산으로 상한 — 단일 느린 호출도 deadline 을 못 넘게) ──
         t0 = time.perf_counter()
+        _budget = min(per_call_timeout_s, max(0.0, deadline_s - (t0 - t_ep)))
         try:
-            result = await asyncio.wait_for(provider.generate(messages, cfg),
-                                            timeout=per_call_timeout_s)
+            result = await asyncio.wait_for(provider.generate(messages, cfg), timeout=_budget)
         except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001
             ep.finish_reason = "error"
             ep.add(HopTrace(episode_id=ep.episode_id, hop=ep.total_hops, gate_decision="NA",
@@ -125,9 +128,16 @@ async def run_episode(
             alog.event(_log, "info", "episode_done", hops=ep.total_hops)
             break
 
-        # ── 병렬 호출 전부 순회 ──
+        # ── 병렬 호출 순회 (개수 상한 + 이터레이션 내 deadline 재검사로 무한점유 방지) ──
         tool_results: list[ToolResult] = []
-        for call in result.tool_calls:
+        calls = result.tool_calls[:MAX_PARALLEL_CALLS]
+        if len(result.tool_calls) > MAX_PARALLEL_CALLS:
+            alog.event(_log, "warning", "parallel_calls_capped",
+                       requested=len(result.tool_calls), cap=MAX_PARALLEL_CALLS)
+        for call in calls:
+            if time.perf_counter() - t_ep > deadline_s:   # 한 응답에 다수 호출이 실려도 예산 강제
+                ep.finish_reason = "deadline_exceeded"
+                break
             hop = HopTrace(
                 episode_id=ep.episode_id, hop=ep.total_hops,
                 tool_name=call.name, tool_args=dict(call.args), call_id=call.call_id,
@@ -161,10 +171,12 @@ async def run_episode(
 
             # ── 도구 실행 (실도구가 걸려도 요청을 붙잡지 못하게 스레드+타임아웃) ──
             try:
+                _tbudget = min(per_call_timeout_s,
+                               max(0.0, deadline_s - (time.perf_counter() - t_ep)))
                 raw = await asyncio.wait_for(
                     asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
                                       call.call_id, world=world, taint_enabled=taint_on),
-                    timeout=per_call_timeout_s)
+                    timeout=_tbudget)
                 hop.executed = True
                 hop.taint_sources = sorted(sources_of(raw))
             except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001 — 도구 오류도 트레이스에
