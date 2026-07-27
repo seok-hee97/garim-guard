@@ -29,7 +29,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 | **구조적 로깅** | JSON 로그 + `episode_id` 상관(contextvar), ★PII 미로깅★ | [log.py](../src/agent/log.py) |
 | **DLP 배선** | `vault.restore`(최종 응답만)·egress DLP scan(외부싱크 잔여 원본 PII 차단)·after_tool fail-closed | loop.py·policy.py |
 | **Tier A 엄격 스키마** | 미선언 인자 거부 + 정수 암묵 형변환 거부 (gated: 서비스 on / 평가 off → 재현성 보존) | policy.py |
-| **테스트** | 50 통과 — 서버 스모크(HTTP money smoke·정상완주·입력검증) + seam fail-closed + deadline + strict | [tests/](../tests/) |
+| **테스트** | 54 통과 — 서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증) + seam fail-closed + deadline + strict schema + confused-deputy | [tests/](../tests/) |
 
 **라이브 검증(2026-07):** 실 gpt-4o-mini 로 `POST /v1/agent/run` → `lookup_customer(phone=<KR_PHONE_1>)`
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
@@ -37,16 +37,16 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 
 > **정직한 한계(현재 서비스 — 파일럿 전 단계):**
 >
-> *2차 검토에서 수정 완료:* **DLP×TierA 과차단**(조회된 고객 이메일이 토큰화돼 정당 발송이 차단되던 것 →
-> egress 인자를 게이트 전 사전복원으로 수정, 회귀 테스트 추가) · **after_model fail-closed**(4 seam 대칭) ·
-> **레일 무음 폴백 표면화**(`/readyz`·startup 로그에 rail 명, heuristic 폴백 경고) · **business-outcome status**
-> (차단된 이메일을 `completed_with_blocks` 로 구분, `done` 오해 방지) · **env키 접두 노출 제거**.
+> *검토에서 수정 완료:* **DLP×TierA 과차단**(egress 인자 게이트 전 사전복원) · **after_model fail-closed**(4 seam 대칭) ·
+> **strict_schema 실검증**(str/email 타입·형식·외부도구 required·빈 로컬파트 거부) · **deadline 벽시계 강제**(잔여예산 상한 +
+> MAX_PARALLEL_CALLS + 이터레이션 내 재검사) · **egress 도메인 casefold**(대문자 주소 과차단 해소) · **레일 무음 폴백 표면화**
+> (`/readyz`·startup) · **business-outcome status**(`completed_with_blocks`) · **env키 접두 노출 제거(파일+git 히스토리)** ·
+> **시스템 프롬프트 배선**(서비스는 `config/system_instruction.ko.txt` 로드, 평가 baseline 은 중립 유지).
 >
 > *아직 남은 한계(로드맵):*
-> - **strict_schema 가 이름만 엄격** — 미선언 인자·정수 형변환만 막고 **str/email 타입·형식·required·빈 로컬파트를 검증 안 함**. `send_email({})`, `to="@company.example.com"` 통과. 실 이메일 도구 연결 전 JSON Schema 강화 필요.
-> - **confused-deputy: allowlist 는 인가가 아니다** — `attacker@customer.example.com`(allowlist 도메인 내 임의주소)이 통과한다. 완화책 `forbid_tainted_args`(Tier B)가 `SERVER_DEFENSES` 에 `tier_b` 부재로 미발동 → **principal↔customer_ref 바인딩**이 정답(로드맵).
-> - **DoS 는 "이터레이션 경계 soft budget"** — `deadline_s` 는 이터레이션 진입에서만 체크, tool_call 개수 상한 없음, `asyncio.to_thread` 는 만료 시 하부 스레드 미회수. 실도구 연결 시 벽시계 취소(`asyncio.timeout`)+전용 executor+idempotency 필요.
+> - **confused-deputy: allowlist 는 인가가 아니다** — `attacker@customer.example.com`(allowlist 도메인 내 임의주소)이 통과한다. Tier B(value-provenance)는 **정당한 KB-언급 주소까지 부분문자열로 오차단**하므로 서비스 기본에서 의도적으로 **비활성**했다. 정답은 **principal↔customer_ref 바인딩**(로드맵).
 > - **본문(body)은 토큰 유지** — 정당 고객에게 가는 이메일 본문의 PII 도 토큰인 채 나갈 수 있다(수신자=데이터주체 검증 후 본문 rehydrate 는 로드맵).
+> - **실도구 시**: `asyncio.to_thread` 는 만료 시 하부 스레드 미회수 → 실 API 는 자체 소켓 타임아웃+idempotency 필요. authN/authZ·HITL 큐 미구현.
 
 ---
 

@@ -190,17 +190,18 @@ class TierAGate:
         return None
 
     def _email_allowed(self, addr: str) -> bool:
-        exact = set(self.egress.get("email_exact", []) or [])
-        if addr in exact:
+        exact = {e.casefold() for e in (self.egress.get("email_exact", []) or [])}
+        if addr.casefold() in exact:
             return True
-        domains = self.egress.get("email_domains", []) or []
-        allow_sub = self.egress.get("allow_subaddressing", False)
         if "@" not in addr:
             return False
         local, _, domain = addr.partition("@")
+        allow_sub = self.egress.get("allow_subaddressing", False)
         if not allow_sub and "+" in local:
             return False  # support+exfil@… 우회 차단
-        return domain in domains
+        # 도메인부는 RFC 5321 상 대소문자 무관 → casefold 비교로 정당 주소 과차단 방지.
+        domains = {d.casefold() for d in (self.egress.get("email_domains", []) or [])}
+        return domain.casefold() in domains
 
 
 class DefenseHooks:

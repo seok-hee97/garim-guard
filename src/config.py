@@ -77,8 +77,14 @@ def gen_config(data: dict[str, Any], *, model_key: str = "model") -> GenConfig:
     pcfg = data["provider"].get(active, {})
     sys_file = data.get("agent", {}).get("system_instruction_file")
     sys_text = ""
-    if sys_file and (ROOT / sys_file).exists():
-        sys_text = (ROOT / sys_file).read_text(encoding="utf-8")
+    if sys_file:
+        p = ROOT / sys_file
+        if p.exists():
+            sys_text = p.read_text(encoding="utf-8")
+        else:   # 선언됐으나 부재 → 조용히 빈 프롬프트로 넘기지 말고 경고(무경고 소실 방지)
+            import warnings
+            warnings.warn(
+                f"system_instruction_file '{sys_file}' 부재 → 빈 시스템 프롬프트로 진행", stacklevel=2)
     return GenConfig(
         provider=active,
         model=pcfg.get(model_key) or pcfg.get("model", ""),

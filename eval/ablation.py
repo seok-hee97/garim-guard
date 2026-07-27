@@ -26,7 +26,15 @@ ORDER = ["none", "plea", "spotlight", "classifier_gate", "tier_a", "tier_a_b", "
 def _load() -> list[dict]:
     if not RUNS.exists():
         return []
-    return [json.loads(l) for l in RUNS.read_text(encoding="utf-8").splitlines() if l.strip()]
+    out = []
+    for l in RUNS.read_text(encoding="utf-8").splitlines():
+        if not l.strip():
+            continue
+        try:
+            out.append(json.loads(l))
+        except json.JSONDecodeError:
+            continue   # 손상 라인(torn write)은 건너뛴다 — 한 줄에 전체 집계가 죽지 않게
+    return out
 
 
 def _rate(rows: list[dict], key: str) -> tuple[int, int]:

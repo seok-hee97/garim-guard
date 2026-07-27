@@ -41,7 +41,10 @@ provider:
 # ── 에이전트 루프 ───────────────────────────────────────────────────────
 agent:
   max_iterations: 6
-  system_instruction_file: config/system_instruction.ko.txt
+  # ★기본(평가/애블레이션)은 중립 시스템 프롬프트(빈 값)★ — '무방어(none)' 기준선이 안전
+  # 지시를 갖지 않도록(plea/spotlight 는 별도 애블레이션 축). runs.jsonl 은 이 중립 baseline 으로 동결.
+  # 실행 서비스는 server.py 가 config/system_instruction.ko.txt 를 명시 로드한다(에이전트 지시 필요).
+  system_instruction_file: null
   seams: [before_model, after_model, before_tool, after_tool]
   # after_model 은 루프 '안'에서 홉마다 발동한다.
   # 루프 밖 1회로 두면 중간 홉의 모델 출력이 검사되지 않는다.

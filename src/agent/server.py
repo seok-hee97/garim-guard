@@ -30,9 +30,11 @@ from .policy import DefenseHooks
 from .toolworld import default_world
 
 # 서버 고정 방어(클라이언트가 못 끔). ★데모/프로토타입 기본값★ — "프로덕션 완제품" 아님.
-# 알려진 한계는 docs/PRODUCTION.md 참조(strict 스키마 미완, confused-deputy=Tier B off,
-# deadline soft-budget). tier_a+dlp_vault 합성 과차단은 egress 인자 사전복원으로 수정됨.
-SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True, "tier_b": True}
+# tier_b 는 기본 비활성: value-provenance(부분문자열)가 KB 에 적힌 정당 고객/지원 주소를
+# 오차단(예: "환불 문의는 support@… 로")한다 → confused-deputy 는 taint 가 아니라
+# principal↔customer_ref 바인딩으로 막아야 한다(로드맵, docs/PRODUCTION.md).
+# tier_a+dlp_vault 합성 과차단은 egress 인자 사전복원으로 수정됨.
+SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True}
 
 _state: dict[str, Any] = {}
 
@@ -56,6 +58,12 @@ async def lifespan(app: FastAPI):
 
     policy = copy.deepcopy(load_policy())              # 캐시된 eval 정책과 격리
     policy.setdefault("tier_a", {})["strict_schema"] = True   # 서비스는 엄격 스키마
+    # 서비스는 실제 에이전트 지시를 로드(평가 baseline 은 중립 유지). 파일 부재 시 경고.
+    _sys = ROOT / "config" / "system_instruction.ko.txt"
+    if _sys.exists():
+        policy.setdefault("agent", {})["system_instruction_file"] = "config/system_instruction.ko.txt"
+    else:
+        alog.event(logger, "warning", "system_instruction_missing", path=str(_sys))
     _state["policy"] = policy
     _state["cfg"] = gen_config(policy)
     rail = _build_rail()
