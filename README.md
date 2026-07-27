@@ -105,14 +105,15 @@ open report/trace_view.html        # 정적 트레이스 데모 뷰어
 
 ---
 
-## 상태 (2026-07-20)
+## 상태 (2026-07-28)
 
 | 항목 | 상태 |
 |---|---|
-| `src/providers/base.py` v2 계약 | ✅ 재작성 (tool_calls·대화이력 표현 가능) |
-| `config/policy.yaml` v2 | ✅ 재작성 (`defenses.*` = 애블레이션 축) |
-| `requirements.{core,}.txt` | ✅ 정리 (presidio≥2.2.361, langchain-experimental 제거) |
-| 런타임·평가·학습 코드 | ⬜ 미착수 |
-| **외부 데이터셋 실재 검증** | ⚠️ **미완 — [project_plan.md §10.2](project_plan.md) 6건을 기획서에 사실로 쓰기 전 확인 필수** |
+| 런타임 코어 (4-seam ReAct 루프 + Tier A 게이트 + DLP) | ✅ 구현·테스트 |
+| 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 구현, 헤드라인 실측 완료 |
+| 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인, 부록) |
+| **실행 서비스 (FastAPI HTTP 런타임)** | ✅ 구동 가능 — 서버고정 Tier A+DLP+strict, 파일럿 전 단계([docs/PRODUCTION.md](docs/PRODUCTION.md)) |
+| 외부 데이터셋 실재 검증 | ✅ 완료 (라이선스·행수 실측, [results/RESULTS.md](results/RESULTS.md)) |
+| 유닛/통합 테스트 | ✅ **50 통과** (.venv) |
 
 주요 설정: [config/policy.yaml](config/policy.yaml) · 의존성: [requirements.txt](requirements.txt) · 환경변수: [.env.example](.env.example)

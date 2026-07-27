@@ -35,6 +35,15 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
 과부하였고 **재시도 소진 후 크래시 없이 `error` 반환**(복원력 실증).
 
+> **정직한 한계(현재 서비스 — 파일럿 전 단계):**
+> - **DoS 방어는 "이터레이션 경계 soft budget" 수준.** `deadline_s` 체크는 이터레이션 진입에서만 일어나고
+>   한 응답의 tool_call 개수 상한이 없어, 모델/주입이 N개 호출을 실으면 그 이터레이션은 `per_call_timeout×N`
+>   까지 걸릴 수 있다. 또 `asyncio.to_thread` 는 만료 시 대기만 취소하고 하부 스레드는 회수하지 못하므로
+>   **실도구 연결 시** 자체 소켓 타임아웃/전용 executor+세마포어가 필요하다(현재 도구=mock 이라 잠재적).
+> - **서버 고정 방어에 Tier B(taint) 미포함.** covered PII(RRN/전화/카드/계좌/이메일)는 DLP 토큰유지로
+>   외부싱크에 토큰만 나가지만, **미커버 PII(이름 등)를 담아 allowlist 내 공격자 통제 주소로 재지정하는
+>   경로**는 `SERVER_DEFENSES` 에 `tier_b` 가 없어 서비스에서 무방어다(Presidio 볼트 스왑 + Tier B 배선이 로드맵).
+
 ---
 
 ## 레퍼런스 아키텍처
