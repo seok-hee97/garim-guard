@@ -310,14 +310,20 @@ class DefenseHooks:
             from .spotlight import wrap_untrusted
             content = wrap_untrusted(content)
 
-        # (b) 레일 채점 (LOG-ONLY 텔레메트리) — 항상 기록
+        # (b) 레일 채점 (LOG-ONLY 텔레메트리) — 관측 전용이므로 실패해도 데이터 흐름·에피소드에
+        #     영향을 주면 안 된다(보안 판정 아님). 예외는 여기서 삼키고 sentinel 로만 남긴다.
+        #     DLP 비식별(위 297-298)은 이 try 밖 → 실패 시 상위로 전파되어 fail-closed 처리된다.
         if self.rail is not None and text:
-            s = float(self.rail.score(text))
-            rail_scores[getattr(self.rail, "name", "rail")] = s
-            # (c) classifier_gate 격리 판정 (enforcement arm)
-            if self.cg.get("enable") and spec.get("returns_untrusted") and s >= self.cg_threshold:
-                if ctx is not None:
-                    ctx.quarantined = True
+            rail_name = getattr(self.rail, "name", "rail")
+            try:
+                s = float(self.rail.score(text))
+                rail_scores[rail_name] = s
+                # (c) classifier_gate 격리 판정 (enforcement arm)
+                if self.cg.get("enable") and spec.get("returns_untrusted") and s >= self.cg_threshold:
+                    if ctx is not None:
+                        ctx.quarantined = True
+            except Exception:  # noqa: BLE001 — 관측 레일 실패는 삼키고 계속(원본 데이터는 이미 위에서 비식별됨)
+                rail_scores[rail_name + "_error"] = -1.0
 
         # ★ 토큰화된 content 를 반환 → 모델은 원본 PII 를 절대 보지 못한다.
         return Tainted_(output=content, rail_scores=rail_scores)

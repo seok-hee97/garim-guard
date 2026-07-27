@@ -187,10 +187,10 @@ async def test_after_tool_populates_corpus_and_rail_scores():
 
 
 @pytest.mark.asyncio
-async def test_after_tool_exception_does_not_lose_hop_or_crash():
-    """★ fail-safe 회귀(S1/S2) ★ — 관측용 after_tool(레일/DLP)이 예외를 던져도
-    (a) 루프가 크래시하지 않고 (b) 이미 실행된 홉이 executed=True 로 트레이스에 남으며
-    (c) note 에 오류가 기록된다. 관측 전용 텔레메트리가 실행 기록·평가를 죽이지 못하게 한다."""
+async def test_observability_rail_exception_is_swallowed_not_blocking():
+    """관측 레일(LOG-ONLY) 예외는 삼켜지고 데이터 흐름·에피소드를 막지 않는다.
+    도구 출력은 정상 전달, hop.executed=True, rail_scores 에 sentinel 만 남는다.
+    (보안 판정이 아니므로 관측 실패로 도구 결과를 차단해서는 안 된다.)"""
     class BoomRail:
         name = "boom"
         def score(self, text: str) -> float:
@@ -205,9 +205,34 @@ async def test_after_tool_exception_does_not_lose_hop_or_crash():
                            world=default_world(), defenses={"tier_b": True})
 
     hop = next(h for h in ep.hops if h.tool_name == "search_kb")
-    assert hop.executed is True                    # 도구는 실제로 실행됐고
-    assert "after_tool_error" in hop.note          # 관측 훅 실패가 기록됐고
-    assert ep.finish_reason == "done"              # 루프는 정상 종료(크래시 없음)
+    assert hop.executed is True                        # 도구는 실행됐고
+    assert hop.gate_decision != "BLOCK"                # 관측 실패는 차단하지 않음
+    assert hop.rail_scores.get("boom_error") == -1.0   # sentinel 로만 관측됨
+    assert ep.finish_reason == "done"                  # 무크래시 정상 종료
+
+
+@pytest.mark.asyncio
+async def test_dlp_redaction_failure_fails_closed():
+    """★ DLP fail-closed(보안) 회귀 ★ — 비식별(vault) 실패 시 원본(raw)을 모델에
+    넘기지 않고 차단한다. 관측 레일(위)과 달리 DLP 실패는 fail-closed 로 처리되어야
+    원본 PII 누출을 막는다. config 의 `dlp: fail: closed` 선언과 런타임을 일치시킨다."""
+    class DlpBoomHooks(DefenseHooks):
+        async def after_tool(self, result, ctx=None):
+            raise RuntimeError("vault.redact 실패 시뮬레이션")
+
+    provider = FakeProvider.scripted([
+        [("search_kb", {"query": "환불"})],
+        "완료",
+    ])
+    hooks = DlpBoomHooks(_policy(), defenses={"dlp_vault": True})
+    ep = await run_episode("x", provider, _cfg(), hooks=hooks,
+                           world=default_world(), defenses={"dlp_vault": True})
+
+    hop = next(h for h in ep.hops if h.tool_name == "search_kb")
+    assert hop.executed is True                             # 실행된 홉은 기록되고
+    assert hop.gate_decision == "BLOCK"                     # 출력은 fail-closed 차단
+    assert hop.gate_rule == "dlp.fail_closed"
+    assert ep.finish_reason == "done"                       # 무크래시
 
 
 @pytest.mark.asyncio

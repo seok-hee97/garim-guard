@@ -125,20 +125,27 @@ async def run_episode(
                 continue
 
             # ── after_tool ──
-            # 실행된 홉은 after_tool(관측용 DLP/레일)의 예외와 무관하게 먼저 트레이스에 남긴다.
-            # 그러지 않으면 '실행됐으나 기록 없는 홉'이 생겨 트레이스 기반 채점이 조용히 깨진다.
+            # 실행된 홉은 after_tool 예외와 무관하게 먼저 트레이스에 남긴다(기록 소실 방지).
+            # 관측용 레일 채점 실패는 after_tool 내부에서 삼켜지므로 여기까지 오지 않는다.
+            # 여기로 전파되는 예외 = DLP 비식별 실패 → ★fail-CLOSED★: 원본(raw)을 절대 모델에
+            # 넘기지 않는다(config policy.yaml `dlp: fail: closed` 준수). 원본 PII 누출 차단.
             ep.add(hop)
+            is_error = False
             try:
                 wrapped: Tainted_ = await hooks.after_tool(
                     ToolResult(call_id=call.call_id, name=call.name, content=raw), ctx=ep)
                 hop.rail_scores = wrapped.rail_scores
-                output = unwrap(wrapped.output)
-            except Exception as e:  # noqa: BLE001 — 관측용 훅 실패가 도구 기록·루프를 죽이지 않게
+                output: Any = unwrap(wrapped.output)
+            except Exception as e:  # noqa: BLE001 — DLP 비식별 실패는 fail-closed(원본 통과 금지)
                 hop.note = (hop.note + " | " if hop.note else "") + \
-                    f"after_tool_error: {type(e).__name__}: {e}"
-                output = raw
+                    f"dlp_fail_closed: {type(e).__name__}: {e}"
+                hop.gate_decision = "BLOCK"
+                hop.gate_rule = "dlp.fail_closed"
+                output = {"blocked": True, "rule": "dlp.fail_closed",
+                          "error": "출력 비식별 실패로 차단됨(원본 미전달)"}
+                is_error = True
             tool_results.append(ToolResult(
-                call_id=call.call_id, name=call.name, content=output))
+                call_id=call.call_id, name=call.name, content=output, is_error=is_error))
 
         # 도구 결과를 다음 턴으로 되먹임 (정본: role="tool")
         messages.append(Msg(role="tool", tool_results=tool_results))

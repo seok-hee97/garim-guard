@@ -18,7 +18,7 @@
 | +classifier_gate (온디바이스 분류기 강제) | 0.17 | [0.09,0.28] | 0.18 | theater — 무효 |
 | **+Tier A 결정적 게이트** | **0.00** | [0.00,0.06] | **0.002** | **genuine — 유의** |
 
-> **McNemar p 기준선:** 표의 p는 **vs 직전 arm**(ablation.csv `mcnemar_p_vs_prev`). classifier_gate 0.18은 vs spotlight. 별도로 **vs 무방어** 기준은 plea/spotlight/classifier_gate 전부 **p=1.0**(불일치쌍 0 — 세 arm 모두 무방어와 executed 집합 동일). 어느 기준이든 theater 3종은 무효, Tier A만 유의.
+> **McNemar p 기준선:** 표의 p는 **vs 직전 arm**(ablation.csv `mcnemar_p_vs_prev`). classifier_gate 0.18은 vs spotlight. 별도로 **vs 무방어**(case_id 페어링, runs.jsonl 재계산): plea **p=1.0**(불일치 11쌍, 6:5) · spotlight **p=0.18**(불일치 9쌍, 2:7) · classifier_gate **p=1.0**(불일치 2쌍, 1:1) · Tier A **p=0.002**(불일치 10쌍, 0:10). 어느 기준이든 theater 3종은 유의성 없음(n.s.), Tier A만 유의. *(주의: "불일치쌍 0" 아님 — 개별 케이스는 arm마다 flip되나 합계·유의성 결론은 동일.)*
 
 조건 분해(Tier A): 원본 clean 0.40→**0.00**, 난독화 obf 0.12→**0.00**(McNemar p=0.016). 게이트는 원본=난독화=0.00(P4).
 
@@ -122,7 +122,7 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 ### 학습형 레일 (R6/R7/e5) — RunPod 실측 완료
 | 레일 | 학습 | 결과 |
 |---|---|---|
-| **R6 PII NER** | klue-roberta-small, openpii-ko 20k, 토큰분류 | **span F1 0.9845** (P 0.981 / R 0.988) |
+| **R6 PII NER** | klue-roberta-small, openpii-ko 20k, 토큰분류 | **span F1 0.9845** (P 0.981 / R 0.988) ⚠️행단위 랜덤분할=누수가능 상한 |
 | **R7 유해** | klue-roberta-base, K-MHaS 20k, 멀티라벨 BCE | **Macro-F1 0.709** / Micro 0.831 (test 21,939) |
 | **e5+LR 교차언어** | e5-small 동결 + LR (영어 Nemotron) | EN in-domain F1 0.954, **한국어 KoTIP F1 0.0** |
 
@@ -135,6 +135,6 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 
 ## 7. 테스트 / 재현성
 
-- 유닛/통합 테스트 **39/39 통과** (게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault).
+- 유닛/통합 테스트 **41/41 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴. (presidio 미설치 시 DLP 2건 skip → core 환경은 marker 분리 권장.)
 - 재현 범위: **헤드라인 애블레이션은 라이브 OpenAI 호출**(temp=0 근사 재현 — gpt-4o-mini는 bit-exact 보장 안 함). 카세트 record/replay는 FakeProvider 경로 전용. DLP·channel_gap·R6/R7·e5·shieldgemma는 RunPod GPU 스크립트 산출로 단일 명령에 미포함.
 - GPU 실측 **완료**(§6c): Kanana P1a 격차 1.0 · ShieldGemma EN-KO 0.268 · R6 span 0.985 · R7 Macro 0.709 · e5 교차언어. (⚠️ P1b 난독화 붕괴는 사전등록 미달 0.1 — 정직 보고)
