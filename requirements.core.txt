@@ -10,6 +10,10 @@ pyyaml>=6.0
 python-dotenv>=1.0.0
 tenacity>=8.3.0              # API 재시도 / 429 백오프
 
+# 실행 서비스(HTTP 런타임) — src/agent/server.py
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
 # 데이터 스파이크 — 6개 로더 관통 + 행수 실측
 datasets>=2.20.0
 duckdb>=1.0.0                # openpii-1.5m 에 language='ko' 푸시다운 (naive 로드는 4.27GB)

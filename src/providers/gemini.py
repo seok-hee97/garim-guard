@@ -13,6 +13,7 @@ import os
 from typing import Any
 
 from .base import GenConfig, GenResult, Msg, ToolCall, ToolSpec
+from ._resilience import transient_retry
 
 _HARM_CATEGORIES = (
     "HARM_CATEGORY_HARASSMENT",
@@ -33,11 +34,16 @@ def _resolve_key() -> str:
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self) -> None:
+    def __init__(self, *, timeout_s: float = 30.0) -> None:
         from google import genai  # 지연 임포트 — 선택 의존성 격리
+        from google.genai import types
 
         self._genai = genai
-        self._client = genai.Client(api_key=_resolve_key())
+        # 벽시계 타임아웃(ms) 주입 — 응답 지연이 요청을 무한정 붙잡지 못하게.
+        self._client = genai.Client(
+            api_key=_resolve_key(),
+            http_options=types.HttpOptions(timeout=int(timeout_s * 1000)),
+        )
 
     def _tool_config(self, specs: list[ToolSpec]) -> Any:
         from google.genai import types
@@ -109,12 +115,16 @@ class GeminiProvider:
             gcfg_kwargs["response_mime_type"] = "application/json"
             gcfg_kwargs["response_schema"] = cfg.response_schema
 
-        resp = self._client.models.generate_content(
-            model=cfg.model,
-            contents=self._to_contents(messages),
-            config=types.GenerateContentConfig(**gcfg_kwargs),
-        )
-        return self._parse(resp)
+        @transient_retry()
+        async def _call() -> Any:
+            # aio: async 네이티브 — 이벤트루프 비블로킹(동시 요청 처리).
+            return await self._client.aio.models.generate_content(
+                model=cfg.model,
+                contents=self._to_contents(messages),
+                config=types.GenerateContentConfig(**gcfg_kwargs),
+            )
+
+        return self._parse(await _call())
 
     def _parse(self, resp: Any) -> GenResult:
         cand = (getattr(resp, "candidates", None) or [None])[0]

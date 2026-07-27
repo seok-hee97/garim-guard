@@ -13,15 +13,19 @@ text-only 응답이면 종료한다. iteration cap 으로 무한 루프를 막�
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from typing import Any
 
 from ..providers.base import GenConfig, Msg, Provider, ToolResult
+from . import log as alog
 from . import tools as toolmod
 from .hooks import Block, GuardrailHooks, NoOpHooks, Redacted, Rehydrated, Tainted_
 from .taint import sources_of, unwrap
 from .trace import EpisodeTrace, HopTrace
+
+_log = alog.get_logger()
 
 
 async def run_episode(
@@ -35,7 +39,13 @@ async def run_episode(
     max_iterations: int = 6,
     scenario: str = "",
     episode_id: str | None = None,
+    deadline_s: float = 60.0,
+    per_call_timeout_s: float = 30.0,
 ) -> EpisodeTrace:
+    # ★ 설정 불변식은 진입에서 fail-fast (오설정=프로그래밍 오류, 런타임 예외 처리와 구분).
+    #   런타임/일시 예외(429·타임아웃)는 아래 루프에서 잡아 우아하게 error 종료한다.
+    if cfg.automatic_function_calling:
+        raise ValueError("automatic_function_calling 은 반드시 False (before_tool 게이트 보호)")
     hooks = hooks or NoOpHooks()
     defenses = defenses or {}
     taint_on = defenses.get("tier_b", False)
@@ -43,12 +53,26 @@ async def run_episode(
         episode_id=episode_id or uuid.uuid4().hex[:12],
         user_input=user_input, scenario=scenario, defenses=dict(defenses),
     )
+    alog.bind(episode_id=ep.episode_id)
     t_ep = time.perf_counter()
     messages: list[Msg] = [Msg(role="user", text=user_input)]
 
     for _ in range(max_iterations):
-        # ── before_model ──
-        bm = await hooks.before_model(messages, ctx=ep)
+        # ── 벽시계 예산 (느린 도구/모델이 요청을 무한정 붙잡지 못하게) ──
+        if time.perf_counter() - t_ep > deadline_s:
+            ep.finish_reason = "deadline_exceeded"
+            alog.event(_log, "warning", "deadline_exceeded", hops=ep.total_hops)
+            break
+
+        # ── before_model (★fail-closed★ — 보안 seam 실패는 크래시가 아니라 안전한 종료) ──
+        try:
+            bm = await hooks.before_model(messages, ctx=ep)
+        except Exception as e:  # noqa: BLE001 — DLP redact 등 실패 시 원본을 모델에 넘기지 않고 종료
+            ep.finish_reason = "error"
+            _record_block(ep, Block(rule="before_model.fail_closed",
+                                    reason=f"{type(e).__name__}: {e}"))
+            alog.event(_log, "error", "before_model.fail_closed", err=type(e).__name__)
+            break
         if isinstance(bm, Block):
             ep.finish_reason = "blocked"
             _record_block(ep, bm)
@@ -56,9 +80,17 @@ async def run_episode(
         if isinstance(bm, Redacted):
             messages = bm.messages
 
-        # ── 모델 호출 ──
+        # ── 모델 호출 (provider 재시도 소진/영구실패 시 우아하게 error 종료) ──
         t0 = time.perf_counter()
-        result = await provider.generate(messages, cfg)
+        try:
+            result = await asyncio.wait_for(provider.generate(messages, cfg),
+                                            timeout=per_call_timeout_s)
+        except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001
+            ep.finish_reason = "error"
+            ep.add(HopTrace(episode_id=ep.episode_id, hop=ep.total_hops, gate_decision="NA",
+                            note=f"provider_error: {type(e).__name__}: {e}"))
+            alog.event(_log, "error", "provider_error", err=type(e).__name__)
+            break
         latency = int((time.perf_counter() - t0) * 1000)
 
         # ── after_model (per_hop) ──
@@ -76,10 +108,13 @@ async def run_episode(
         messages.append(Msg(role="model", text=result.text,
                             tool_calls=result.tool_calls, raw=result.raw))
 
-        # text-only → 종료
+        # text-only → 종료. ★신뢰 경계(에이전트→사용자)에서만 vault.restore★
+        #   외부 싱크로는 토큰을 유지하되, 최종 사용자 응답에는 원본을 복원한다.
         if not result.tool_calls:
-            ep.final_text = result.text
+            vault = getattr(hooks, "vault", None)
+            ep.final_text = vault.restore(result.text) if vault is not None else result.text
             ep.finish_reason = "done"
+            alog.event(_log, "info", "episode_done", hops=ep.total_hops)
             break
 
         # ── 병렬 호출 전부 순회 ──
@@ -91,9 +126,14 @@ async def run_episode(
                 attempted=True, latency_ms=latency,
             )
 
-            # ── before_tool (★게이트★) ──
+            # ── before_tool (★게이트 · fail-closed★) ──
+            #    게이트 자체가 예외를 던지면 fail-open(통과)이 아니라 차단으로 변환한다.
             args_for_exec = dict(call.args)
-            gate = await hooks.before_tool(call, ctx=ep)
+            try:
+                gate = await hooks.before_tool(call, ctx=ep)
+            except Exception as e:  # noqa: BLE001 — 게이트 실패 = fail-closed 차단
+                gate = Block(rule="gate.fail_closed", reason=f"{type(e).__name__}: {e}")
+                alog.event(_log, "error", "gate.fail_closed", tool=call.name, err=type(e).__name__)
             if isinstance(gate, Block):
                 hop.executed = False
                 hop.gate_decision = gate.decision  # BLOCK | HITL_DENY
@@ -101,6 +141,8 @@ async def run_episode(
                 hop.note = gate.reason
                 hop.taint_sources = sorted(sources_of(call.args))
                 ep.add(hop)
+                alog.event(_log, "info", "gate_block", tool=call.name,
+                           decision=gate.decision, rule=gate.rule)
                 tool_results.append(ToolResult(
                     call_id=call.call_id, name=call.name,
                     content={"blocked": True, "rule": gate.rule}, is_error=True))
@@ -109,16 +151,19 @@ async def run_episode(
                 args_for_exec = gate.args
             hop.gate_decision = "ALLOW"
 
-            # ── 도구 실행 ──
+            # ── 도구 실행 (실도구가 걸려도 요청을 붙잡지 못하게 스레드+타임아웃) ──
             try:
-                raw = toolmod.execute(call.name, unwrap(args_for_exec), call.call_id,
-                                      world=world, taint_enabled=taint_on)
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
+                                      call.call_id, world=world, taint_enabled=taint_on),
+                    timeout=per_call_timeout_s)
                 hop.executed = True
                 hop.taint_sources = sorted(sources_of(raw))
-            except Exception as e:  # noqa: BLE001 — 도구 오류도 트레이스에 남긴다
+            except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001 — 도구 오류도 트레이스에
                 hop.executed = False
                 hop.note = f"tool_error: {type(e).__name__}: {e}"
                 ep.add(hop)
+                alog.event(_log, "error", "tool_error", tool=call.name, err=type(e).__name__)
                 tool_results.append(ToolResult(
                     call_id=call.call_id, name=call.name,
                     content={"error": str(e)}, is_error=True))

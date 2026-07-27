@@ -19,6 +19,7 @@ import os
 from typing import Any
 
 from .base import GenConfig, GenResult, Msg, ToolCall, ToolSpec
+from ._resilience import transient_retry
 
 
 def _key() -> str:
@@ -31,10 +32,11 @@ def _key() -> str:
 class OpenAIProvider:
     name = "openai"
 
-    def __init__(self) -> None:
-        from openai import OpenAI
+    def __init__(self, *, timeout_s: float = 30.0) -> None:
+        from openai import AsyncOpenAI
 
-        self._client = OpenAI(api_key=_key())
+        # async 네이티브 — 이벤트루프 비블로킹(동시 요청 처리 가능). 재시도는 tenacity 로 일원화.
+        self._client = AsyncOpenAI(api_key=_key(), timeout=timeout_s, max_retries=0)
 
     def _tools(self, specs: list[ToolSpec]) -> list[dict] | None:
         if not specs:
@@ -88,8 +90,11 @@ class OpenAIProvider:
         if cfg.response_schema is not None:
             kwargs["response_format"] = {"type": "json_object"}
 
-        resp = self._client.chat.completions.create(**kwargs)
-        return self._parse(resp)
+        @transient_retry()
+        async def _call() -> Any:
+            return await self._client.chat.completions.create(**kwargs)
+
+        return self._parse(await _call())
 
     def _parse(self, resp: Any) -> GenResult:
         choice = resp.choices[0]
