@@ -1,0 +1,246 @@
+{
+  "generated_for": "기획서 3장 (데이터 출처·라이선스·분할)",
+  "method": "로컬 len() 실측 — 카드/API 수치 인용 금지",
+  "datasets": {
+    "openpii_ko": {
+      "ok": true,
+      "license": "other (license_name=cc-by-4.0, link=null) ⚠️약관 직접 확인 필요",
+      "rows": {
+        "train": 21225,
+        "validation": 5273
+      },
+      "total": 26498,
+      "load_s": 272.5,
+      "method": "duckdb parquet 변환 브랜치 푸시다운 (WHERE language='ko')",
+      "entity_distribution": {
+        "_method": "native",
+        "GIVENNAME": 18140,
+        "DATE": 16955,
+        "SURNAME": 13675,
+        "EMAIL": 10710,
+        "TITLE": 10151,
+        "CITY": 9663,
+        "TELEPHONENUM": 8496,
+        "AGE": 7809,
+        "BUILDINGNUM": 7168,
+        "STREET": 6999,
+        "CREDITCARDNUMBER": 6366,
+        "ZIPCODE": 6117,
+        "IDCARDNUM": 4370,
+        "GENDER": 4365,
+        "SOCIALNUM": 4093,
+        "DRIVERLICENSENUM": 4092,
+        "TAXNUM": 3975,
+        "SEX": 3615,
+        "PASSPORTNUM": 3211,
+        "TIME": 1522,
+        "URL": 40,
+        "ORGANISATION": 40,
+        "AMOUNT": 38,
+        "COUNTRY": 26,
+        "CURRENCY": 14,
+        "BANKNAME": 10,
+        "ACCOUNTNUM": 5,
+        "USERNAME": 4,
+        "PASSWORD": 4,
+        "TIMEZONE": 3,
+        "SALARY": 2,
+        "IPV4": 2,
+        "HOSPITALNAME": 1,
+        "ALLERGIES": 1,
+        "JOBTITLE": 1
+      },
+      "note": "전량 사용. 26k 규모는 서브샘플할 크기가 아니다. SOCIALNUM/TELEPHONENUM/IDCARDNUM 은 한국 로케일 오류로 학습·평가 제외."
+    },
+    "nemotron_ipi": {
+      "ok": true,
+      "license": "cc-by-4.0",
+      "rows": {
+        "train": 1272
+      },
+      "total": 1272,
+      "load_s": 4.1,
+      "columns": [
+        "license",
+        "id",
+        "domain",
+        "attack_category",
+        "target_tool",
+        "injection_vector",
+        "agent_ref",
+        "responses_create_params",
+        "environment",
+        "required_tools",
+        "injection",
+        "verifier_config",
+        "used_in"
+      ],
+      "n_with_injection": 1272,
+      "n_clean_negatives": 0,
+      "n_distinct_injection_vectors": 36,
+      "injection_keys": [
+        "goal",
+        "target_tool",
+        "target_args",
+        "verification_type",
+        "vector",
+        "category",
+        "injection_text"
+      ],
+      "note": "음성(정상 도구출력) 0건이면 FPR 은 이 데이터셋만으로 산출 불가 — 자체 채굴 필요"
+    },
+    "maps_ko": {
+      "ok": true,
+      "license": "cc-by-4.0",
+      "rows": {
+        "all_attack_tools.jsonl": 400,
+        "agent_task.jsonl": 10
+      },
+      "total": 410,
+      "load_s": 0.7,
+      "all_attack_tools.jsonl": {
+        "columns": [
+          "Attacker Tool",
+          "Attacker Instruction",
+          "Description",
+          "Attack goal",
+          "Attack Type",
+          "Corresponding Agent",
+          "Aggressive"
+        ]
+      },
+      "agent_task.jsonl": {
+        "columns": [
+          "agent_name",
+          "agent_path",
+          "tasks"
+        ]
+      },
+      "localization": {
+        "Attacker Tool": 0.0,
+        "Attacker Instruction": 1.0,
+        "Description": 0.0,
+        "Attack goal": 0.0,
+        "Attack Type": 0.0,
+        "Corresponding Agent": 0.0,
+        "Aggressive": 0.0
+      },
+      "localization_note": "필드별 한글 포함 비율. 1.0 미만은 영문 잔존 = 부분 번역"
+    },
+    "kmhas": {
+      "ok": true,
+      "license": "cc-by-sa-4.0",
+      "rows": {
+        "train": 78977,
+        "validation": 8776,
+        "test": 21939
+      },
+      "total": 109692,
+      "load_s": 2.5,
+      "columns": [
+        "text",
+        "label"
+      ],
+      "label_type": "list",
+      "label_is_list": true,
+      "label_feature": "List(ClassLabel(names=['origin', 'physical', 'politics', 'profanity', 'age', 'gender', 'race', 'religion', 'not_hate_speech']))",
+      "n_classes": 9,
+      "sample_label": [
+        2,
+        4
+      ],
+      "load_path": "revision='refs/convert/parquet' (원 저장소는 스크립트 기반, datasets>=4 에서 로드 불가)",
+      "note": "label 이 리스트면 BCEWithLogits + 라벨별 임계값 필수"
+    },
+    "xstest_ko": {
+      "ok": true,
+      "license": "⚠️ NONE DECLARED — 수치 보고만, 재배포 금지",
+      "rows": {
+        "test": 450
+      },
+      "total": 450,
+      "load_s": 1.9,
+      "columns": [
+        "prompt",
+        "focus",
+        "type",
+        "note",
+        "label",
+        "prompt_ko"
+      ],
+      "label_breakdown": {
+        "safe": 250,
+        "unsafe": 200
+      },
+      "n_types": 18,
+      "types": {
+        "homonyms": 25,
+        "contrast_homonyms": 25,
+        "figurative_language": 25,
+        "contrast_figurative_language": 25,
+        "safe_targets": 25,
+        "contrast_safe_targets": 25,
+        "safe_contexts": 25,
+        "contrast_safe_contexts": 25,
+        "definitions": 25,
+        "contrast_definitions": 25,
+        "nons_group_real_discr": 25,
+        "real_group_nons_discr": 25,
+        "contrast_discr": 25,
+        "historical_events": 25,
+        "contrast_historical_events": 25,
+        "privacy_public": 25,
+        "privacy_fictional": 25,
+        "contrast_privacy": 25
+      },
+      "note": "figurative_language 는 번역으로 중의성이 소실됨 — D8 원어민 감수 대상"
+    },
+    "klue_ner": {
+      "ok": true,
+      "license": "cc-by-sa-4.0",
+      "rows": {
+        "train": 21008,
+        "validation": 5000
+      },
+      "total": 26008,
+      "load_s": 2.3,
+      "columns": [
+        "sentence",
+        "tokens",
+        "ner_tags"
+      ],
+      "n_tags": 13,
+      "tags": [
+        "B-DT",
+        "I-DT",
+        "B-LC",
+        "I-LC",
+        "B-OG",
+        "I-OG",
+        "B-PS",
+        "I-PS",
+        "B-QT",
+        "I-QT",
+        "B-TI",
+        "I-TI",
+        "O"
+      ],
+      "note": "PII 개체 없음 — 보조 확인용, 학습셋 아님"
+    },
+    "deepset_pi": {
+      "ok": true,
+      "license": "apache-2.0",
+      "rows": {
+        "train": 546,
+        "test": 116
+      },
+      "total": 662,
+      "load_s": 2.0,
+      "columns": [
+        "text",
+        "label"
+      ],
+      "note": "단일 발화 스모크 전용"
+    }
+  }
+}
