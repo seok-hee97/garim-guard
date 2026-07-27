@@ -5,9 +5,7 @@
     {
       "step": "key",
       "ok": true,
-      "source_var": "GEMINI_API_KEY",
-      "key_len": 53,
-      "key_prefix": "REDACTED..."
+      "source_var": "GEMINI_API_KEY"
     },
     {
       "step": "tool_call",

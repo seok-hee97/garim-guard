@@ -40,6 +40,20 @@ async def test_before_model_exception_fails_closed():
 
 
 @pytest.mark.asyncio
+async def test_after_model_exception_fails_closed():
+    """after_model(출력 모더레이션 seam) 예외 → 크래시 아님, finish='error'(3 seam 대칭)."""
+    class AMBoom(NoOpHooks):
+        async def after_model(self, result, ctx=None):
+            raise RuntimeError("after_model 크래시 시뮬")
+
+    provider = FakeProvider.scripted([[("search_kb", {"query": "x"})], "done"])
+    ep = await run_episode("x", provider, _cfg(), hooks=AMBoom(), world=default_world())
+    assert ep.finish_reason == "error"
+    assert not any(h.executed for h in ep.hops)
+    assert any(h.gate_rule == "after_model.fail_closed" for h in ep.hops)
+
+
+@pytest.mark.asyncio
 async def test_before_tool_gate_exception_fails_closed():
     """before_tool(게이트) 예외 → fail-open 아님, 해당 도구 차단(gate.fail_closed)."""
     class GateBoom(NoOpHooks):

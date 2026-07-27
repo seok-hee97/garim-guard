@@ -36,13 +36,17 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 과부하였고 **재시도 소진 후 크래시 없이 `error` 반환**(복원력 실증).
 
 > **정직한 한계(현재 서비스 — 파일럿 전 단계):**
-> - **DoS 방어는 "이터레이션 경계 soft budget" 수준.** `deadline_s` 체크는 이터레이션 진입에서만 일어나고
->   한 응답의 tool_call 개수 상한이 없어, 모델/주입이 N개 호출을 실으면 그 이터레이션은 `per_call_timeout×N`
->   까지 걸릴 수 있다. 또 `asyncio.to_thread` 는 만료 시 대기만 취소하고 하부 스레드는 회수하지 못하므로
->   **실도구 연결 시** 자체 소켓 타임아웃/전용 executor+세마포어가 필요하다(현재 도구=mock 이라 잠재적).
-> - **서버 고정 방어에 Tier B(taint) 미포함.** covered PII(RRN/전화/카드/계좌/이메일)는 DLP 토큰유지로
->   외부싱크에 토큰만 나가지만, **미커버 PII(이름 등)를 담아 allowlist 내 공격자 통제 주소로 재지정하는
->   경로**는 `SERVER_DEFENSES` 에 `tier_b` 가 없어 서비스에서 무방어다(Presidio 볼트 스왑 + Tier B 배선이 로드맵).
+>
+> *2차 검토에서 수정 완료:* **DLP×TierA 과차단**(조회된 고객 이메일이 토큰화돼 정당 발송이 차단되던 것 →
+> egress 인자를 게이트 전 사전복원으로 수정, 회귀 테스트 추가) · **after_model fail-closed**(4 seam 대칭) ·
+> **레일 무음 폴백 표면화**(`/readyz`·startup 로그에 rail 명, heuristic 폴백 경고) · **business-outcome status**
+> (차단된 이메일을 `completed_with_blocks` 로 구분, `done` 오해 방지) · **env키 접두 노출 제거**.
+>
+> *아직 남은 한계(로드맵):*
+> - **strict_schema 가 이름만 엄격** — 미선언 인자·정수 형변환만 막고 **str/email 타입·형식·required·빈 로컬파트를 검증 안 함**. `send_email({})`, `to="@company.example.com"` 통과. 실 이메일 도구 연결 전 JSON Schema 강화 필요.
+> - **confused-deputy: allowlist 는 인가가 아니다** — `attacker@customer.example.com`(allowlist 도메인 내 임의주소)이 통과한다. 완화책 `forbid_tainted_args`(Tier B)가 `SERVER_DEFENSES` 에 `tier_b` 부재로 미발동 → **principal↔customer_ref 바인딩**이 정답(로드맵).
+> - **DoS 는 "이터레이션 경계 soft budget"** — `deadline_s` 는 이터레이션 진입에서만 체크, tool_call 개수 상한 없음, `asyncio.to_thread` 는 만료 시 하부 스레드 미회수. 실도구 연결 시 벽시계 취소(`asyncio.timeout`)+전용 executor+idempotency 필요.
+> - **본문(body)은 토큰 유지** — 정당 고객에게 가는 이메일 본문의 PII 도 토큰인 채 나갈 수 있다(수신자=데이터주체 검증 후 본문 rehydrate 는 로드맵).
 
 ---
 

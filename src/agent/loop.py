@@ -93,8 +93,16 @@ async def run_episode(
             break
         latency = int((time.perf_counter() - t0) * 1000)
 
-        # ── after_model (per_hop) ──
-        result = await hooks.after_model(result, ctx=ep)
+        # ── after_model (per_hop 모더레이션) · ★fail-closed★ ──
+        #    출력 모더레이션 seam 실패도 크래시가 아니라 안전한 종료로(3 seam 대칭).
+        try:
+            result = await hooks.after_model(result, ctx=ep)
+        except Exception as e:  # noqa: BLE001
+            ep.finish_reason = "error"
+            _record_block(ep, Block(rule="after_model.fail_closed",
+                                    reason=f"{type(e).__name__}: {e}"))
+            alog.event(_log, "error", "after_model.fail_closed", err=type(e).__name__)
+            break
 
         if result.blocked:
             ep.finish_reason = "blocked"

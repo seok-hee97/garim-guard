@@ -271,20 +271,36 @@ class DefenseHooks:
 
     async def before_tool(self, call: ToolCall, ctx: Any = None):
         corpus = getattr(ctx, "untrusted_corpus", None)
+        spec = self.tools.get(call.name, {})
+        exec_args = dict(call.args)
+        rehydrated_any = False
 
-        # 1) Tier A 결정적 게이트 — 항상 먼저. 구조적 Block 이 우선한다.
+        # 0) ★DLP 사전 복원(egress/라우팅 인자)★ — allowlist_ref 있는 인자(to/account)는 게이트
+        #    검사 '전에' 원본으로 복원한다. 토큰(<EMAIL_1>)인 채로 egress allowlist 검사를 받으면
+        #    allowlist 안의 정당한 고객 주소마저 무조건 차단되기 때문(DLP×TierA 합성 결함 수정).
+        #    본문(body) 등 비-egress 인자는 토큰을 유지한다 → 외부로 나가도 토큰만.
+        if self.vault is not None:
+            for a, meta in (spec.get("args") or {}).items():
+                if meta.get("allowlist_ref") and isinstance(exec_args.get(a), str):
+                    r = self.vault.rehydrate(exec_args[a])
+                    if r != exec_args[a]:
+                        exec_args[a] = r
+                        rehydrated_any = True
+        gate_call = (ToolCall(name=call.name, args=exec_args, call_id=call.call_id)
+                     if rehydrated_any else call)
+
+        # 1) Tier A 결정적 게이트 — 항상 먼저(복원된 egress 인자로 판정). 구조적 Block 이 우선.
         if self.defenses.get("tier_a", False):
-            decision = self.gate.check(call, untrusted_corpus=corpus)
+            decision = self.gate.check(gate_call, untrusted_corpus=corpus)
             if isinstance(decision, Block):
                 return decision  # ← 분류기가 무엇을 말하든 이 Block 을 무를 수 없다
-            tier_a_result = decision  # None 또는 Rehydrated
-        else:
-            tier_a_result = None
+            if isinstance(decision, Rehydrated):
+                exec_args = decision.args
+                rehydrated_any = True
 
-        # 1.5) egress DLP 스캔 — 외부 싱크 인자에 잔여 '원본' PII 가 있으면 차단.
-        #      외부로는 토큰만 나가야 한다(모델이 실수로 원본을 인자에 넣은 경우 차단).
+        # 1.5) egress DLP 스캔 — 외부 싱크의 비-egress 인자(body 등)에 잔여 '원본' PII 차단.
+        #      원본(call.args, 토큰 상태) 기준 검사 — 모델이 실수로 원본 PII 를 본문에 넣으면 차단.
         if self.vault is not None:
-            spec = self.tools.get(call.name, {})
             for a in spec.get("dlp_scan_args", []) or []:
                 v = call.args.get(a)
                 if isinstance(v, str) and self.vault.contains_raw(v):
@@ -293,24 +309,19 @@ class DefenseHooks:
 
         # 2) classifier_gate — negative control. 격리 상태 + 고위험 도구면 추가 차단.
         if self.cg.get("enable") and getattr(ctx, "quarantined", False):
-            spec = self.tools.get(call.name, {})
             if spec.get("risk_tier") in self._high_risk:
                 return Block(rule="classifier_gate.quarantined",
                              reason="분류기가 선행 도구출력에서 인젝션 탐지 → 고위험 도구 차단",
                              decision="BLOCK")
 
-        # 3) DLP rehydrate — 내부 신뢰 도구만 원본 PII 복원(외부 싱크는 토큰 유지 → 유출돼도 토큰).
+        # 3) DLP rehydrate — 내부 신뢰 도구의 원본 PII 복원(rehydrate_args: 예 lookup_customer rrn/phone).
         if self.vault is not None:
-            spec = self.tools.get(call.name, {})
-            rehy = spec.get("rehydrate_args")
-            if rehy:
-                args = dict(call.args)
-                for a in rehy:
-                    if a in args and isinstance(args[a], str):
-                        args[a] = self.vault.rehydrate(args[a])
-                return Rehydrated(args=args)
+            for a in spec.get("rehydrate_args", []) or []:
+                if isinstance(exec_args.get(a), str):
+                    exec_args[a] = self.vault.rehydrate(exec_args[a])
+                    rehydrated_any = True
 
-        return tier_a_result  # Tier A 의 None/Rehydrated 를 그대로 통과
+        return Rehydrated(args=exec_args) if rehydrated_any else None
 
     async def after_tool(self, result: ToolResult, ctx: Any = None) -> Tainted_:
         rail_scores: dict[str, float] = {}

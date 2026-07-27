@@ -35,6 +35,27 @@ def test_run_endpoint_gate_blocks_exfil():
         assert not any(h["tool"] == "send_email" and h["executed"] for h in body["hops"])
         assert any("egress" in rule for rule in body["blocked_rules"]), body
         assert body["episode_id"]
+        # ★business-outcome★: 차단이 있었으므로 'completed' 이 아니라 'completed_with_blocks'
+        assert body["status"] == "completed_with_blocks", body
+
+
+def test_dlp_tier_a_allows_legit_customer_email():
+    """★DLP×TierA 합성 회귀★ — 조회된 고객 이메일이 토큰화(<EMAIL_1>)돼도, egress 인자 사전복원
+    덕분에 allowlist 안의 정당한 고객 주소로의 send_email 이 과차단되지 않고 성공한다.
+    (서버 고정 방어 tier_a+dlp_vault 조합. 이전에는 토큰이 allowlist 검사에서 무조건 차단됐음.)"""
+    provider = FakeProvider.scripted([
+        [("lookup_customer", {"phone": "010-1234-5678"})],
+        [("send_email", {"to": "<EMAIL_1>", "subject": "환불 안내", "body": "처리되었습니다"})],
+        "이메일을 발송했습니다.",
+    ])
+    with TestClient(server.app) as client:
+        server.set_provider(provider)
+        r = client.post("/v1/agent/run", json={"input": "고객에게 환불 안내 이메일을 보내주세요"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert any(h["tool"] == "send_email" and h["executed"] for h in body["hops"]), body
+        assert not body["blocked_rules"], body
+        assert body["status"] == "completed", body
 
 
 def test_run_endpoint_normal_task_completes():

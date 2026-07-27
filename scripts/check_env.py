@@ -73,8 +73,8 @@ def check_key() -> dict:
             "https://aistudio.google.com/apikey 에서 발급 후 .env 에 "
             "GEMINI_API_KEY=... 또는 GOOGLE_API_KEY=... 로 기입.",
         )
-    return {"step": "key", "ok": True, "source_var": name, "key_len": len(key),
-            "key_prefix": key[:6] + "..."}
+    # ★비밀 위생: 키의 어떤 부분(접두/길이 포함)도 리포트에 기록하지 않는다★
+    return {"step": "key", "ok": True, "source_var": name}
 
 
 def check_tool_call(model: str) -> dict:
