@@ -21,7 +21,8 @@ from typing import Any
 
 from ..providers.base import GenResult, Msg, ToolCall, ToolResult
 from ..rails.base import RailScorer
-from .hooks import Block, Rehydrated, Tainted_
+from .authz import check_action
+from .hooks import Block, HITLRequired, Rehydrated, Tainted_
 from .taint import sources_of
 
 # 엄격 스키마(서비스)용 상수
@@ -220,9 +221,10 @@ class DefenseHooks:
     """
 
     def __init__(self, policy: dict, defenses: dict[str, Any],
-                 rail: RailScorer | None = None):
+                 rail: RailScorer | None = None, principal: Any = None):
         self.policy = policy
         self.defenses = defenses
+        self.principal = principal          # 서비스: 인증 주체(authz·confused-deputy 차단). 평가: None
         self.tools = policy.get("tools", {})
         self.gate = TierAGate(policy, taint_enabled=bool(defenses.get("tier_b", False)))
         self.rail = rail
@@ -312,10 +314,23 @@ class DefenseHooks:
         if self.defenses.get("tier_a", False):
             decision = self.gate.check(gate_call, untrusted_corpus=corpus)
             if isinstance(decision, Block):
+                if decision.decision == "HITL_DENY":
+                    # authz 를 먼저 적용(무권한 액션은 승인 큐로 보내지 않고 차단), 통과 시 HITL 필요 신호.
+                    if self.principal is not None:
+                        az = check_action(self.principal, call.name, exec_args, self.tools)
+                        if az is not None:
+                            return az
+                    return HITLRequired(tool=call.name, args=exec_args, rule=decision.rule)
                 return decision  # ← 분류기가 무엇을 말하든 이 Block 을 무를 수 없다
             if isinstance(decision, Rehydrated):
                 exec_args = decision.args
                 rehydrated_any = True
+
+        # 1.2) authz — principal 스코프 강제(egress allowlist 는 인가가 아님 → confused-deputy 구조적 차단).
+        if self.principal is not None:
+            az = check_action(self.principal, call.name, exec_args, self.tools)
+            if az is not None:
+                return az
 
         # 1.5) egress DLP 스캔 — 외부 싱크의 비-egress 인자(body 등)에 잔여 '원본' PII 차단.
         #      원본(call.args, 토큰 상태) 기준 검사 — 모델이 실수로 원본 PII 를 본문에 넣으면 차단.

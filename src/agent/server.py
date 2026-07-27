@@ -1,15 +1,18 @@
 """SafeAgent-KR HTTP 서비스 — run_episode 를 감싼 실제 구동 런타임.
 
-앱 기동 시 policy/provider/rail 을 1회 구성(싱글턴), 요청마다 vault(요청 스코프)를 새로 만든다.
-`POST /v1/agent/run` 이 4-seam 에이전트 루프를 실행하고 트레이스 요약을 반환한다.
+앱 기동 시 policy/provider/rail/world/승인큐/principal 을 1회 구성(싱글턴), 요청마다
+vault(요청 스코프)를 새로 만든다. 상태 있는 ServiceWorld 로 환불·이메일에 실제 부작용과
+idempotency 를 갖고, 비가역 도구는 HITL 승인 큐를 거쳐 사람 승인 후 실행된다.
 
-★방어(defenses)는 서버 구성 고정 — 클라이언트가 약화시킬 수 없다★ (tier_a 항상 on,
-dlp_vault 항상 on, strict_schema on). 클라이언트가 tier_a 를 끄는 경로가 존재하지 않는다.
+★방어 고정(클라이언트가 못 끔): tier_a + dlp_vault + strict_schema.★
+★authz(principal↔고객 바인딩)로 confused-deputy 를 구조적으로 차단.★
 
-    uvicorn src.agent.server:app --port 8000
-    curl -s localhost:8000/healthz
-    curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
-         -d '{"input":"환불 처리 방법 알려주세요"}'
+엔드포인트:
+  GET  /healthz /readyz
+  POST /v1/agent/run            에이전트 실행 (X-API-Key 로 principal 인증)
+  GET  /v1/approvals            대기 중 HITL 승인 목록
+  POST /v1/approvals/{id}       승인/거부 → 승인 시 백엔드에 실제 실행(idempotent)
+  GET  /v1/audit                처리된 환불·발송 이메일(관측)
 """
 
 from __future__ import annotations
@@ -20,20 +23,20 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from ..config import ROOT, gen_config, load_policy
 from . import log as alog
+from . import tools as toolmod
+from .authz import registry_from_world
+from .backend import service_world
+from .hitl import ApprovalQueue
 from .loop import run_episode
 from .policy import DefenseHooks
-from .toolworld import default_world
 
-# 서버 고정 방어(클라이언트가 못 끔). ★데모/프로토타입 기본값★ — "프로덕션 완제품" 아님.
-# tier_b 는 기본 비활성: value-provenance(부분문자열)가 KB 에 적힌 정당 고객/지원 주소를
-# 오차단(예: "환불 문의는 support@… 로")한다 → confused-deputy 는 taint 가 아니라
-# principal↔customer_ref 바인딩으로 막아야 한다(로드맵, docs/PRODUCTION.md).
-# tier_a+dlp_vault 합성 과차단은 egress 인자 사전복원으로 수정됨.
+# 서버 고정 방어(클라이언트가 못 끔). ★데모/프로토타입 기본값★.
+# tier_b 는 기본 비활성(value-provenance 오탐) — confused-deputy 는 authz(principal 바인딩)로 차단.
 SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True}
 
 _state: dict[str, Any] = {}
@@ -58,7 +61,6 @@ async def lifespan(app: FastAPI):
 
     policy = copy.deepcopy(load_policy())              # 캐시된 eval 정책과 격리
     policy.setdefault("tier_a", {})["strict_schema"] = True   # 서비스는 엄격 스키마
-    # 서비스는 실제 에이전트 지시를 로드(평가 baseline 은 중립 유지). 파일 부재 시 경고.
     _sys = ROOT / "config" / "system_instruction.ko.txt"
     if _sys.exists():
         policy.setdefault("agent", {})["system_instruction_file"] = "config/system_instruction.ko.txt"
@@ -66,17 +68,24 @@ async def lifespan(app: FastAPI):
         alog.event(logger, "warning", "system_instruction_missing", path=str(_sys))
     _state["policy"] = policy
     _state["cfg"] = gen_config(policy)
+
+    # 상태 있는 백엔드(부작용·idempotency) + HITL 승인 큐 + principal 레지스트리(싱글턴).
+    world = service_world()
+    _state["world"] = world
+    _state["hitl"] = ApprovalQueue()
+    _state["principals"] = registry_from_world(world)
+    _state["default_principal"] = _state["principals"]["demo-agent-key"]
+
     rail = _build_rail()
     _state["rail"] = rail
     _state["rail_name"] = getattr(rail, "name", type(rail).__name__)
-    # 학습 레일 아티팩트가 없어 heuristic 으로 조용히 폴백됐는지 표면화(무음 폴백 방지).
     if _state["rail_name"] == "heuristic":
         alog.event(logger, "warning", "rail_fallback_heuristic",
                    note="ko_agentguard 아티팩트 부재 → HeuristicRail 폴백")
-    try:                                               # provider 구성 실패해도 부팅은 성공(readyz=false)
+    try:
         _state["provider"] = _build_provider(policy)
         _state["ready"] = True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — provider 실패해도 부팅 성공(readyz=false)
         _state["provider"] = None
         _state["ready"] = False
         alog.event(logger, "error", "provider_init_failed", err=type(e).__name__)
@@ -91,7 +100,7 @@ app = FastAPI(title="SafeAgent-KR", version="1.0", lifespan=lifespan)
 
 class RunRequest(BaseModel):
     input: str = Field(..., min_length=1, max_length=8000)
-    scenario: str = ""
+    scenario: str = Field("", max_length=200)
 
 
 class HopView(BaseModel):
@@ -103,52 +112,63 @@ class HopView(BaseModel):
 
 class RunResponse(BaseModel):
     episode_id: str
-    status: str                 # business-outcome: completed | completed_with_blocks | blocked | error | ...
-    finish_reason: str          # model-termination (done/blocked/error/deadline_exceeded/iteration_cap)
+    status: str                 # completed | completed_with_blocks | hitl_pending | blocked | error | ...
+    finish_reason: str
     final_text: str
     hops: list[HopView]
     blocked_rules: list[str]
+    pending_approval: str = ""  # hitl_pending 시 승인 요청 id
     latency_ms: int
 
 
+class ApproveRequest(BaseModel):
+    decision: str = Field(..., pattern="^(approve|deny)$")
+    approver: str = Field("human", max_length=100)
+
+
 def _business_status(ep) -> str:
-    """업무 결과를 모델 종료 사유와 분리한다 — 이메일이 차단됐는데 모델이 '완료'라 해도
-    finish_reason='done' 이 되는 문제(업무 실패를 성공으로 오해) 방지."""
+    if ep.finish_reason == "hitl_pending":
+        return "hitl_pending"
     if ep.finish_reason != "done":
         return ep.finish_reason
     if any(h.gate_decision in ("BLOCK", "HITL_DENY") for h in ep.hops):
-        return "completed_with_blocks"       # 모델은 종료했으나 일부 도구가 차단됨(업무 부분 실패)
+        return "completed_with_blocks"
     return "completed"
+
+
+def _resolve_principal(x_api_key: str | None):
+    """X-API-Key → principal. 데모: 키 없거나 미등록이면 default demo principal(authz 여전히 ON)."""
+    if x_api_key and x_api_key in _state["principals"]:
+        return _state["principals"][x_api_key]
+    return _state["default_principal"]   # 실운영은 미등록 키를 401 로 거부해야 함
 
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    """살아있음(liveness) — 의존성 무관, 항상 200."""
     return {"status": "ok"}
 
 
 @app.get("/readyz")
 async def readyz() -> dict:
-    """준비됨(readiness) — provider 까지 구성돼 요청 처리 가능한가."""
     if not _state.get("ready"):
         raise HTTPException(status_code=503, detail="provider not ready")
-    return {"status": "ready", "provider": _state["cfg"].provider,
-            "rail": _state.get("rail_name")}       # heuristic 이면 폴백된 것
+    return {"status": "ready", "provider": _state["cfg"].provider, "rail": _state.get("rail_name")}
 
 
 @app.post("/v1/agent/run", response_model=RunResponse)
-async def run(req: RunRequest) -> RunResponse:
+async def run(req: RunRequest, x_api_key: str | None = Header(default=None)) -> RunResponse:
     if not _state.get("ready") or _state.get("provider") is None:
         raise HTTPException(status_code=503, detail="provider not ready")
 
     episode_id = uuid.uuid4().hex[:12]
     alog.bind(episode_id=episode_id)
-    # 요청 스코프: DefenseHooks(→ 새 vault) 를 매 요청 새로 만든다.
-    hooks = DefenseHooks(_state["policy"], dict(SERVER_DEFENSES), rail=_state["rail"])
+    principal = _resolve_principal(x_api_key)
+    hooks = DefenseHooks(_state["policy"], dict(SERVER_DEFENSES),
+                         rail=_state["rail"], principal=principal)
     ep = await run_episode(
         req.input, _state["provider"], _state["cfg"],
-        hooks=hooks, world=default_world(), defenses=dict(SERVER_DEFENSES),
-        scenario=req.scenario, episode_id=episode_id,
+        hooks=hooks, world=_state["world"], defenses=dict(SERVER_DEFENSES),
+        scenario=req.scenario, episode_id=episode_id, hitl_queue=_state["hitl"],
     )
     return RunResponse(
         episode_id=ep.episode_id,
@@ -160,8 +180,46 @@ async def run(req: RunRequest) -> RunResponse:
               for h in ep.hops if h.tool_name],
         blocked_rules=sorted({h.gate_rule for h in ep.hops
                               if h.gate_decision == "BLOCK" and h.gate_rule}),
+        pending_approval=ep.pending_approval,
         latency_ms=ep.total_latency_ms,
     )
+
+
+@app.get("/v1/approvals")
+async def list_approvals() -> dict:
+    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹)."""
+    return {"pending": [a.public() for a in _state["hitl"].list_pending()]}
+
+
+@app.post("/v1/approvals/{approval_id}")
+async def resolve_approval(approval_id: str, req: ApproveRequest) -> dict:
+    """승인/거부. 승인 시 보류된 액션을 백엔드에 실제 실행(idempotent, approval_id 를 키로)."""
+    q = _state["hitl"]
+    appr = q.get(approval_id)
+    if appr is None:
+        raise HTTPException(status_code=404, detail="approval not found")
+    if appr.status != "pending":
+        raise HTTPException(status_code=409, detail=f"already {appr.status}")
+
+    world = _state["world"]
+
+    def _executor(tool: str, args: dict) -> dict:
+        # 승인된 액션을 백엔드에 실행. approval_id 를 idempotency_key 로 → 중복 승인 시 이중환불 방지.
+        raw = toolmod.execute(tool, dict(args), approval_id, world=world)
+        return {"executed": True, "result": raw}
+
+    resolved = q.resolve(approval_id, approve=(req.decision == "approve"),
+                         approver=req.approver,
+                         executor=_executor if req.decision == "approve" else None)
+    alog.event(alog.get_logger(), "info", "approval_resolved",
+               id=approval_id, decision=req.decision, approver=req.approver)
+    return resolved.public()
+
+
+@app.get("/v1/audit")
+async def audit() -> dict:
+    """관측 — 처리된 환불·발송 이메일 요약(운영자 감사용)."""
+    return _state["world"].audit()
 
 
 def set_provider(provider: Any) -> None:

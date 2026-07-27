@@ -51,7 +51,8 @@ class EpisodeTrace:
     defenses: dict[str, bool] = field(default_factory=dict)   # 이 실행의 애블레이션 arm
     hops: list[HopTrace] = field(default_factory=list)
     final_text: str = ""
-    finish_reason: str = ""                   # done | iteration_cap | blocked | error
+    finish_reason: str = ""                   # done | iteration_cap | blocked | error | hitl_pending | deadline_exceeded
+    pending_approval: str = ""                # hitl_pending 시 승인 요청 id
     total_hops: int = 0
     total_latency_ms: int = 0
 

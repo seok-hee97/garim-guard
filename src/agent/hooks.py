@@ -46,6 +46,17 @@ class Tainted_:
     rail_scores: dict[str, float] = field(default_factory=dict)
 
 
+@dataclass
+class HITLRequired:
+    """before_tool 이 '사람 승인 필요' 도구를 만났을 때. args 는 복원된(실행 가능한) 인자다.
+    승인 큐가 있으면 루프가 이 액션을 큐에 적재하고 에피소드를 hitl_pending 으로 일시중단한다.
+    큐가 없으면(평가) 루프가 이를 HITL_DENY Block 으로 처리한다(기존 동작)."""
+
+    tool: str
+    args: dict[str, Any]
+    rule: str
+
+
 class GuardrailHooks(Protocol):
     async def before_model(self, messages: list[Msg], ctx: Any) -> Redacted | Block | None: ...
     async def after_model(self, result: GenResult, ctx: Any) -> GenResult: ...

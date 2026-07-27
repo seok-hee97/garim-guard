@@ -137,6 +137,6 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 
 ## 7. 테스트 / 재현성
 
-- 유닛/통합 테스트 **54 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**. (presidio 미설치 시 DLP 2건 skip → 52; CI core 는 `--ignore=test_dlp_defenses` 로 48.)
+- 유닛/통합 테스트 **58 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**. (CI core 는 `--ignore=test_dlp_defenses` 로 52 통과; presidio 없으면 그 6건이 빠진다.)
 - 재현 범위: **헤드라인 애블레이션은 라이브 OpenAI 호출**(temp=0 근사 재현 — gpt-4o-mini는 bit-exact 보장 안 함). 카세트 record/replay는 FakeProvider 경로 전용. DLP·channel_gap·R6/R7·e5·shieldgemma는 RunPod GPU 스크립트 산출로 단일 명령에 미포함.
 - GPU 실측 **완료**(§6c): Kanana P1a 격차 1.0 · ShieldGemma EN-KO 0.268 · R6 span 0.985 · R7 Macro 0.709 · e5 교차언어. (⚠️ P1b 난독화 붕괴는 사전등록 미달 0.1 — 정직 보고)

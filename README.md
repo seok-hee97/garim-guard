@@ -95,9 +95,13 @@ curl -s localhost:8000/readyz                          # provider 준비 여부
 curl -s -XPOST localhost:8000/v1/agent/run \
      -H 'content-type: application/json' \
      -d '{"input":"고객 010-1234-5678 환불 상태를 조회해 주세요"}'
+curl -s localhost:8000/v1/approvals                    # 대기 중 HITL 승인 목록
+curl -s -XPOST localhost:8000/v1/approvals/appr_00001 \
+     -H 'content-type: application/json' -d '{"decision":"approve"}'   # 환불 승인→실행
+curl -s localhost:8000/v1/audit                        # 처리된 환불·이메일(관측)
 
 # 평가
-pytest                             # 54 통과 (.venv, pytest-asyncio+presidio)
+pytest                             # 58 통과 (.venv, pytest-asyncio+presidio)
 python eval/ablation.py            # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py      # 채널 조건부 2×2
 open report/trace_view.html        # 정적 트레이스 데모 뷰어
@@ -116,6 +120,6 @@ open report/trace_view.html        # 정적 트레이스 데모 뷰어
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인, 부록) |
 | **실행 서비스 (FastAPI HTTP 런타임)** | ✅ 구동 가능 — 서버고정 Tier A+DLP+strict, 파일럿 전 단계([docs/PRODUCTION.md](docs/PRODUCTION.md)) |
 | 외부 데이터셋 실재 검증 | ✅ 완료 (라이선스·행수 실측, [results/RESULTS.md](results/RESULTS.md)) |
-| 유닛/통합 테스트 | ✅ **54 통과** (.venv) |
+| 유닛/통합 테스트 | ✅ **58 통과** (.venv) |
 
 주요 설정: [config/policy.yaml](config/policy.yaml) · 의존성: [requirements.txt](requirements.txt) · 환경변수: [.env.example](.env.example)

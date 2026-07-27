@@ -21,7 +21,7 @@ from typing import Any
 from ..providers.base import GenConfig, Msg, Provider, ToolResult
 from . import log as alog
 from . import tools as toolmod
-from .hooks import Block, GuardrailHooks, NoOpHooks, Redacted, Rehydrated, Tainted_
+from .hooks import Block, GuardrailHooks, HITLRequired, NoOpHooks, Redacted, Rehydrated, Tainted_
 from .taint import sources_of, unwrap
 from .trace import EpisodeTrace, HopTrace
 
@@ -44,6 +44,7 @@ async def run_episode(
     episode_id: str | None = None,
     deadline_s: float = 60.0,
     per_call_timeout_s: float = 30.0,
+    hitl_queue: Any = None,
 ) -> EpisodeTrace:
     # ★ 설정 불변식은 진입에서 fail-fast (오설정=프로그래밍 오류, 런타임 예외 처리와 구분).
     #   런타임/일시 예외(429·타임아웃)는 아래 루프에서 잡아 우아하게 error 종료한다.
@@ -152,6 +153,24 @@ async def run_episode(
             except Exception as e:  # noqa: BLE001 — 게이트 실패 = fail-closed 차단
                 gate = Block(rule="gate.fail_closed", reason=f"{type(e).__name__}: {e}")
                 alog.event(_log, "error", "gate.fail_closed", tool=call.name, err=type(e).__name__)
+            # ── HITL 필요: 승인 큐가 있으면 액션을 적재하고 에피소드를 일시중단 ──
+            if isinstance(gate, HITLRequired):
+                if hitl_queue is not None:
+                    pid = getattr(getattr(hooks, "principal", None), "id", "")
+                    approval_id = hitl_queue.submit(
+                        tool=gate.tool, args=gate.args, episode_id=ep.episode_id,
+                        principal=pid, rule=gate.rule)
+                    hop.executed = False
+                    hop.gate_decision = "HITL_DENY"
+                    hop.gate_rule = gate.rule
+                    hop.note = f"hitl_pending:{approval_id}"
+                    ep.add(hop)
+                    ep.pending_approval = approval_id
+                    ep.finish_reason = "hitl_pending"
+                    alog.event(_log, "info", "hitl_pending", tool=gate.tool, approval_id=approval_id)
+                    break            # 에피소드 일시중단(외부 승인 대기)
+                # 큐 없음(평가) → 기존처럼 HITL_DENY 차단으로 처리
+                gate = Block(rule=gate.rule, reason="HITL 승인 필요", decision="HITL_DENY")
             if isinstance(gate, Block):
                 hop.executed = False
                 hop.gate_decision = gate.decision  # BLOCK | HITL_DENY
@@ -212,6 +231,9 @@ async def run_episode(
             tool_results.append(ToolResult(
                 call_id=call.call_id, name=call.name, content=output, is_error=is_error))
 
+        # HITL 일시중단·예산초과면 되먹임 없이 종료(외부 승인/종료 대기).
+        if ep.finish_reason in ("hitl_pending", "deadline_exceeded"):
+            break
         # 도구 결과를 다음 턴으로 되먹임 (정본: role="tool")
         messages.append(Msg(role="tool", tool_results=tool_results))
     else:

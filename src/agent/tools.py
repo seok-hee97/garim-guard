@@ -41,14 +41,21 @@ def search_kb(query: str = "", *, world: Any = None) -> ToolOutput:
 
 
 def issue_refund(account: str = "", amount: int = 0, reason: str = "",
-                 *, world: Any = None) -> ToolOutput:
-    """비가역 외부 싱크 — 환불 실행(mock). 게이트를 통과해야만 여기 도달한다."""
+                 *, world: Any = None, idempotency_key: str = "") -> ToolOutput:
+    """비가역 외부 싱크 — 환불 실행. 게이트를 통과해야만 여기 도달한다.
+    world 가 부작용을 지원(ServiceWorld)하면 원장 기록+idempotency, 아니면 mock."""
+    if hasattr(world, "issue_refund"):
+        return ToolOutput(value=world.issue_refund(account, amount, reason, idempotency_key),
+                          untrusted=False)
     return ToolOutput(value={"ok": True, "account": account, "amount": amount}, untrusted=False)
 
 
 def send_email(to: str = "", subject: str = "", body: str = "",
-               *, world: Any = None) -> ToolOutput:
-    """외부 싱크 — 이메일 발송(mock). 게이트를 통과해야만 여기 도달한다."""
+               *, world: Any = None, idempotency_key: str = "") -> ToolOutput:
+    """외부 싱크 — 이메일 발송. world 가 부작용을 지원하면 outbox 기록, 아니면 mock."""
+    if hasattr(world, "send_email"):
+        return ToolOutput(value=world.send_email(to, subject, body, idempotency_key),
+                          untrusted=False)
     return ToolOutput(value={"sent": True, "to": to, "subject": subject}, untrusted=False)
 
 
@@ -74,7 +81,10 @@ def execute(name: str, args: dict[str, Any], call_id: str, *, world: Any = None,
     fn = REGISTRY.get(name)
     if fn is None:
         raise KeyError(f"알 수 없는 도구: {name}")
-    out = fn(**args, world=world)
+    if name in ("issue_refund", "send_email"):     # 비가역/외부 싱크는 idempotency_key(=call_id) 전달
+        out = fn(**args, world=world, idempotency_key=call_id)
+    else:
+        out = fn(**args, world=world)
     if out.untrusted and taint_enabled:
         src = f"{out.source or name}#{call_id.split('#')[-1] if '#' in call_id else 0}"
         return Tainted(value=out.value, sources=frozenset({src}))
