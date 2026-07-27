@@ -32,7 +32,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 | **구조적 로깅** | JSON 로그 + `episode_id` 상관(contextvar), ★PII 미로깅★ | [log.py](../src/agent/log.py) |
 | **DLP 배선** | `vault.restore`(최종 응답만)·egress DLP scan(외부싱크 잔여 원본 PII 차단)·after_tool fail-closed | loop.py·policy.py |
 | **Tier A 엄격 스키마** | 미선언 인자 거부 + 정수 암묵 형변환 거부 (gated: 서비스 on / 평가 off → 재현성 보존) | policy.py |
-| **테스트** | 58 통과 — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema | [tests/](../tests/) |
+| **테스트** | 63 통과 — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema | [tests/](../tests/) |
 
 **라이브 검증(2026-07):** 실 gpt-4o-mini 로 `POST /v1/agent/run` → `lookup_customer(phone=<KR_PHONE_1>)`
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
@@ -40,16 +40,18 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 
 > **정직한 한계(현재 서비스 — 파일럿 전 단계):**
 >
-> *구현·통합 완료:* **HITL 승인 큐**(비가역 도구는 사람 승인 후 실행) · **상태 백엔드+idempotency**(환불 원장·이중환불 방지) ·
-> **authN/authZ**(principal↔고객 바인딩 → **confused-deputy 구조적 차단**, taint 아님) · **DLP×TierA 과차단 수정** ·
-> **4 seam fail-closed** · **strict_schema 실검증** · **deadline 벽시계 강제** · **egress casefold** · **레일 폴백 표면화** ·
-> **business-outcome status**(hitl_pending/completed_with_blocks) · **env키 노출 제거(파일+git 히스토리)** · **시스템 프롬프트 배선**.
+> *구현·통합 완료:* **HITL 승인 큐**(비가역 도구는 사람 승인 후 실행, **트랜잭션적** — 백엔드 실패 시 미커밋·재시도) ·
+> **상태 백엔드+idempotency**(환불/이메일 이중실행 방지) · **authN/authZ**(X-API-Key **fail-closed 401** + principal↔고객
+> 바인딩 → **confused-deputy 구조적 차단**) · **/v1/audit PII 마스킹** · **병렬 HITL 다건 적재(유실 방지)** · **html_escape 배선** ·
+> **DLP×TierA 과차단 수정** · **4 seam fail-closed** · **strict_schema 실검증** · **deadline 벽시계** · **egress casefold** ·
+> **레일 폴백 표면화** · **env키 노출 제거(파일+git 히스토리)** · **시스템 프롬프트 배선**.
 >
 > *아직 남은 한계(로드맵):*
-> - **실 외부 API 미연결** — ServiceWorld 는 인메모리(환불 원장·이메일 outbox). 실 Stripe/SMTP 연결 지점은 `backend.py` 의 TODO. 실 API 시 `asyncio.to_thread` 는 만료해도 스레드 미회수 → 자체 소켓 타임아웃 필요.
-> - **인메모리 상태** — 승인 큐·백엔드가 프로세스 재시작 시 소실(실운영은 DB/redis + 승인 TTL). 승인자 authN·직무분리(요청자≠승인자)는 데모 미강제.
-> - **본문(body)은 토큰 유지** — 정당 고객에게 가는 이메일 본문 PII 도 토큰인 채 나갈 수 있다(수신자=데이터주체 검증 후 본문 rehydrate 는 로드맵).
-> - **lookup_customer authz 미제한** — 조회는 principal 스코프로 안 막았다(출력은 어차피 토큰화). 대시보드/경보도 미구현.
+> - **실 외부 API 미연결** — ServiceWorld 는 인메모리(환불 원장·이메일 outbox). 실 Stripe/SMTP 연결 지점은 `backend.py` TODO. 실 API 시 `asyncio.to_thread` 만료해도 스레드 미회수 → 자체 소켓 타임아웃 필요. `_refund_seq` check-then-set 도 실 async/워커 도입 시 Lock 필요(현재는 이벤트루프 직렬화로 도달 불가).
+> - **cross-customer 스코프** — X-API-Key 는 fail-closed 이나 **데모 principal 은 전-고객 flat 스코프**라 담당 외 고객의 등록 이메일로도 발송 가능. 실운영은 **에피소드↔대상고객 per-ticket 바인딩** 필요(confused-deputy=미등록주소는 이미 차단).
+> - **refund authz ≡ egress(demo)** — `authz.account_unverified` 는 `egress.refund_accounts` allowlist 와 동치라 데모에선 egress 가 먼저 차단(구조적 도달 불가). 실운영은 전역 유효계좌 ⊋ 담당계좌 로 분리해야 authz 가 의미.
+> - **인메모리 상태·승인 위생** — 큐/백엔드 재시작 소실(실운영 DB/redis + 승인 TTL). 승인자 authN·직무분리(요청자≠승인자) 데모 미강제.
+> - **본문(body) 토큰 유지 · lookup authz 미제한 · 대시보드/경보 미구현 · 전체 대화 재개 미구현.**
 
 ---
 

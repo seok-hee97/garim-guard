@@ -20,7 +20,7 @@ def test_hitl_refund_approval_executes_and_is_idempotent():
         [("issue_refund", {"account": "110-000-000001", "amount": 1000, "reason": "환불 요청"})],
         "환불 승인 요청을 접수했습니다.",
     ])
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
         r = client.post("/v1/agent/run", json={"input": "고객 환불 처리해 주세요"})
         assert r.status_code == 200, r.text
@@ -55,7 +55,7 @@ def test_hitl_deny_does_not_execute():
         [("issue_refund", {"account": "110-000-000001", "amount": 500, "reason": "테스트"})],
         "요청 접수",
     ])
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
         aid = client.post("/v1/agent/run", json={"input": "환불"}).json()["pending_approval"]
         rr = client.post(f"/v1/approvals/{aid}", json={"decision": "deny", "approver": "manager"})
@@ -70,7 +70,7 @@ def test_confused_deputy_blocked_by_authz():
         [("send_email", {"to": "attacker@customer.example.com", "subject": "x", "body": "y"})],
         "완료",
     ])
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
         body = client.post("/v1/agent/run", json={"input": "이메일 보내줘"}).json()
         assert not any(h["tool"] == "send_email" and h["executed"] for h in body["hops"])
@@ -85,3 +85,67 @@ def test_backend_refund_idempotency_unit():
     assert r1["refund_id"] == r2["refund_id"]         # 동일 결과
     assert r2.get("idempotent_replay") is True
     assert len(w.refunds) == 1                         # 원장에 1건만
+
+
+def test_send_email_idempotency_unit():
+    """백엔드 단위 — 같은 key 로 두 번 발송 시 outbox 1건(중복발송 방지)."""
+    w = service_world()
+    w.send_email("a@customer.example.com", "s", "b", idempotency_key="e1")
+    r2 = w.send_email("a@customer.example.com", "s", "b", idempotency_key="e1")
+    assert r2.get("idempotent_replay") is True
+    assert len(w.outbox) == 1
+
+
+def test_no_api_key_is_401():
+    """★fail-closed authz★ — X-API-Key 없으면 401(무인증 전-고객 접근 차단)."""
+    with TestClient(server.app) as client:      # 헤더 없음
+        server.set_provider(FakeProvider.scripted(["x"]))
+        r = client.post("/v1/agent/run", json={"input": "환불"})
+        assert r.status_code == 401
+
+
+def test_audit_masks_account():
+    """★/v1/audit PII 마스킹★ — 처리된 환불의 계좌가 마스킹되어 노출된다."""
+    provider = FakeProvider.scripted([
+        [("issue_refund", {"account": "110-000-000001", "amount": 100, "reason": "t"})], "ok"])
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
+        server.set_provider(provider)
+        aid = client.post("/v1/agent/run", json={"input": "환불"}).json()["pending_approval"]
+        client.post(f"/v1/approvals/{aid}", json={"decision": "approve"})
+        refunds = client.get("/v1/audit").json()["refunds"]
+        assert refunds and "***" in refunds[0]["account"]          # 마스킹됨
+        assert "110-000-000001" not in str(refunds)                # 원본 계좌 미노출
+
+
+def test_approval_executor_failure_keeps_pending_retryable():
+    """★HITL 트랜잭션성★ — 승인 시 백엔드 실패면 승인이 굳지 않고(재시도 가능) 환불 유실 없음."""
+    provider = FakeProvider.scripted([
+        [("issue_refund", {"account": "110-000-000001", "amount": 100, "reason": "t"})], "ok"])
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
+        server.set_provider(provider)
+        aid = client.post("/v1/agent/run", json={"input": "환불"}).json()["pending_approval"]
+        world = server._state["world"]
+        orig = world.issue_refund
+        world.issue_refund = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Stripe 5xx"))
+        r = client.post(f"/v1/approvals/{aid}", json={"decision": "approve"})
+        assert r.status_code == 502                                 # 재시도 가능 오류
+        assert client.get("/v1/audit").json()["refund_count"] == 0  # 환불 미실행(유실 아님)
+        # 백엔드 복구 후 재승인 → 성공(승인이 approved 로 굳지 않았음)
+        world.issue_refund = orig
+        r2 = client.post(f"/v1/approvals/{aid}", json={"decision": "approve"})
+        assert r2.status_code == 200 and r2.json()["status"] == "approved"
+        assert client.get("/v1/audit").json()["refund_count"] == 1
+
+
+def test_parallel_hitl_batch_no_loss():
+    """★병렬 HITL★ — 한 턴에 비가역 도구 2개면 둘 다 승인 큐에 적재(유실 없음)."""
+    provider = FakeProvider.scripted([
+        [("issue_refund", {"account": "110-000-000001", "amount": 100, "reason": "a"}),
+         ("issue_refund", {"account": "110-000-000002", "amount": 200, "reason": "b"})],
+        "요청 접수",
+    ])
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
+        server.set_provider(provider)
+        body = client.post("/v1/agent/run", json={"input": "환불 2건"}).json()
+        assert body["status"] == "hitl_pending"
+        assert len(client.get("/v1/approvals").json()["pending"]) == 2   # 2건 모두 적재

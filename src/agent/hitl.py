@@ -63,16 +63,24 @@ class ApprovalQueue:
 
     def resolve(self, aid: str, approve: bool, approver: str = "",
                 executor: Callable[[str, dict], dict] | None = None) -> Approval | None:
-        """승인/거부. approve 시 executor(tool, args)로 백엔드에 실제 실행."""
+        """승인/거부. approve 시 executor(tool, args)로 백엔드에 실제 실행.
+
+        ★트랜잭션적★: executor 를 먼저 실행해 성공해야만 approved 로 커밋한다. 실패하면
+        status 를 pending 으로 유지해(자금·데이터 손실 방지) 재시도를 허용한다.
+        """
         a = self._store.get(aid)
         if a is None or a.status != "pending":
             return a
-        if approve:
-            a.status = "approved"
-            a.approver = approver
-            if executor is not None:
-                a.result = executor(a.tool, a.args)   # idempotent 실행(백엔드)
-        else:
+        if not approve:
             a.status = "denied"
             a.approver = approver
+            return a
+        if executor is not None:
+            try:
+                a.result = executor(a.tool, a.args)   # idempotent 실행(백엔드)
+            except Exception as e:  # noqa: BLE001 — 백엔드 실패 시 승인 미커밋(pending 유지→재시도)
+                a.result = {"executed": False, "error": f"{type(e).__name__}: {e}"}
+                return a          # status='pending' 유지
+        a.status = "approved"     # executor 성공(또는 없음) 후에만 커밋
+        a.approver = approver
         return a

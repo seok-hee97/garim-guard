@@ -137,10 +137,14 @@ def _business_status(ep) -> str:
 
 
 def _resolve_principal(x_api_key: str | None):
-    """X-API-Key → principal. 데모: 키 없거나 미등록이면 default demo principal(authz 여전히 ON)."""
-    if x_api_key and x_api_key in _state["principals"]:
-        return _state["principals"][x_api_key]
-    return _state["default_principal"]   # 실운영은 미등록 키를 401 로 거부해야 함
+    """X-API-Key → principal. ★fail-closed★ — 키 없거나 미등록이면 401(무인증 전-고객 접근 차단).
+    데모 키: `demo-agent-key`. 실운영은 IdP/OAuth 로 교체."""
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="X-API-Key 헤더가 필요합니다")
+    p = _state["principals"].get(x_api_key)
+    if p is None:
+        raise HTTPException(status_code=401, detail="유효하지 않은 API 키")
+    return p
 
 
 @app.get("/healthz")
@@ -211,6 +215,13 @@ async def resolve_approval(approval_id: str, req: ApproveRequest) -> dict:
     resolved = q.resolve(approval_id, approve=(req.decision == "approve"),
                          approver=req.approver,
                          executor=_executor if req.decision == "approve" else None)
+    # executor 실패 시 approved 로 커밋되지 않음(pending 유지) → 재시도 가능한 502(자금 손실 방지).
+    if req.decision == "approve" and resolved.status != "approved":
+        alog.event(alog.get_logger(), "error", "approval_execution_failed",
+                   id=approval_id, err=(resolved.result or {}).get("error"))
+        raise HTTPException(status_code=502,
+                            detail={"error": "backend_execution_failed",
+                                    "retryable": True, "approval": resolved.public()})
     alog.event(alog.get_logger(), "info", "approval_resolved",
                id=approval_id, decision=req.decision, approver=req.approver)
     return resolved.public()

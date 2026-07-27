@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from typing import Any
 
@@ -354,6 +355,12 @@ class DefenseHooks:
                 if isinstance(exec_args.get(a), str):
                     exec_args[a] = self.vault.rehydrate(exec_args[a])
                     rehydrated_any = True
+
+        # 4) HTML 이스케이프 — 외부 싱크 본문의 이미지태그/HTML 인젝션 경유 유출(EchoLeak류) 차단.
+        for a in spec.get("html_escape_args", []) or []:
+            if isinstance(exec_args.get(a), str) and ("<" in exec_args[a] or "&" in exec_args[a]):
+                exec_args[a] = html.escape(exec_args[a])
+                rehydrated_any = True
 
         return Rehydrated(args=exec_args) if rehydrated_any else None
 

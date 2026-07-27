@@ -23,6 +23,7 @@ class ServiceWorld(ToolWorld):
 
     refunds: dict[str, dict] = field(default_factory=dict)   # idempotency_key → refund record
     outbox: list[dict] = field(default_factory=list)         # 발송된 이메일 기록
+    _sent_keys: set = field(default_factory=set)             # send_email dedup(idempotency)
     _refund_seq: int = 0
 
     def issue_refund(self, account: str = "", amount: int = 0, reason: str = "",
@@ -40,17 +41,24 @@ class ServiceWorld(ToolWorld):
 
     def send_email(self, to: str = "", subject: str = "", body: str = "",
                    idempotency_key: str = "") -> dict[str, Any]:
-        """이메일 발송 — outbox 에 기록. 실 SMTP/ESP 연결 지점."""
+        """이메일 발송 — outbox 에 기록(idempotency_key 로 중복 발송 방지). 실 SMTP/ESP 연결 지점."""
+        if idempotency_key and idempotency_key in self._sent_keys:
+            return {"sent": True, "to": to, "subject": subject, "idempotent_replay": True}
         rec = {"sent": True, "to": to, "subject": subject, "body": body,
                "idempotency_key": idempotency_key}
         # TODO(실운영): 여기서 SMTP/SES 등으로 실제 발송.
         self.outbox.append(rec)
+        if idempotency_key:
+            self._sent_keys.add(idempotency_key)
         return {"sent": True, "to": to, "subject": subject}
 
     def audit(self) -> dict[str, Any]:
-        """관측용 — 처리된 환불·발송 이메일 요약."""
+        """관측용 — 처리된 환불·발송 이메일 요약. ★계좌 등 원본 PII 는 마스킹★(approvals 와 동일)."""
+        from .hitl import _mask
         return {
-            "refunds": list(self.refunds.values()),
+            "refunds": [{"refund_id": r["refund_id"], "account": _mask("account", r["account"]),
+                         "amount": r["amount"], "status": r["status"]}
+                        for r in self.refunds.values()],
             "outbox": [{"to": e["to"], "subject": e["subject"]} for e in self.outbox],
             "refund_count": len(self.refunds), "email_count": len(self.outbox),
         }

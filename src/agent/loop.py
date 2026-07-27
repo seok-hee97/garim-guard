@@ -131,6 +131,7 @@ async def run_episode(
 
         # ── 병렬 호출 순회 (개수 상한 + 이터레이션 내 deadline 재검사로 무한점유 방지) ──
         tool_results: list[ToolResult] = []
+        pending_ids: list[str] = []          # 이 배치에서 HITL 승인 대기로 적재된 액션(유실 방지)
         calls = result.tool_calls[:MAX_PARALLEL_CALLS]
         if len(result.tool_calls) > MAX_PARALLEL_CALLS:
             alog.event(_log, "warning", "parallel_calls_capped",
@@ -153,7 +154,7 @@ async def run_episode(
             except Exception as e:  # noqa: BLE001 — 게이트 실패 = fail-closed 차단
                 gate = Block(rule="gate.fail_closed", reason=f"{type(e).__name__}: {e}")
                 alog.event(_log, "error", "gate.fail_closed", tool=call.name, err=type(e).__name__)
-            # ── HITL 필요: 승인 큐가 있으면 액션을 적재하고 에피소드를 일시중단 ──
+            # ── HITL 필요: 승인 큐가 있으면 액션을 적재(배치 내 다건도 전부 적재 — 유실 방지) ──
             if isinstance(gate, HITLRequired):
                 if hitl_queue is not None:
                     pid = getattr(getattr(hooks, "principal", None), "id", "")
@@ -165,10 +166,12 @@ async def run_episode(
                     hop.gate_rule = gate.rule
                     hop.note = f"hitl_pending:{approval_id}"
                     ep.add(hop)
-                    ep.pending_approval = approval_id
-                    ep.finish_reason = "hitl_pending"
+                    pending_ids.append(approval_id)
+                    tool_results.append(ToolResult(
+                        call_id=call.call_id, name=call.name,
+                        content={"hitl_pending": approval_id}, is_error=True))
                     alog.event(_log, "info", "hitl_pending", tool=gate.tool, approval_id=approval_id)
-                    break            # 에피소드 일시중단(외부 승인 대기)
+                    continue         # 배치의 나머지 HITL 도 마저 적재
                 # 큐 없음(평가) → 기존처럼 HITL_DENY 차단으로 처리
                 gate = Block(rule=gate.rule, reason="HITL 승인 필요", decision="HITL_DENY")
             if isinstance(gate, Block):
@@ -231,8 +234,12 @@ async def run_episode(
             tool_results.append(ToolResult(
                 call_id=call.call_id, name=call.name, content=output, is_error=is_error))
 
-        # HITL 일시중단·예산초과면 되먹임 없이 종료(외부 승인/종료 대기).
-        if ep.finish_reason in ("hitl_pending", "deadline_exceeded"):
+        # 이 배치에 HITL 승인 대기가 있으면 에피소드 일시중단(모든 대기 id 를 기록).
+        if pending_ids:
+            ep.pending_approval = ",".join(pending_ids)
+            ep.finish_reason = "hitl_pending"
+            break
+        if ep.finish_reason == "deadline_exceeded":     # 이터레이션 내 예산초과
             break
         # 도구 결과를 다음 턴으로 되먹임 (정본: role="tool")
         messages.append(Msg(role="tool", tool_results=tool_results))
