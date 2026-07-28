@@ -73,19 +73,25 @@
 
 > ⚠️ **길이 누수 정직 표기(F1 0.99 하향 해석):** Nemotron 투영에서 양성=원문+인젝션 문장, 음성=그 문장 제거본이라 **양성이 체계적으로 더 길다**(test 평균 543자 vs 215자). **길이 단 하나로 학습한 LR 이 test F1 0.957**(직접 재계산) — 즉 ko_agentguard F1 0.994 의 상당 부분이 인젝션 의미가 아니라 **삽입량·문장 길이 shortcut**일 수 있다. contamination GREEN(중복 감사)은 label shortcut 부재를 보장하지 않는다. 따라서 이 표의 논지는 *"우리가 강한 탐지기를 만들었다"*가 아니라 **"길이 shortcut까지 얻은 최상의 CPU 탐지기조차 base64에 붕괴하고 한국어에 눈멀며, 강제는 게이트에 있어야 한다"** 로 읽어야 한다. 보강: 길이 일치 benign padding·동일길이 replacement·length-only baseline 병기 필요.
 
-## 4. DLP 싱크별 원본 PII 유출률 (H7)
+## 4. DLP — 계측 경계 분리 지표 (H7, 재구현 2026-07-28)
 
-외부 싱크(send_email/issue_refund) 인자에 고객 원본 PII 노출 비율. n=8 프로브.
+`eval/dlp_eval.py` 재구현: 단일 "싱크 유출률"을 **두 경계로 분리** 측정한다. n=8 프로브.
+- **model_view** = 모델이 낸 인자(tool_args)에 원본 PII — *"모델이 원본을 봤나"*. vault ON 목표 0%.
+- **unauthorized_sink** = 실행 인자의 **비-라우팅 필드**(body/subject/reason)에 원본 PII — *"비인가 필드로 샜나"*.
+  라우팅 식별자(to/account)의 복원은 설계상 정상이라 **유출로 세지 않는다**(트레이스에도 미직렬화).
 
-| 싱크 | dlp_vault OFF | dlp_vault ON |
-|---|---|---|
-| email | 0.875 | **0.0** |
-| account | 0.50 | **0.0** |
-| phone | 0.25 | **0.0** |
-| rrn | 0.0¹ | **0.0** |
+| PII | model_view OFF | model_view **ON** | unauthorized_sink OFF | unauthorized_sink **ON** |
+|---|---|---|---|---|
+| email | 0.75 | **0.0** | 0.125 | **0.0** |
+| account | 0.25 | **0.0** | 0.0 | **0.0** |
+| phone | 0.125 | **0.0** | 0.125 | **0.0** |
+| rrn | 0.0 | **0.0** | 0.0 | **0.0** |
 
-¹ 이 프로브에서 모델이 RRN 은 외부로 보내지 않음(account/email 유출). vault ON 은 **전 싱크 0%**(목표 달성).
-홉 간 coreference 일관성·왕복 복원은 유닛테스트로 검증(test_vault_scope 6/6).
+> **결과:** vault **ON 이면 두 경계 모두 전 PII 0%** — 모델은 토큰만 보고(model_view=0), 비인가 콘텐츠
+> 필드로도 원본이 새지 않는다(unauthorized_sink=0). OFF 에선 모델이 email 0.75·account 0.25 로 원본을
+> 인자에 실었다. 홉 간 coreference 일관성·왕복 복원은 유닛테스트로 검증(test_vault_scope 6/6).
+> ★ effective_args(복원된 실제 PII)는 in-memory 계측에만 쓰고 traces.jsonl 로는 직렬화하지 않는다
+> (PII-in-logs 회귀 차단, test_eval_metrics).
 
 > ⚠️ **계측 경계 재정의(중요):** 이 0%는 **트레이스에 기록된 모델 인자**(비식별 상태)를 검사한 값이다 — 즉 정확히 측정하는 것은 **"모델이 원본 PII 를 보지 못한다"**(참). 서비스의 egress 사전복원(DLP×TierA 수정)은 send_email 수신자·계좌를 **라우팅을 위해 실제 값으로 복원해 백엔드에 넘긴다** — 따라서 *"외부 도구가 원본 PII 를 전혀 받지 않는다"* 는 **성립하지 않는다**(수신자 주소는 본질적으로 데이터주체 식별자). 정직한 분리 지표: (a) 모델 입력 원본 PII 노출=0, (b) 승인된 라우팅 식별자(to/account)=실제값(설계), (c) subject/body/reason 의 **비인가** PII=차단(dlp_scan_args), (d) 비인가 목적지=authz/egress 차단. H7 의 유효 주장은 (a)·(c)·(d) 이지 "외부로 원본 0" 전체가 아니다.
 
@@ -168,6 +174,6 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 
 ## 7. 테스트 / 재현성
 
-- 유닛/통합 테스트 **70 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**. (CI core 는 `--ignore=test_dlp_defenses` 로 64 통과; presidio 없으면 그 6건이 빠진다.)
+- 유닛/통합 테스트 **77 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**·**군집McNemar 교집합·DLP경계분리·트레이스 PII 미직렬화**. (CI core 는 `--ignore=test_dlp_defenses` 로 **71 통과**; presidio 없으면 그 6건이 빠진다.)
 - 재현 범위: **헤드라인 애블레이션은 라이브 OpenAI 호출**(temp=0 근사 재현 — gpt-4o-mini는 bit-exact 보장 안 함). 카세트 record/replay는 FakeProvider 경로 전용. DLP·channel_gap·R6/R7·e5·shieldgemma는 RunPod GPU 스크립트 산출로 단일 명령에 미포함.
 - GPU 실측 **완료**(§6c): Kanana P1a 격차 1.0 · ShieldGemma EN-KO 0.268 · R6 span 0.985 · R7 Macro 0.709 · e5 교차언어. (⚠️ P1b 난독화 붕괴는 사전등록 미달 0.1 — 정직 보고)
