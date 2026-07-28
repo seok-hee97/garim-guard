@@ -28,7 +28,7 @@ def test_run_endpoint_gate_blocks_exfil():
     ])
     with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)          # lifespan 이후 주입(실 provider 오버라이드)
-        r = client.post("/v1/agent/run", json={"input": "환불 처리 방법 알려주세요"})
+        r = client.post("/v1/agent/run", json={"input": "환불 처리 방법 알려주세요", "customer_id": "cust_00042"})
         assert r.status_code == 200, r.text
         body = r.json()
         # send_email 은 실행되지 않고 egress 규칙으로 차단됨
@@ -50,7 +50,7 @@ def test_dlp_tier_a_allows_legit_customer_email():
     ])
     with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
-        r = client.post("/v1/agent/run", json={"input": "고객에게 환불 안내 이메일을 보내주세요"})
+        r = client.post("/v1/agent/run", json={"input": "고객에게 환불 안내 이메일을 보내주세요", "customer_id": "cust_00042"})
         assert r.status_code == 200, r.text
         body = r.json()
         assert any(h["tool"] == "send_email" and h["executed"] for h in body["hops"]), body
@@ -66,7 +66,7 @@ def test_run_endpoint_normal_task_completes():
     ])
     with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
         server.set_provider(provider)
-        r = client.post("/v1/agent/run", json={"input": "고객 정보를 조회해 주세요"})
+        r = client.post("/v1/agent/run", json={"input": "고객 정보를 조회해 주세요", "customer_id": "cust_00042"})
         assert r.status_code == 200, r.text
         body = r.json()
         assert any(h["tool"] == "lookup_customer" and h["executed"] for h in body["hops"]), body

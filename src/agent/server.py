@@ -21,7 +21,9 @@ import copy
 import hashlib
 import json
 import os
+import time
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -43,6 +45,39 @@ SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True}
 
 # 승인 만료(초) — 오래된 HITL 승인이 정책 변경 후 실행되지 않도록. env 로 조정 가능.
 APPROVAL_TTL_S: float = float(os.getenv("APPROVAL_TTL_S", "3600"))
+IDEM_MAXSIZE: int = int(os.getenv("IDEM_MAXSIZE", "10000"))
+IDEM_TTL_S: float = float(os.getenv("IDEM_TTL_S", "86400"))     # 요청 멱등성 창(기본 24h)
+
+
+class _IdemStore:
+    """요청 멱등성 저장소 — LRU maxsize + TTL. 평범한 dict 는 키마다 RunResponse 를 영구 보관해
+    메모리가 무한 성장(가용성/DoS)하므로, 크기 상한 LRU 축출 + 만료를 강제한다(리뷰)."""
+
+    def __init__(self, maxsize: int = IDEM_MAXSIZE, ttl_s: float = IDEM_TTL_S):
+        self._d: "OrderedDict[Any, dict]" = OrderedDict()
+        self._maxsize = maxsize
+        self._ttl_s = ttl_s
+
+    def get(self, key: Any) -> dict | None:
+        e = self._d.get(key)
+        if e is None:
+            return None
+        if time.time() - e.get("created_at", 0) > self._ttl_s:
+            self._d.pop(key, None)                 # 만료 → miss
+            return None
+        self._d.move_to_end(key)
+        return e
+
+    def set(self, key: Any, val: dict) -> None:
+        v = dict(val); v["created_at"] = time.time()
+        self._d[key] = v
+        self._d.move_to_end(key)
+        while len(self._d) > self._maxsize:
+            self._d.popitem(last=False)            # LRU 축출
+
+    def pop(self, key: Any, default: Any = None) -> Any:
+        return self._d.pop(key, default)
+
 
 _state: dict[str, Any] = {}
 
@@ -60,7 +95,7 @@ def _build_rail() -> Any:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = alog.configure(os.getenv("LOG_LEVEL", "INFO"))
-    if os.getenv("APP_ENV") != "prod":                 # prod 는 오케스트레이터 env 주입만 신뢰
+    if os.getenv("APP_ENV", "").strip().lower() != "prod":   # prod 는 오케스트레이터 env 주입만 신뢰
         from dotenv import load_dotenv
         load_dotenv(ROOT / ".env")
 
@@ -76,7 +111,7 @@ async def lifespan(app: FastAPI):
     # 요청 멱등성용 정책 지문(정책이 바뀌면 같은 키라도 다른 요청으로 취급).
     _state["policy_hash"] = hashlib.sha256(
         json.dumps(policy, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()[:16]
-    _state["idem"] = {}    # (principal_id, Idempotency-Key) → {hash, status, response}
+    _state["idem"] = _IdemStore()    # (principal_id, Idempotency-Key) → {hash, status, response} (LRU+TTL)
 
     # 상태 있는 백엔드(부작용·idempotency) + HITL 승인 큐 + principal 레지스트리(싱글턴).
     world = service_world()
@@ -208,8 +243,17 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
     episode_id = uuid.uuid4().hex[:12]
     alog.bind(episode_id=episode_id)
     principal = _require(x_api_key, {"agent"})
-    if req.customer_id:                       # 대화-고객 바인딩(P1) — 지정 시 스코프 한정
+    # ★default-secure 고객 바인딩(P1)★ — flat scope confused-deputy 를 기본 경로에서 막는다:
+    #   customer_id 지정 → 그 고객으로 한정. 미지정이고 principal 이 단일 고객 → 암묵 바인딩.
+    #   미지정인데 다중 고객 담당 → 400(대상 고객 불명확 시 쓰기 도구를 허용하지 않음).
+    if req.customer_id:
         principal = _bind_customer(principal, req.customer_id, _state["world"])
+    elif len(principal.customer_ids) == 1:
+        principal = _bind_customer(principal, next(iter(principal.customer_ids)), _state["world"])
+    elif len(principal.customer_ids) > 1:
+        raise HTTPException(status_code=400, detail={
+            "error": "customer_id_required",
+            "reason": "principal 이 다수 고객을 담당 — 대상 고객을 customer_id 로 지정하세요"})
 
     # ── ★요청 멱등성(P0-2)★ — (principal, Idempotency-Key)로 요청 저장. canonical hash 로
     #    같은 키/같은 요청은 원 응답 재생, 같은 키/다른 요청은 409, 진행중 재요청도 409. ──
@@ -232,7 +276,7 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
                 raise HTTPException(status_code=409, detail={
                     "error": "request_in_progress", "idempotency_key": idempotency_key})
             return prev["response"]         # 완료된 원 응답 재생(부작용 재실행 없음)
-        idem_store[store_key] = {"hash": req_hash, "status": "in_flight", "response": None}
+        idem_store.set(store_key, {"hash": req_hash, "status": "in_flight", "response": None})
 
     hooks = DefenseHooks(_state["policy"], dict(SERVER_DEFENSES),
                          rail=_state["rail"], principal=principal)
@@ -261,7 +305,12 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
         latency_ms=ep.total_latency_ms,
     )
     if store_key is not None:
-        idem_store[store_key] = {"hash": req_hash, "status": "done", "response": resp}
+        # ★일시적 실패(provider 429/timeout·deadline)는 굳히지 않는다★ — 예외 경로와 동일하게
+        #   키를 비워 재시도가 재실행되게 한다(리뷰 #1). 종결 상태만 캐시.
+        if ep.finish_reason in ("error", "deadline_exceeded"):
+            idem_store.pop(store_key, None)
+        else:
+            idem_store.set(store_key, {"hash": req_hash, "status": "done", "response": resp})
     return resp
 
 
@@ -299,9 +348,15 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
             spec = _state["policy"].get("tools", {}).get("issue_refund", {}).get("args", {})
             cap = (spec.get("amount", {}) or {}).get("max")
             amt = appr.args.get("amount")
-            if cap is not None and isinstance(amt, (int, float)) and amt > cap:
-                raise HTTPException(status_code=409, detail={
-                    "error": "amount_exceeds_current_limit", "amount": amt, "current_max": cap})
+            if cap is not None:
+                try:                                     # 문자열 '1000000' 도 정규화(생성 게이트가 허용)
+                    amt_num = int(amt)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=409, detail={   # 비수치 = fail-closed
+                        "error": "refund_amount_not_numeric", "amount": amt})
+                if amt_num > cap:
+                    raise HTTPException(status_code=409, detail={
+                        "error": "amount_exceeds_current_limit", "amount": amt_num, "current_max": cap})
 
     world = _state["world"]
 

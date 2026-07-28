@@ -41,7 +41,7 @@
 요청 (+X-API-Key → principal)                         ← authN/authZ
   → ╔ before_model ╗ DLP 비식별 · plea/spotlight · 분류기[LOG-ONLY]
   → provider.generate  ★모든 functionCall part 순회 · async · 재시도★
-  → ╔ after_model  ╗ per-hop 모더레이션 (fail-closed)
+  → ╔ after_model  ╗ pass-through (의도적 no-op; provider 자체 안전필터에 위임 — 분류기 강제 아님)
   → ╔ before_tool  ╗ ★결정적 게이트★                   ← Tier A + authz + HITL
         위험티어 · allowlist · 인자 스키마 · egress DLP scan · principal 바인딩
         └ 비가역 도구 → HITL 승인 큐(hitl_pending)
@@ -106,9 +106,9 @@ KEY='X-API-Key: demo-agent-key'      # ★fail-closed: 키 없으면 401★
 curl -s localhost:8000/healthz                                   # {"status":"ok"}
 curl -s localhost:8000/readyz                                    # provider 준비 여부
 
-# 정상 조회 (PII는 모델이 보기 전 토큰화됨)
+# 정상 조회 (PII는 모델이 보기 전 토큰화됨). ★다중 고객 담당 키는 customer_id 필수(대화-고객 바인딩)★
 curl -s -XPOST localhost:8000/v1/agent/run -H "$KEY" -H 'content-type: application/json' \
-     -d '{"input":"010-1234-5678 고객 환불 상태를 조회해 주세요"}'
+     -d '{"input":"010-1234-5678 고객 환불 상태를 조회해 주세요","customer_id":"cust_00042"}'
 ```
 
 **HITL 환불 승인 흐름 (비가역 도구는 사람 승인 후 실행):**
@@ -116,7 +116,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H "$KEY" -H 'content-type: applicati
 ```bash
 # 1) 환불 요청 → 즉시 실행 안 됨. status=hitl_pending + pending_approval(id) 반환
 curl -s -XPOST localhost:8000/v1/agent/run -H "$KEY" -H 'content-type: application/json' \
-     -d '{"input":"이 고객 환불 처리해 주세요"}'
+     -d '{"input":"이 고객 환불 처리해 주세요","customer_id":"cust_00042"}'
 #    → {"status":"hitl_pending","pending_approval":"appr_00001", ...}
 
 # ★직무분리: 승인=demo-approver-key, 감사=demo-auditor-key (agent 키로는 자기승인 403)★
@@ -134,7 +134,7 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 90 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 92 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -157,7 +157,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
 | **결정적 게이트 (Tier A)** | 위험티어·allowlist·엄격 스키마·egress DLP scan. 문자열 미판독 | [policy.py](src/agent/policy.py) |
 | **HITL 승인 큐** | 비가역 도구는 `hitl_pending` → 사람 승인 후 실행. **트랜잭션적**(백엔드 실패 시 재시도) | [hitl.py](src/agent/hitl.py) |
 | **상태 백엔드 + idempotency** | 환불 원장·이메일 outbox·이중실행 방지 | [backend.py](src/agent/backend.py) |
-| **authN/authZ** | `X-API-Key`→principal, 수신자/계좌는 담당 고객의 등록값이어야(**confused-deputy 구조적 차단**) | [authz.py](src/agent/authz.py) |
+| **authN/authZ** | `X-API-Key`→principal, 수신자/계좌는 등록 고객값이어야(미등록 주소 차단). `customer_id` 바인딩 시 **한 고객으로 스코프 한정 → 타-고객 confused-deputy 구조적 차단** | [authz.py](src/agent/authz.py) |
 | **DLP 볼트** | 요청 스코프 가역 토큰화(5종), 최종 응답만 복원, egress는 토큰 유지 | [dlp/vault.py](src/dlp/vault.py) |
 | **provider 복원력** | async 네이티브 + tenacity 재시도(429/5xx) + 벽시계 타임아웃 | [_resilience.py](src/providers/_resilience.py) |
 | **fail-closed 4 seam · 구조적 로깅(PII 미로깅) · deadline 예산** | | [loop.py](src/agent/loop.py)·[log.py](src/agent/log.py) |
@@ -172,7 +172,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **90 통과** (.venv; CI-core 84, presidio 6) |
+| 유닛/통합 테스트 | ✅ **92 통과** (.venv; CI-core 86, presidio 6) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 

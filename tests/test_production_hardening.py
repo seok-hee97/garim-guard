@@ -112,11 +112,11 @@ def test_http_idempotency_same_key_same_request_replays():
     with TestClient(server.app, headers=AGENT) as client:
         server.set_provider(_send_email_provider())
         h = {"Idempotency-Key": "req-1"}
-        r1 = client.post("/v1/agent/run", json={"input": "고객에게 안내 메일 보내줘"}, headers=h)
+        r1 = client.post("/v1/agent/run", json={"input": "고객에게 안내 메일 보내줘", "customer_id": "cust_00042"}, headers=h)
         assert r1.status_code == 200
         n1 = client.get("/v1/audit", headers={"X-API-Key": "demo-auditor-key"}).json()["email_count"]
         # 같은 키·같은 요청 재시도 → 재실행 없이 원 응답, outbox 불변
-        r2 = client.post("/v1/agent/run", json={"input": "고객에게 안내 메일 보내줘"}, headers=h)
+        r2 = client.post("/v1/agent/run", json={"input": "고객에게 안내 메일 보내줘", "customer_id": "cust_00042"}, headers=h)
         assert r2.status_code == 200
         assert r2.json()["episode_id"] == r1.json()["episode_id"]      # 원 응답 재생
         n2 = client.get("/v1/audit", headers={"X-API-Key": "demo-auditor-key"}).json()["email_count"]
@@ -127,9 +127,9 @@ def test_http_idempotency_same_key_different_request_409():
     with TestClient(server.app, headers=AGENT) as client:
         server.set_provider(_send_email_provider())
         h = {"Idempotency-Key": "req-2"}
-        r1 = client.post("/v1/agent/run", json={"input": "메일 A"}, headers=h)
+        r1 = client.post("/v1/agent/run", json={"input": "메일 A", "customer_id": "cust_00042"}, headers=h)
         assert r1.status_code == 200
-        r2 = client.post("/v1/agent/run", json={"input": "메일 B(다른 요청)"}, headers=h)
+        r2 = client.post("/v1/agent/run", json={"input": "메일 B(다른 요청)", "customer_id": "cust_00042"}, headers=h)
         assert r2.status_code == 409                                   # 같은 키/다른 요청
 
 
@@ -152,6 +152,27 @@ def test_customer_binding_blocks_other_customer_send():
         assert any("authz" in r for r in body["blocked_rules"])
 
 
+def test_multicustomer_principal_requires_customer_id():
+    """★default-secure★ — 다중 고객 담당 principal 은 customer_id 없이 실행 불가(400).
+    flat scope confused-deputy 를 기본 경로에서 차단(리뷰)."""
+    with TestClient(server.app, headers=AGENT) as client:      # 데모 agent = 고객 3명
+        server.set_provider(_send_email_provider())
+        r = client.post("/v1/agent/run", json={"input": "메일"})   # customer_id 없음
+        assert r.status_code == 400 and "customer_id" in str(r.json())
+
+
+def test_idem_store_bounded_lru_and_ttl():
+    """요청 멱등성 저장소는 maxsize LRU 축출 + TTL 만료(무한 성장 방지)."""
+    s = server._IdemStore(maxsize=2, ttl_s=1000)
+    s.set(("p", "k1"), {"hash": "h", "status": "done", "response": 1})
+    s.set(("p", "k2"), {"hash": "h", "status": "done", "response": 2})
+    s.set(("p", "k3"), {"hash": "h", "status": "done", "response": 3})   # k1 축출
+    assert s.get(("p", "k1")) is None and s.get(("p", "k3"))["response"] == 3
+    exp = server._IdemStore(maxsize=10, ttl_s=0.0)                        # 즉시 만료
+    exp.set(("p", "k"), {"hash": "h", "status": "done", "response": 1})
+    assert exp.get(("p", "k")) is None
+
+
 def test_customer_binding_unauthorized_customer_403():
     with TestClient(server.app, headers=AGENT) as client:
         server.set_provider(_send_email_provider())
@@ -167,7 +188,7 @@ def test_approval_ttl_expiry_blocks_execution(monkeypatch):
     monkeypatch.setattr(server, "APPROVAL_TTL_S", 0.0)     # 즉시 만료
     with TestClient(server.app, headers=AGENT) as client:
         server.set_provider(provider)
-        aid = client.post("/v1/agent/run", json={"input": "환불"}).json()["pending_approval"]
+        aid = client.post("/v1/agent/run", json={"input": "환불", "customer_id": "cust_00042"}).json()["pending_approval"]
         rr = client.post(f"/v1/approvals/{aid}", json={"decision": "approve"}, headers=APPROVER)
         assert rr.status_code == 409 and "expired" in str(rr.json())
         assert client.get("/v1/audit", headers=AUDITOR).json()["refund_count"] == 0
