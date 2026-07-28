@@ -35,7 +35,7 @@ from src.config import ROOT, gen_config, load_policy
 from eval.build_dataset import CUSTOMERS, STYLES, SCENARIOS as V1_SCENARIOS, _payload, \
     ATTACKER_EMAIL, ATTACKER_ACCT
 from eval.harness import run_case, score_attack, score_utility
-from eval.run import ARMS, _build_rail, _run_id
+from eval.run import ARMS, _build_rail, _run_id, _provenance
 from eval.stats import cluster_mcnemar
 
 def _out_paths(provider: str) -> tuple[Path, Path]:
@@ -253,9 +253,10 @@ def _analyze(rows: list[dict], out_md: Path) -> str:
 
 async def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--provider", default="openai")
+    ap.add_argument("--provider", default="openai", choices=["openai", "gemini"])
     ap.add_argument("--arms", default="none,tier_a")
-    ap.add_argument("--rail", default="ko_agentguard")
+    ap.add_argument("--rail", default="ko_agentguard",
+                    choices=["ko_agentguard", "heuristic", "kanana", "shieldgemma", "e5"])
     ap.add_argument("--limit", type=int, default=0, help="시나리오 수 상한(교차 provider 확인용 축소)")
     ap.add_argument("--report-only", default="", help="재실행 없이 기존 runs.v0.2.*.jsonl 재집계")
     args = ap.parse_args()
@@ -281,10 +282,22 @@ async def main() -> int:
     actual_rail = getattr(rail, "name", type(rail).__name__)   # 요청 vs 실제 레일 분리(R5-#1)
     arms = [a for a in args.arms.split(",") if a in ARMS]
     model = policy["provider"].get(args.provider, {}).get("model", "")
-    run_id = "v0.2." + _run_id(args.provider, model, args.rail, "test")
 
     out_runs, out_md = _out_paths(args.provider)
     attacks, utility = build_cases(args.limit)
+    # ★계보 지문(R6-#3)★ — v0.1(eval/run.py)과 동일하게 policy/rail 아티팩트 해시를 run_id·각 행에
+    #   각인해, 정책·레일이 바뀐 실행이 조용히 섞이지 않게 한다. 단 v0.2 는 split 파일이 아니라
+    #   build_cases() 로 합성하므로 dataset_hash 는 ★실제 생성된 케이스★에서 계산한다(파일 해시 오인 방지).
+    prov = _provenance(policy, "test", args.rail)
+    _ds = hashlib.sha256(
+        json.dumps([attacks, utility], sort_keys=True, ensure_ascii=False, default=str).encode()
+    ).hexdigest()[:16]
+    prov["dataset_hash"] = _ds                       # 파일 대신 합성 케이스 지문으로 대체
+    _art6 = (prov.get("rail_artifact_hash") or "norail")[:6]
+    run_id = ("v0.2." + _run_id(args.provider, model, args.rail, "test")
+              + f".{_ds[:6]}.{prov['policy_hash'][:6]}.{_art6}")
+    _meta = {"run_id": run_id, "provider": args.provider, "model": model, "rail": args.rail,
+             "actual_rail": actual_rail, "split": "test", **prov}
     print(f"v0.2 독립 시나리오 {len(utility)} × 스타일 {len(STYLES)} = 공격 {len(attacks)} "
           f"· benign {len(utility)} · arms={arms} · run_id={run_id}\n")
 
@@ -296,15 +309,13 @@ async def main() -> int:
             ep = await run_case(case, provider, policy, defenses, rail=rail, customers=CUSTOMERS)
             sc = score_attack(case, ep)
             exe_c += int(bool(sc["executed"])); err_c += int(sc["finish_reason"] == "error")
-            rows.append({"arm": arm, "kind": "attack", "run_id": run_id, "provider": args.provider,
-                         "model": model, "rail": args.rail, "actual_rail": actual_rail, "split": "test", **sc})
+            rows.append({"arm": arm, "kind": "attack", **_meta, **sc})
         uc = 0
         for case in utility:
             ep = await run_case(case, provider, policy, defenses, rail=rail, customers=CUSTOMERS)
             sc = score_utility(case, ep)
             uc += int(bool(sc["completed"]))
-            rows.append({"arm": arm, "kind": "utility", "run_id": run_id, "provider": args.provider,
-                         "model": model, "rail": args.rail, "actual_rail": actual_rail, "split": "test", **sc})
+            rows.append({"arm": arm, "kind": "utility", **_meta, **sc})
         print(f"  {arm:16s} exe={exe_c}/{len(attacks)}  BPR={uc}/{len(utility)}  err={err_c}")
 
     out_runs.parent.mkdir(parents=True, exist_ok=True)

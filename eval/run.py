@@ -38,7 +38,7 @@ ARMS: dict[str, dict] = {
 }
 
 
-def _provenance(policy: dict, split: str) -> dict:
+def _provenance(policy: dict, split: str, rail: str = "ko_agentguard") -> dict:
     """실행 계보 — 코드/데이터/정책/SDK 가 바뀌면 결과가 다르다는 것을 각 행에 각인.
 
     run_id(조건 슬러그)만으로는 dataset/policy/commit 변경을 구분 못 해 stale 결과를 완료로
@@ -65,13 +65,23 @@ def _provenance(policy: dict, split: str) -> dict:
         sdk = {p: version(p) for p in ("google-genai", "openai") if _safe_ver(p)}
     except Exception:  # noqa: BLE001
         sdk = {}
-    # 레일 학습 아티팩트 지문(R5-#1) — 아티팩트가 바뀌면 결과도 다르므로 계보에 포함.
-    rail_art = ROOT / "train" / "artifacts" / "ko-agentguard-lr.joblib"
-    rail_hash = _sha(rail_art.read_bytes()) if rail_art.exists() else ""
+    # ★레일별 지문(R6-#3)★ — 선택한 레일에 맞는 아티팩트/모델만 계보에 넣는다.
+    #   joblib 레일(ko_agentguard/e5)은 해당 파일 해시, HF 모델 레일(kanana/shieldgemma)은
+    #   모델 id, heuristic 은 없음. (무관한 ko_agentguard joblib 을 항상 넣던 결함 수정.)
+    _joblib = {"ko_agentguard": "ko-agentguard-lr.joblib", "e5": "e5-lr-head.joblib"}
+    _model = {"kanana": "kakaocorp/kanana-safeguard-prompt-2.1b",
+              "shieldgemma": "google/shieldgemma-2b"}
+    rail_hash, rail_ref = "", ""
+    if rail in _joblib:
+        p = ROOT / "train" / "artifacts" / _joblib[rail]
+        rail_hash = _sha(p.read_bytes()) if p.exists() else ""
+    elif rail in _model:
+        rail_ref = _model[rail]
     return {
         "dataset_hash": _sha(ds),
         "policy_hash": _sha(_json.dumps(policy, sort_keys=True, default=str).encode()),
-        "rail_artifact_hash": rail_hash,
+        "rail_artifact_hash": rail_hash,   # joblib 레일 파일 해시(해당 레일만)
+        "rail_model_ref": rail_ref,        # HF 모델 레일 id(kanana/shieldgemma)
         "commit": commit,
         "sdk": sdk,
     }
@@ -200,9 +210,11 @@ async def _safe_run_case(case, provider, policy, defenses, *, rail, customers, a
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", default="test")
-    ap.add_argument("--provider", default="openai")
+    ap.add_argument("--provider", default="openai",
+                    choices=["openai", "gemini"])   # 오타/미지원 값을 argparse 가 즉시 거부
     ap.add_argument("--arms", default=",".join(ARMS))
     ap.add_argument("--rail", default="ko_agentguard",
+                    choices=["ko_agentguard", "heuristic", "kanana", "shieldgemma", "e5"],
                     help="ko_agentguard|heuristic|kanana|shieldgemma|e5 (GPU 레일은 RunPod)")
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
@@ -228,7 +240,7 @@ async def main() -> int:
     RUNS.parent.mkdir(parents=True, exist_ok=True)
     # 실행 조건 메타 — 결과 행에 각인해 재현/재개 시 조건 혼입을 막는다.
     model = policy["provider"].get(args.provider, {}).get("model", "")
-    prov = _provenance(policy, args.split)
+    prov = _provenance(policy, args.split, args.rail)
     # ★run_id 에 계보 지문 포함(R3-6)★ — 데이터·정책이 다른 실행은 run_id 자체가 달라져,
     #   ablation 의 run_id 필터가 신·구 결과를 분리한다(동결 backfill 데이터와 자동 격리).
     _art6 = (prov.get("rail_artifact_hash") or "norail")[:6]

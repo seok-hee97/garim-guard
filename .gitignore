@@ -2,10 +2,12 @@
 .env
 .env.*
 !.env.example
-# 대용량 학습 가중치 (klue 라이선스 미명시 → 재배포 금지, 로컬 보관만)
-models/
+# 자체학습 레일 가중치 (ko_agentguard·e5) — CC-BY-4.0 데이터 학습 → 재배포 가능하나
+#   대용량 바이너리라 git 위생상 제외. 공개 HF(cycloevan/safeagent-kr)에 있음 → scripts.fetch_rail 로 취득.
 train/artifacts/*/
 train/artifacts/*.joblib
+# klue 파생 가중치 (R6 PII·R7 유해성) — CC-BY-SA 상속·라이선스 고려로 공개 HF 배포 지양, 로컬 보관만
+models/
 # 캐시/런타임
 .venv/
 __pycache__/

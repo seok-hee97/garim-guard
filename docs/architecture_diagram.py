@@ -76,7 +76,7 @@ def build() -> graphviz.Digraph:
         node(
             c,
             "before_model",
-            "╔ before_model ╗\\nDLP 비식별(vault)·spotlight\\n·Prompt Guard 2 (LOG-ONLY)",
+            "╔ before_model ╗\\nDLP 비식별(vault)·spotlight\\n·인젝션 레일/분류기 (LOG-ONLY)",
             C_DLP,
         )
         node(
@@ -159,7 +159,7 @@ def build() -> graphviz.Digraph:
     with g.subgraph(name="cluster_legend") as lg:
         lg.attr(label="범례", style="rounded", color="#90a4ae", fontname=FONT, fontsize="12", labeljust="l")
         node(lg, "lg_gate", "진짜 방어(결정적·구현): Tier A 게이트·Tier B taint", C_GATE)
-        node(lg, "lg_tele", "텔레메트리(LOG-ONLY)·미구현: Prompt Guard·ShieldGemma·Tier C(설계전용)·after_model(no-op)", C_TELE)
+        node(lg, "lg_tele", "텔레메트리(LOG-ONLY)·미구현: 분류기(Kanana·ShieldGemma)·Tier C(설계전용)·after_model(no-op)", C_TELE)
         node(lg, "lg_dlp", "DLP/PII: PIIVault·Presidio 한국어 인식기", C_DLP)
         node(lg, "lg_model", "LLM provider(구현): Gemini·OpenAI  (Gemma provider 없음)", C_MODEL)
         lg.edge("lg_gate", "lg_tele", style="invis")

@@ -34,7 +34,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 | **구조적 로깅** | JSON 로그 + `episode_id` 상관(contextvar), ★PII 미로깅★ | [log.py](../src/agent/log.py) |
 | **DLP 배선** | `vault.restore`(최종 응답만)·egress DLP scan(외부싱크 잔여 원본 PII 차단)·after_tool fail-closed | loop.py·policy.py |
 | **Tier A 엄격 스키마** | 미선언 인자 거부 + 정수 암묵 형변환 거부 (gated: 서비스 on / 평가 off → 재현성 보존) | policy.py |
-| **테스트** | 107 통과(CI-core 101·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
+| **테스트** | 108 통과(CI-core 102·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
 
 **라이브 검증(2026-07):** 실 gpt-4o-mini 로 `POST /v1/agent/run` → `lookup_customer(phone=<KR_PHONE_1>)`
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
@@ -87,18 +87,19 @@ flowchart TB
       BT --> AT[after_tool · taint/DLP]
     end
     LOOP --> BM
-    BT -->|requires_hitl| HITL[HITL 승인 큐 · checkpoint/resume]
+    BT -->|requires_hitl| HITL[HITL 승인 큐 · 보류-액션 실행]
     BT --> TOOL[실도구 어댑터 · timeout·idempotency-key]
     TOOL --> AT --> LOOP
     LOOP -->|종료 시| VAULT
-    BM & BT & AT -.emit.-> OBS[구조적 로그·메트릭·트레이스·경보]
+    BM & BT & AT -.emit.-> OBS[구조적 로그·트레이스]
 
     classDef done fill:#1b5e20,color:#fff
     classDef todo fill:#5d4037,color:#fff
-    class BM,GEN,BT,AT,VAULT,LOOP,PRV,POL,RAIL,OBS,AUTH,HITL done
+    class BM,GEN,BT,AT,VAULT,LOOP,PRV,POL,RAIL,AUTH,HITL,OBS done
     class RL,TOOL todo
 ```
 녹색=구현됨 · 갈색=남은 로드맵(RL=레이트리밋/백프레셔, TOOL=실 외부 API 어댑터).
+OBS 는 **구조적 로그·트레이스만 구현** — 메트릭 집계·경보는 로드맵. HITL 은 **보류-액션 실행까지 구현** — 전체 대화 checkpoint/resume 은 로드맵(아래 §미구현 참조).
 
 ---
 

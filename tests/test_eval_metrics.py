@@ -28,6 +28,25 @@ def _rows():
     ]
 
 
+def test_fetch_rail_places_remote_at_local_dest(tmp_path, monkeypatch):
+    """★fetch_rail 원격/로컬 경로 분리(R6-#1)★ — HF models/ 원격을 train/artifacts/ 로컬로
+    배치하고 체크섬을 검증한다. 네트워크 없이 hf_hub_download 를 목킹."""
+    import hashlib
+    import scripts.fetch_rail as fr
+    fake = tmp_path / "cache" / "models" / "ko-agentguard-lr.joblib"
+    fake.parent.mkdir(parents=True)
+    fake.write_bytes(b"REAL-ARTIFACT-BYTES")
+    sha = hashlib.sha256(fake.read_bytes()).hexdigest()
+    dest = tmp_path / "artifacts"
+    monkeypatch.setattr(fr, "DEST", dest)
+    monkeypatch.setattr(fr, "ARTIFACTS", {"ko-agentguard-lr.joblib": ("models/ko-agentguard-lr.joblib", sha)})
+    import huggingface_hub
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **kw: str(fake))
+    assert fr.main() == 0
+    placed = dest / "ko-agentguard-lr.joblib"                # ★로컬 최종 경로(models/ 아님)★
+    assert placed.exists() and placed.read_bytes() == b"REAL-ARTIFACT-BYTES"
+
+
 def test_eval_rail_fail_loud_no_silent_fallback():
     """★평가 레일 fail-loud(R5-#1)★ — 아티팩트 없으면 조용히 HeuristicRail 로 폴백해 결과에
     잘못된 레일명(ko_agentguard)을 남기지 않는다. 명시적 heuristic 은 정상."""

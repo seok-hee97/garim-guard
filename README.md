@@ -66,7 +66,8 @@ pip install -r requirements.core.txt          # 서비스+평가 코어 (presidi
 cp .env.example .env                           # GEMINI_API_KEY 또는 OPENAI_API_KEY 기입
 python -m scripts.check_env                    # 키·모델·RPM 점검
 
-# ★평가 레일 아티팩트(clean clone 필수)★ — ko_agentguard 는 gitignore(재배포 제약)라 저장소에 없다.
+# ★평가 레일 아티팩트(clean clone 필수)★ — ko_agentguard 는 대용량 바이너리(git 위생)라 저장소에 없다.
+# (라이선스 제약이 아니라 용량 문제 — CC-BY-4.0 데이터로 자체학습해 공개 HF 에 재배포돼 있다.)
 # 평가(eval.run)는 아티팩트가 없으면 fail-loud 하므로(잘못된 레일명 기록 방지), 아래로 받는다:
 python -m scripts.fetch_rail                    # HF cycloevan/safeagent-kr → train/artifacts/ (체크섬 검증)
 #   sha256(ko-agentguard-lr.joblib)=10cca996f7f193ffcd633dc8cb98e07c4a330db0cb4424400952c4838dadb2c8
@@ -140,7 +141,7 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 107 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 108 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -182,7 +183,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **107 통과** (.venv; CI-core 101, presidio 6) |
+| 유닛/통합 테스트 | ✅ **108 통과** (.venv; CI-core 102, presidio 6) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 
