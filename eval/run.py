@@ -38,6 +38,71 @@ ARMS: dict[str, dict] = {
 }
 
 
+def _provenance(policy: dict, split: str) -> dict:
+    """실행 계보 — 코드/데이터/정책/SDK 가 바뀌면 결과가 다르다는 것을 각 행에 각인.
+
+    run_id(조건 슬러그)만으로는 dataset/policy/commit 변경을 구분 못 해 stale 결과를 완료로
+    오인할 수 있다(리뷰 지적). 아래를 함께 기록해 감사·재현 시 불일치를 즉시 드러낸다."""
+    import hashlib
+    import subprocess
+    import json as _json
+
+    def _sha(b: bytes) -> str:
+        return hashlib.sha256(b).hexdigest()[:16]
+
+    ds = b""
+    for kind in ("attacks", "utility"):
+        p = DATA / f"{kind}.{split}.jsonl"
+        if p.exists():
+            ds += p.read_bytes()
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+                                capture_output=True, text=True, timeout=5).stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001 — git 없거나 비-repo
+        commit = "unknown"
+    try:
+        from importlib.metadata import version
+        sdk = {p: version(p) for p in ("google-genai", "openai") if _safe_ver(p)}
+    except Exception:  # noqa: BLE001
+        sdk = {}
+    return {
+        "dataset_hash": _sha(ds),
+        "policy_hash": _sha(_json.dumps(policy, sort_keys=True, default=str).encode()),
+        "commit": commit,
+        "sdk": sdk,
+    }
+
+
+def _safe_ver(pkg: str) -> bool:
+    try:
+        from importlib.metadata import version
+        version(pkg); return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _warn_provenance_drift(prov: dict) -> None:
+    """기존 runs.jsonl 행의 계보와 현재가 다르면 경고 — 코드/데이터 변경 후 stale 재사용 방지."""
+    if not RUNS.exists():
+        return
+    seen_ds, seen_commit = set(), set()
+    for l in RUNS.read_text(encoding="utf-8").splitlines():
+        if not l.strip():
+            continue
+        try:
+            r = json.loads(l)
+        except json.JSONDecodeError:
+            continue
+        if r.get("dataset_hash"):
+            seen_ds.add(r["dataset_hash"])
+        if r.get("commit"):
+            seen_commit.add(r["commit"])
+    drift_ds = seen_ds - {prov["dataset_hash"]}
+    if drift_ds:
+        print(f"⚠️ dataset_hash 불일치: 기존 {sorted(seen_ds)} vs 현재 {prov['dataset_hash']} — "
+              "데이터가 바뀌었으면 새 run_id 로 분리하거나 runs.jsonl 을 비우세요.")
+
+
 def _run_id(provider: str, model: str, rail: str, split: str) -> str:
     """실험 조건 결정적 슬러그 — 같은 조건은 같은 run_id, 다른 조건은 격리.
 
@@ -150,8 +215,13 @@ async def main() -> int:
     RUNS.parent.mkdir(parents=True, exist_ok=True)
     # 실행 조건 메타 — 결과 행에 각인해 재현/재개 시 조건 혼입을 막는다.
     model = policy["provider"].get(args.provider, {}).get("model", "")
+    prov = _provenance(policy, args.split)
     run_meta = {"provider": args.provider, "model": model, "rail": args.rail, "split": args.split,
-                "run_id": _run_id(args.provider, model, args.rail, args.split)}
+                "run_id": _run_id(args.provider, model, args.rail, args.split), **prov}
+    print(f"계보: dataset={prov['dataset_hash']} policy={prov['policy_hash']} "
+          f"commit={prov['commit']} sdk={prov['sdk']}")
+    # 기존 runs.jsonl 에 다른 계보가 섞였으면 경고(코드/데이터 변경 후 stale 재사용 방지).
+    _warn_provenance_drift(prov)
 
     def _key(arm: str, cid: str) -> tuple:
         return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"], run_meta["split"])

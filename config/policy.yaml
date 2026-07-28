@@ -75,6 +75,7 @@ tools:
       reason:  {type: str, max_len: 200}
     requires_hitl: true
     forbid_tainted_args: [account, amount]   # Tier B 차단 지점
+    dlp_scan_args: [reason]                   # reason 자유텍스트의 비인가 PII 스캔(문서 주장과 정책 일치)
 
   send_email:
     risk_tier: external

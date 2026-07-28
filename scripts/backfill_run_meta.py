@@ -29,8 +29,11 @@ FROZEN_META = {
     "split": "test",
 }
 FROZEN_META["run_id"] = f"{FROZEN_META['split']}.{FROZEN_META['provider']}.{FROZEN_META['model']}.{FROZEN_META['rail']}"
+# ★출처 표기(리뷰)★ — 이 메타는 런타임 provenance 가 아니라 문서화된 조건에서 소급/재구성됐다.
+#   provenance(dataset_hash/commit) 가 있는 새 run.py 산출과 구분된다.
+FROZEN_META["metadata_source"] = "backfilled_from_docs"
 
-META_KEYS = ("provider", "model", "rail", "split", "run_id")
+META_KEYS = ("provider", "model", "rail", "split", "run_id", "metadata_source")
 
 
 def main() -> int:

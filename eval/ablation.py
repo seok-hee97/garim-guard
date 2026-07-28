@@ -44,6 +44,23 @@ def _rate(rows: list[dict], key: str) -> tuple[int, int]:
     return k, len(rows)
 
 
+def _verify_coverage(rows: list[dict], arms_present: list[str]) -> None:
+    """arm 간 case 대칭성·중복을 검증하고 어긋나면 경고(McNemar 대응쌍 전제)."""
+    per_arm = {a: [r["case_id"] for r in rows if r["arm"] == a and r.get("kind") == "attack"]
+               for a in arms_present}
+    base = set(per_arm.get(arms_present[0], []))
+    for a in arms_present:
+        ids = per_arm[a]
+        dups = len(ids) - len(set(ids))
+        if dups:
+            print(f"⚠️ arm '{a}' 공격 case 중복 {dups}건 — 집계 오염 가능.")
+        missing = base - set(ids)
+        extra = set(ids) - base
+        if missing or extra:
+            print(f"⚠️ arm '{a}' case 비대칭: 누락 {len(missing)} 추가 {len(extra)} "
+                  f"(McNemar 는 교집합만 사용).")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-id", default="", help="특정 run_id 만 집계(조건 격리). 미지정 시 자동 선택")
@@ -58,16 +75,19 @@ def main() -> int:
     ids = Counter(r.get("run_id", "(무메타)") for r in rows)
     if args.run_id:
         sel = args.run_id
+        if sel not in ids:
+            print(f"❌ run_id '{sel}' 없음. 가능: {sorted(ids)}"); return 2
     elif len(ids) > 1:
-        sel = ids.most_common(1)[0][0]
-        print(f"⚠️ 복수 run_id 감지 {dict(ids)} → 최다 '{sel}' 만 집계. "
-              f"다른 조건은 --run-id 로 지정하라.")
+        # ★자동 선택 금지★ — 조건이 섞이면 명시적 --run-id 를 요구(stale/혼입 집계 방지).
+        print(f"❌ 복수 run_id 감지 {dict(ids)}. --run-id <id> 로 명시하세요(자동선택 안 함).")
+        return 2
     else:
         sel = next(iter(ids))
     rows = [r for r in rows if r.get("run_id", "(무메타)") == sel]
     print(f"run_id={sel} · {len(rows)}행 집계\n")
 
     arms_present = [a for a in ORDER if any(r["arm"] == a for r in rows)]
+    _verify_coverage(rows, arms_present)
     # 공격 케이스를 arm별·case_id별로 인덱싱 (McNemar 대응쌍)
     atk = {a: {r["case_id"]: r for r in rows if r["arm"] == a and r["kind"] == "attack"}
            for a in arms_present}
