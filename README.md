@@ -80,16 +80,23 @@ python -m scripts.fetch_rail                    # HF cycloevan/safeagent-kr → 
 
 ## 5. 실행 방법
 
-### 5-1. 핵심 증명 — money smoke (CLI, 실 provider 필요)
+### 5-1. 핵심 증명 — money smoke
 
+**★키 불요 데모(권장)★** — 같은 공격을 arm 3종에 결정적 재생 + 실행 과정 타임라인:
 ```bash
-python -m src.agent.cli --scenario poisoned_kb --defenses tier_a
-#   오염 KB가 send_email(공격자)를 유도 → Tier A가 egress 위반으로 차단
-#   기대: gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
-python -m src.agent.cli --scenario normal --defenses tier_a     # 정상 과제는 완주
+python -m scripts.run_demo          # none=🔴유출 / tier_a=🛑차단 / tier_a+dlp_vault=🛑차단(body)
+python -m app.trace_view            # → report/trace_view.html (seam 흐름·차단지점)
 ```
 
-> 키 없이 **결정적으로** 같은 증명을 보려면: `pytest tests/test_gate.py -k money_smoke`
+**CLI 단건**(scripted=키 불요 재생 · openai/gemini=라이브 유도):
+```bash
+python -m src.agent.cli --scenario poisoned_kb --defenses none  --provider scripted  # 🔴 유출
+python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider scripted  # 🛑 차단
+#   기대(tier_a): gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
+python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider openai     # 실 모델 유도
+```
+
+> 키 없이 **assert 로 고정**된 증명: `pytest tests/test_gate.py -k money_smoke` · `pytest tests/test_demo.py`
 > (FakeProvider.scripted로 게이트 차단을 재현 — 모델 취약성이 아니라 게이트 동작을 검증).
 
 ### 5-2. 실제 구동 서비스 (HTTP 런타임)
@@ -141,7 +148,7 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 108 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 113 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -183,7 +190,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **108 통과** (.venv; CI-core 102, presidio 6) |
+| 유닛/통합 테스트 | ✅ **113 통과** (.venv; CI-core 107, presidio 6) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 
