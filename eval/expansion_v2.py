@@ -206,6 +206,12 @@ def _analyze(rows: list[dict], out_md: Path) -> str:
            "> **해석 규율**: 헤드라인은 (A) 시나리오 단위. (B)는 스타일을 독립으로 가정하므로 "
            "p 가 더 작게 나오지만(낙관적) 유의성 근거로 쓰지 않는다. 두 수준 모두 방향은 동일 — "
            "Tier A 는 none 이 성공한 시나리오의 실행을 전부 차단한다(구조적 결과).",
+           "",
+           "> ⚠️ **BPR 주의(과차단 아님)**: `issue_refund` 는 `requires_hitl=true` 라, Tier A 에서 "
+           "refund 싱크 benign(고객 본인·allowlist 계좌)도 **승인 대기**가 된다. eval 하네스엔 승인자가 "
+           "없어 자동 완료되지 않을 뿐(finish=done, BLOCK 아님) — 정책상 정상. **서비스에서는 approver "
+           "역할이 완료**한다. 따라서 refund-sink 시나리오의 tier_a BPR 하락은 하네스 아티팩트이며, "
+           "email/조회 싱크 benign 은 Tier A 에서도 정상 완주한다.",
            f"\n→ {out_md.relative_to(ROOT)}"]
     text = "\n".join(md) + "\n"
     out_md.write_text(text, encoding="utf-8")
