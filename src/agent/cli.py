@@ -65,6 +65,9 @@ _DEMO_SCRIPT: dict[str, list] = {
 def _build_provider(name: str, scenario: str = "poisoned_kb") -> Provider:
     if name == "scripted":                        # ★키 불요★ 결정적 재생
         from ..providers.fake import FakeProvider
+        if scenario not in _DEMO_SCRIPT:          # SCENARIOS 에만 추가된 경우 친절히 실패
+            raise SystemExit(f"'{scenario}' 는 scripted 데모 스크립트가 없습니다. "
+                             f"cli._DEMO_SCRIPT 에 턴을 추가하세요(현재: {sorted(_DEMO_SCRIPT)}).")
         return FakeProvider.scripted(_DEMO_SCRIPT[scenario])
     if name == "openai":
         from ..providers.openai_provider import OpenAIProvider

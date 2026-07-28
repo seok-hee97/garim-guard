@@ -56,16 +56,17 @@ def _ablation():
     csv_path = ROOT / "results" / "ablation.csv"
     real: dict[str, float] = {}
     if csv_path.exists():
+        # 실제 헤더: arm,condition,n,asr_attempted,asr_executed,... (all 조건 = n=60 집계)
         with csv_path.open(encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                if (row.get("cond") or row.get("조건")) == "all":
-                    key = row.get("arm", "")
-                    val = row.get("t_asr") or row.get("t-ASR(exe)") or row.get("tasr")
-                    if key and val:
-                        try:
-                            real[key] = float(val)
-                        except ValueError:
-                            pass
+                if row.get("condition") == "all" and row.get("asr_executed"):
+                    try:
+                        real[row.get("arm", "")] = float(row["asr_executed"])
+                    except ValueError:
+                        pass
+    missing = [a for (a, *_ ) in bars if a not in real]
+    if missing:                      # 데이터가 없으면 표값 폴백을 쓰되 눈에 띄게 알린다
+        print(f"  ⚠️ ablation.csv 에서 못 찾은 arm(폴백값 사용): {missing}")
     bars = [(a, lb, real.get(a, v), p, c) for (a, lb, v, p, c) in bars]
 
     fig, ax = plt.subplots(figsize=(9.2, 4.8))
@@ -154,8 +155,8 @@ def _dlp():
     ax.set_xticklabels(fields, fontproperties=KFONT, fontsize=11)
     ax.set_ylabel("모델 노출 유출률 (↓ 좋음)", fontproperties=KFONT, fontsize=12)
     ax.set_ylim(0, 0.9)
-    ax.set_title("요청 스코프 PII 볼트 — 켜면 모델 노출·비인가 유출 모두 0%",
-                 fontproperties=KFONT, fontsize=14, fontweight="bold", pad=12)
+    ax.set_title("요청 스코프 PII 볼트 — 켜면 모델 노출 유출 0% (비인가 싱크도 0, 표 참조)",
+                 fontproperties=KFONT, fontsize=13, fontweight="bold", pad=12)
     leg = ax.legend(prop=KFONT, fontsize=11, loc="upper right")
     leg.set_zorder(5)
     ax.grid(axis="y", ls=":", alpha=0.5, zorder=0)
