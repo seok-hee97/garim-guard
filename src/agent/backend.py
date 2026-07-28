@@ -29,15 +29,21 @@ class ServiceWorld(ToolWorld):
 
     def issue_refund(self, account: str = "", amount: int = 0, reason: str = "",
                      idempotency_key: str = "") -> dict[str, Any]:
-        """비가역 환불 — idempotency_key 로 중복 실행 방지. 실 결제 API 연결 지점."""
+        """비가역 환불 — idempotency_key 로 중복 실행 방지. 실 결제 API 연결 지점.
+
+        ★transactional-outbox 상태 모델(P1)★: 실 API 호출 '전에' status='submitted' 로 레코드를
+        먼저 기록(durable-write-first)하고, 성공 시 'completed' 로 전이한다. 그 사이 크래시/타임아웃이
+        나면 레코드가 'submitted'(=미확인)로 남아 재조정(reconcile)이 가능하다 — 유실도 이중실행도 아님.
+        (현재는 인메모리·동기. 실운영은 이 레코드를 DB 에 쓰고 별도 워커가 completed 로 전이한다.)"""
         key = idempotency_key or f"{account}:{amount}"
         if key in self.refunds:                              # 이미 처리됨 → 같은 결과 반환(이중환불 방지)
             return {**self.refunds[key], "idempotent_replay": True}
         self._refund_seq += 1
         rec = {"ok": True, "refund_id": f"rf_{self._refund_seq:05d}",
-               "account": account, "amount": amount, "reason": reason, "status": "issued"}
-        # TODO(실운영): 여기서 Stripe 등에 Idempotency-Key=key 헤더로 실제 환불 호출.
-        self.refunds[key] = rec
+               "account": account, "amount": amount, "reason": reason, "status": "submitted"}
+        self.refunds[key] = rec                              # 1) durable write-first(submitted)
+        # TODO(실운영): 2) 여기서 Stripe 등에 Idempotency-Key=key 헤더로 실제 환불 호출(별도 워커 가능).
+        rec["status"] = "completed"                          # 3) 성공 전이(실패 시 submitted 로 잔존)
         return rec
 
     def send_email(self, to: str = "", subject: str = "", body: str = "",
@@ -51,9 +57,10 @@ class ServiceWorld(ToolWorld):
             return {"sent": True, "to": orig.get("to"), "subject": orig.get("subject"),
                     "idempotent_replay": True}
         rec = {"sent": True, "to": to, "subject": subject, "body": body,
-               "idempotency_key": idempotency_key}
-        # TODO(실운영): 여기서 SMTP/SES 등으로 실제 발송.
-        self.outbox.append(rec)
+               "idempotency_key": idempotency_key, "status": "submitted"}
+        self.outbox.append(rec)                       # 1) durable write-first(submitted)
+        # TODO(실운영): 2) 여기서 SMTP/SES 등으로 실제 발송(별도 워커 가능).
+        rec["status"] = "completed"                   # 3) 성공 전이(실패 시 submitted 잔존→재조정)
         if idempotency_key:
             self._sent_keys.add(idempotency_key)
             self._sent[idempotency_key] = {"to": to, "subject": subject}   # 원본 발송 결과 보존
@@ -66,8 +73,12 @@ class ServiceWorld(ToolWorld):
             "refunds": [{"refund_id": r["refund_id"], "account": _mask("account", r["account"]),
                          "amount": r["amount"], "status": r["status"]}
                         for r in self.refunds.values()],
-            "outbox": [{"to": _mask("to", e["to"]), "subject": e["subject"]} for e in self.outbox],
+            "outbox": [{"to": _mask("to", e["to"]), "subject": e["subject"],
+                        "status": e.get("status", "completed")} for e in self.outbox],
             "refund_count": len(self.refunds), "email_count": len(self.outbox),
+            # 미확인(submitted) 부작용 수 — 재조정 대상(0 이면 모두 완료).
+            "unconfirmed": (sum(1 for r in self.refunds.values() if r.get("status") == "submitted")
+                            + sum(1 for e in self.outbox if e.get("status") == "submitted")),
         }
 
 
