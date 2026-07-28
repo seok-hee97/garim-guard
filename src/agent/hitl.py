@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -22,10 +23,11 @@ class Approval:
     episode_id: str
     principal: str = ""
     rule: str = ""
-    status: str = "pending"          # pending | approved | denied
+    status: str = "pending"          # pending | approved | denied | expired
     approver: str = ""
     result: dict[str, Any] | None = None
     logical_key: str = ""            # 논리적 액션 멱등성 키(P0-3) — 백엔드 실행·중복 승인 dedup 기준
+    created_at: float = 0.0          # 적재 시각(epoch) — 승인 TTL 만료 판정(P1 stale approval)
 
     def public(self) -> dict[str, Any]:
         """API 노출용 — args·result 모두 재귀 마스킹(계좌/이메일 마스킹, 사유/본문 제거).
@@ -83,7 +85,7 @@ class ApprovalQueue:
         aid = f"appr_{self._seq:05d}"
         self._store[aid] = Approval(id=aid, tool=tool, args=dict(args),
                                     episode_id=episode_id, principal=principal, rule=rule,
-                                    logical_key=idem_key)
+                                    logical_key=idem_key, created_at=time.time())
         return aid
 
     def list_pending(self) -> list[Approval]:

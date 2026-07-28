@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from ..config import ROOT, gen_config, load_policy
 from . import log as alog
 from . import tools as toolmod
-from .authz import build_registry
+from .authz import build_registry, Principal
 from .backend import service_world
 from .hitl import ApprovalQueue
 from .loop import run_episode
@@ -40,6 +40,9 @@ from .policy import DefenseHooks
 # 서버 고정 방어(클라이언트가 못 끔). ★데모/프로토타입 기본값★.
 # tier_b 는 기본 비활성(value-provenance 오탐) — confused-deputy 는 authz(principal 바인딩)로 차단.
 SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True}
+
+# 승인 만료(초) — 오래된 HITL 승인이 정책 변경 후 실행되지 않도록. env 로 조정 가능.
+APPROVAL_TTL_S: float = float(os.getenv("APPROVAL_TTL_S", "3600"))
 
 _state: dict[str, Any] = {}
 
@@ -109,6 +112,7 @@ app = FastAPI(title="SafeAgent-KR", version="1.0", lifespan=lifespan)
 class RunRequest(BaseModel):
     input: str = Field(..., min_length=1, max_length=8000)
     scenario: str = Field("", max_length=200)
+    customer_id: str = Field("", max_length=64)   # 대화 대상 고객 — 지정 시 스코프를 그 고객으로 한정
 
 
 class HopView(BaseModel):
@@ -164,6 +168,25 @@ def _require(x_api_key: str | None, roles: set[str]):
     return p
 
 
+def _bind_customer(principal: Principal, customer_id: str, world: Any) -> Principal:
+    """★대화-고객 바인딩(P1)★ — 요청이 지정한 고객으로 스코프를 '한 명'으로 좁힌다.
+
+    principal 이 전체 고객을 flat 하게 소유하면 조회는 고객 A인데 발송/환불은 고객 B(등록됨)로
+    가는 confused-deputy 가 남는다. customer_id 를 지정하면 그 고객의 이메일/계좌만 허용해
+    타-고객 유출을 차단한다. principal 이 담당하지 않는 고객이면 403."""
+    if customer_id not in principal.customer_ids:
+        raise HTTPException(status_code=403,
+                            detail=f"principal 이 고객 {customer_id} 를 담당하지 않습니다")
+    cust = next((c for c in getattr(world, "customers", []) if c.get("id") == customer_id), None)
+    if cust is None:
+        raise HTTPException(status_code=404, detail="고객을 찾을 수 없습니다")
+    return Principal(
+        id=principal.id, role=principal.role, customer_ids=frozenset({customer_id}),
+        verified_emails=frozenset({cust["email"]} if cust.get("email") else set()),
+        verified_accounts=frozenset({cust["account"]} if cust.get("account") else set()),
+    )
+
+
 @app.get("/healthz")
 async def healthz() -> dict:
     return {"status": "ok"}
@@ -185,6 +208,8 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
     episode_id = uuid.uuid4().hex[:12]
     alog.bind(episode_id=episode_id)
     principal = _require(x_api_key, {"agent"})
+    if req.customer_id:                       # 대화-고객 바인딩(P1) — 지정 시 스코프 한정
+        principal = _bind_customer(principal, req.customer_id, _state["world"])
 
     # ── ★요청 멱등성(P0-2)★ — (principal, Idempotency-Key)로 요청 저장. canonical hash 로
     #    같은 키/같은 요청은 원 응답 재생, 같은 키/다른 요청은 409, 진행중 재요청도 409. ──
@@ -192,9 +217,10 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
     store_key = None
     if idempotency_key:
         req_hash = hashlib.sha256(json.dumps(
-            {"input": req.input, "scenario": req.scenario, "principal": principal.id,
-             "policy": _state["policy_hash"], "provider": _state["cfg"].provider,
-             "model": _state["cfg"].model}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            {"input": req.input, "scenario": req.scenario, "customer_id": req.customer_id,
+             "principal": principal.id, "policy": _state["policy_hash"],
+             "provider": _state["cfg"].provider, "model": _state["cfg"].model},
+            ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         store_key = (principal.id, idempotency_key)
         prev = idem_store.get(store_key)
         if prev is not None:
@@ -260,6 +286,22 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
         raise HTTPException(status_code=409, detail=f"already {appr.status}")
     if appr.principal and appr.principal == approver.id:   # 요청자≠승인자 강제
         raise HTTPException(status_code=403, detail="요청자와 승인자가 동일할 수 없습니다(직무분리)")
+
+    # ── ★승인 stale 방지(P1)★ — 오래된/정책 밖 승인이 실행되지 않게 재검사 ──
+    if req.decision == "approve":
+        import time as _time
+        if appr.created_at and (_time.time() - appr.created_at) > APPROVAL_TTL_S:
+            appr.status = "expired"
+            raise HTTPException(status_code=409, detail={
+                "error": "approval_expired", "ttl_s": APPROVAL_TTL_S})
+        # 금액 한도 재검사(승인 시점의 최신 정책으로) — 오래된 승인이 하향된 한도를 우회 못 하게.
+        if appr.tool == "issue_refund":
+            spec = _state["policy"].get("tools", {}).get("issue_refund", {}).get("args", {})
+            cap = (spec.get("amount", {}) or {}).get("max")
+            amt = appr.args.get("amount")
+            if cap is not None and isinstance(amt, (int, float)) and amt > cap:
+                raise HTTPException(status_code=409, detail={
+                    "error": "amount_exceeds_current_limit", "amount": amt, "current_max": cap})
 
     world = _state["world"]
 

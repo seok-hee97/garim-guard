@@ -18,6 +18,8 @@ from src.agent.hitl import ApprovalQueue
 from src.providers.fake import FakeProvider
 
 AGENT = {"X-API-Key": "demo-agent-key"}
+APPROVER = {"X-API-Key": "demo-approver-key"}
+AUDITOR = {"X-API-Key": "demo-auditor-key"}
 
 
 class _World:
@@ -129,3 +131,43 @@ def test_http_idempotency_same_key_different_request_409():
         assert r1.status_code == 200
         r2 = client.post("/v1/agent/run", json={"input": "메일 B(다른 요청)"}, headers=h)
         assert r2.status_code == 409                                   # 같은 키/다른 요청
+
+
+# ── P1: 대화-고객 바인딩 · 승인 TTL ──
+
+def test_customer_binding_blocks_other_customer_send():
+    """★confused-deputy★ — customer_id=A 로 바인딩하면 등록된 다른 고객 B로 발송이 차단된다."""
+    # 고객 A(cust_00042)로 바인딩했는데 모델이 고객 B(cust_00043)의 이메일로 발송 시도.
+    provider = FakeProvider.scripted([
+        [("send_email", {"to": "seoyeon.lee@customer.example.com",   # 고객 B(등록됨)
+                         "subject": "s", "body": "b"})],
+        "완료",
+    ])
+    with TestClient(server.app, headers=AGENT) as client:
+        server.set_provider(provider)
+        body = client.post("/v1/agent/run",
+                           json={"input": "메일 보내줘", "customer_id": "cust_00042"}).json()
+        sent = [h for h in body["hops"] if h["tool"] == "send_email" and h["executed"]]
+        assert not sent                                    # 타-고객 발송 차단
+        assert any("authz" in r for r in body["blocked_rules"])
+
+
+def test_customer_binding_unauthorized_customer_403():
+    with TestClient(server.app, headers=AGENT) as client:
+        server.set_provider(_send_email_provider())
+        r = client.post("/v1/agent/run",
+                        json={"input": "x", "customer_id": "cust_99999"})   # 미담당 고객
+        assert r.status_code == 403
+
+
+def test_approval_ttl_expiry_blocks_execution(monkeypatch):
+    """만료된 승인은 실행되지 않는다(stale approval)."""
+    provider = FakeProvider.scripted([
+        [("issue_refund", {"account": "110-000-000001", "amount": 100, "reason": "t"})], "접수"])
+    monkeypatch.setattr(server, "APPROVAL_TTL_S", 0.0)     # 즉시 만료
+    with TestClient(server.app, headers=AGENT) as client:
+        server.set_provider(provider)
+        aid = client.post("/v1/agent/run", json={"input": "환불"}).json()["pending_approval"]
+        rr = client.post(f"/v1/approvals/{aid}", json={"decision": "approve"}, headers=APPROVER)
+        assert rr.status_code == 409 and "expired" in str(rr.json())
+        assert client.get("/v1/audit", headers=AUDITOR).json()["refund_count"] == 0

@@ -16,7 +16,9 @@ uvicorn src.agent.server:app --port 8000
 curl -s localhost:8000/healthz     # {"status":"ok"}
 curl -s localhost:8000/readyz      # {"status":"ready","provider":"gemini"}
 curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
-     -d '{"input":"고객 010-1234-5678 환불 상태를 조회해 주세요"}'
+     -H 'X-API-Key: demo-agent-key' \
+     -d '{"input":"고객 010-1234-5678 환불 상태를 조회해 주세요","customer_id":"cust_00042"}'
+# ↑ X-API-Key 필수(없으면 fail-closed 401). customer_id 지정 시 스코프를 그 고객으로 한정.
 ```
 
 | 영역 | 구현 | 파일 |
@@ -50,8 +52,9 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 > - **실 외부 API 미연결** — ServiceWorld 는 인메모리(환불 원장·이메일 outbox). 실 Stripe/SMTP 연결 지점은 `backend.py` TODO. 실 API 시 `asyncio.to_thread` 만료해도 스레드 미회수 → 자체 소켓 타임아웃 필요. `_refund_seq` check-then-set 도 실 async/워커 도입 시 Lock 필요(현재는 이벤트루프 직렬화로 도달 불가).
 > - **cross-customer 스코프** — X-API-Key 는 fail-closed 이나 **데모 principal 은 전-고객 flat 스코프**라 담당 외 고객의 등록 이메일로도 발송 가능. 실운영은 **에피소드↔대상고객 per-ticket 바인딩** 필요(confused-deputy=미등록주소는 이미 차단).
 > - **refund authz ≡ egress(demo)** — `authz.account_unverified` 는 `egress.refund_accounts` allowlist 와 동치라 데모에선 egress 가 먼저 차단(구조적 도달 불가). 실운영은 전역 유효계좌 ⊋ 담당계좌 로 분리해야 authz 가 의미.
-> - **인메모리 상태·승인 위생** — 큐/백엔드 재시작 소실(실운영 DB/redis + 승인 TTL). 승인자 authN·직무분리(요청자≠승인자) 데모 미강제.
-> - **본문(body) 토큰 유지 · lookup authz 미제한 · 대시보드/경보 미구현 · 전체 대화 재개 미구현.**
+> - **인메모리 상태** — 큐/백엔드가 프로세스 메모리에 있어 재시작 시 소실(실운영은 DB/redis). 승인 TTL(기본 3600s)·정책변경 후 금액한도 재검사·요청/HITL 멱등성은 **구현됨**. **부수효과 outbox 상태모델(submitted/completed/unknown)과 실 job queue 는 미구현**(현재는 완료까지 동기 대기 — deadline 벽시계 보장 없음).
+> - 승인자 authN·**직무분리(요청자≠승인자)는 강제됨**(역할키 분리 + `appr.principal == approver.id` 차단, 테스트 고정). 데모 자격증명은 비-prod 전용(prod 는 주입 자격증명 필수).
+> - **본문(body) 토큰 유지 · lookup_customer 자체 접근제어 미제한(대화-고객 바인딩은 customer_id 로 지원) · 대시보드/경보 미구현 · 전체 대화 재개 미구현.**
 
 ---
 

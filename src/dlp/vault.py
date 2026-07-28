@@ -95,7 +95,12 @@ class RegexVault:
         return len(self._v2t)
 
     def contains_raw(self, text: str) -> list[str]:
-        """text 에 원본 PII 값이 그대로 노출됐는지 (싱크별 유출률 측정)."""
+        """text 에 원본 PII 값이 그대로 노출됐는지 (싱크별 유출률 측정).
+
+        ⚠️ **범위 한계(정직 표기):** 이 검사는 볼트가 **이미 매핑한** 값(입력에서 탐지·토큰화된
+        PII)만 잡는다. 모델이 **새로 생성**했거나 탐지기(RegexVault)가 **놓친** PII 는 여기서
+        잡히지 않는다. 즉 'vault ON 유출 0%'는 *탐지·토큰화된 PII 에 한정*한 주장이며,
+        탐지 재현율(recognizer recall) 밖의 PII 는 별개 축(R6/Presidio 평가)에서 다룬다."""
         return [v for v in self._v2t if v and v in (text or "")]
 
 
