@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 from src.config import ROOT
-from eval.stats import mcnemar_exact, wilson_ci
+from eval.stats import mcnemar_exact, wilson_ci, cluster_reduce, cluster_mcnemar
 from eval.run import ARMS
 
 RUNS = ROOT / "results" / "runs.jsonl"
@@ -43,9 +45,27 @@ def _rate(rows: list[dict], key: str) -> tuple[int, int]:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run-id", default="", help="특정 run_id 만 집계(조건 격리). 미지정 시 자동 선택")
+    args = ap.parse_args()
+
     rows = _load()
     if not rows:
         print("results/runs.jsonl 없음 — 먼저 python -m eval.run"); return 1
+
+    # ── run_id 격리: 서로 다른 조건(provider/model/rail)이 한 파일에 섞이면 집계가 오염된다.
+    #    복수 run_id 가 보이면 경고하고, --run-id 미지정 시 최다 행 run_id 로 자동 한정한다.
+    ids = Counter(r.get("run_id", "(무메타)") for r in rows)
+    if args.run_id:
+        sel = args.run_id
+    elif len(ids) > 1:
+        sel = ids.most_common(1)[0][0]
+        print(f"⚠️ 복수 run_id 감지 {dict(ids)} → 최다 '{sel}' 만 집계. "
+              f"다른 조건은 --run-id 로 지정하라.")
+    else:
+        sel = next(iter(ids))
+    rows = [r for r in rows if r.get("run_id", "(무메타)") == sel]
+    print(f"run_id={sel} · {len(rows)}행 집계\n")
 
     arms_present = [a for a in ORDER if any(r["arm"] == a for r in rows)]
     # 공격 케이스를 arm별·case_id별로 인덱싱 (McNemar 대응쌍)
@@ -95,11 +115,47 @@ def main() -> int:
             lines_csv.append(f"{a},{c},{n},{ka/n:.3f},{ke/n:.3f},{lo:.3f},{hi:.3f},{bpr},{obr},{mp}")
             md.append(f"| {a} | {c} | {n} | {ka/n:.2f} | **{ke/n:.2f}** | [{lo:.2f},{hi:.2f}] | {bpr} | {obr} | {mp} |")
 
+    # ── ★군집 단위 민감도(독립성 보정)★ ──
+    #   행 단위 McNemar 는 같은 기본공격의 난독화 6변형을 독립 취급해 과대 유의를 준다.
+    #   시나리오×스타일 군집(하나라도 executed 면 군집 성공)으로 묶어 보수적 p 를 함께 보고한다.
+    md += _cluster_block(rows, arms_present)
+
     OUT.write_text("\n".join(lines_csv) + "\n", encoding="utf-8")
     OUT_MD.write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md))
     print(f"\n→ {OUT.relative_to(ROOT)} · {OUT_MD.relative_to(ROOT)}")
     return 0
+
+
+CLUSTER_KEYS = ("scenario", "attack_style")   # 군집 = 같은 기본공격의 난독화 변형 묶음
+
+
+def _cluster_block(rows: list[dict], arms_present: list[str]) -> list[str]:
+    """시나리오×스타일 군집 단위로 각 arm vs 무방어의 McNemar exact p 를 계산.
+
+    실제 계산은 eval/stats.py 의 cluster_reduce/cluster_mcnemar 프리미티브가 담당한다
+    (문서 수기 기록이 아니라 코드 산출물).
+    """
+    if "none" not in arms_present:
+        return []
+    n_clusters = len(cluster_reduce(rows, "none", CLUSTER_KEYS))
+    out = ["\n## 군집 단위 민감도 (독립성 보정 — 시나리오×스타일)",
+           f"군집 수 = {n_clusters}. 군집 = 같은 기본공격의 난독화 변형 묶음(하나라도 executed 면 성공).",
+           "",
+           "| arm | 군집 성공/전체 | vs 무방어 discordant | **군집 McNemar p** |",
+           "|---|---|---|---|"]
+    for a in arms_present:
+        m = cluster_mcnemar(rows, "none", a, CLUSTER_KEYS)
+        if a == "none":
+            out.append(f"| none | {m['arm_success']}/{m['n_clusters']} | — | — |")
+            continue
+        # b01 = 무방어성공&arm실패, b10 = arm성공&무방어실패
+        out.append(f"| {a} | {m['arm_success']}/{m['n_clusters']} | {m['b01']}:{m['b10']} | **{m['p_value']}** |")
+    out += ["",
+            "> ⚠️ 헤드라인은 **행 단위 p(탐색적)**와 **군집 단위 p(보수적)**를 함께 보고한다. "
+            "Tier A 는 군집 p 가 유의 임계 미달이어도 **모든 성공 군집의 실행을 차단**(방향 일관)한다 — "
+            "구조적 결과이지 통계적 유의 주장이 아니다."]
+    return out
 
 
 if __name__ == "__main__":

@@ -24,7 +24,8 @@ class HopTrace:
     episode_id: str
     hop: int
     tool_name: str = ""                       # 빈 문자열이면 text-only 종료 홉
-    tool_args: dict[str, Any] = field(default_factory=dict)
+    tool_args: dict[str, Any] = field(default_factory=dict)       # 모델이 낸 인자(비식별 상태)
+    effective_args: dict[str, Any] = field(default_factory=dict)  # 실행에 쓰인 인자(복원됨) — DLP 어댑터 경계 계측
     call_id: str = ""
 
     # ★ ASR 분해의 전부 ★

@@ -38,6 +38,15 @@ ARMS: dict[str, dict] = {
 }
 
 
+def _run_id(provider: str, model: str, rail: str, split: str) -> str:
+    """실험 조건 결정적 슬러그 — 같은 조건은 같은 run_id, 다른 조건은 격리.
+
+    타임스탬프가 아니라 조건 함수라 재현 가능하고, 같은 파일에 여러 조건을 이어붙여도
+    ablation 이 run_id 로 분리 집계할 수 있다. resume 키에는 넣지 않는다(넣으면 매 실행이
+    새 run_id 라 절대 재개 못 함) — 조건 4-튜플이 이미 resume 격리를 담당한다."""
+    return f"{split}.{provider}.{model}.{rail}"
+
+
 def _load(split: str, kind: str) -> list[dict]:
     p = DATA / f"{kind}.{split}.jsonl"
     if not p.exists():
@@ -141,7 +150,8 @@ async def main() -> int:
     RUNS.parent.mkdir(parents=True, exist_ok=True)
     # 실행 조건 메타 — 결과 행에 각인해 재현/재개 시 조건 혼입을 막는다.
     model = policy["provider"].get(args.provider, {}).get("model", "")
-    run_meta = {"provider": args.provider, "model": model, "rail": args.rail, "split": args.split}
+    run_meta = {"provider": args.provider, "model": model, "rail": args.rail, "split": args.split,
+                "run_id": _run_id(args.provider, model, args.rail, args.split)}
 
     def _key(arm: str, cid: str) -> tuple:
         return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"])

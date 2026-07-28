@@ -39,3 +39,39 @@ def mcnemar_exact(a_flags: Sequence[bool], b_flags: Sequence[bool]) -> dict:
         tail = sum(comb(n_disc, i) for i in range(0, k + 1)) * (0.5 ** n_disc)
         p = min(1.0, 2 * tail)
     return {"b01": b01, "b10": b10, "n_discordant": n_disc, "p_value": round(p, 5)}
+
+
+def cluster_reduce(rows: Sequence[dict], arm: str, key_fields: Sequence[str],
+                   outcome: str = "executed", *, arm_field: str = "arm",
+                   kind_field: str = "kind", kind: str | None = "attack") -> dict[tuple, bool]:
+    """행들을 key_fields 군집으로 접어, 군집당 성공여부(하나라도 outcome=True 면 성공)를 낸다.
+
+    행 단위 McNemar 는 같은 기본공격의 난독화 변형들을 독립 취급 → 과대 유의.
+    시나리오×스타일 같은 군집으로 접으면 상관된 변형이 1표로 합쳐져 보수적이다.
+    """
+    cl: dict[tuple, bool] = {}
+    for r in rows:
+        if r.get(arm_field) != arm:
+            continue
+        if kind is not None and r.get(kind_field) != kind:
+            continue
+        k = tuple(r.get(f, "") for f in key_fields)
+        cl[k] = cl.get(k, False) or bool(r.get(outcome))
+    return cl
+
+
+def cluster_mcnemar(rows: Sequence[dict], base_arm: str, arm: str,
+                    key_fields: Sequence[str], outcome: str = "executed", **kw) -> dict:
+    """두 arm 을 같은 군집 키로 정렬해 군집 단위 McNemar exact p 를 낸다.
+
+    반환에 n_clusters·base_success·arm_success 를 덧붙여 표 조립을 단순화한다.
+    """
+    base = cluster_reduce(rows, base_arm, key_fields, outcome, **kw)
+    other = cluster_reduce(rows, arm, key_fields, outcome, **kw)
+    keys = sorted(base)
+    res = mcnemar_exact([base.get(k, False) for k in keys],
+                        [other.get(k, False) for k in keys])
+    res["n_clusters"] = len(keys)
+    res["base_success"] = sum(base.get(k, False) for k in keys)
+    res["arm_success"] = sum(other.get(k, False) for k in keys)
+    return res

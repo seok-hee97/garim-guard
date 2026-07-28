@@ -196,6 +196,7 @@ async def run_episode(
             if isinstance(gate, Rehydrated):
                 args_for_exec = gate.args
             hop.gate_decision = "ALLOW"
+            hop.effective_args = dict(args_for_exec)     # 복원된 실행 인자(DLP 어댑터 경계 계측용)
 
             # ── 도구 실행 ──
             #  멱등성 키 = 스코프 + 단조 ordinal(call_id 리셋 충돌 회피).

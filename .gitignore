@@ -14,3 +14,4 @@ __pycache__/
 data/cassettes/
 # 임시
 TEMP.md
+*.bak
