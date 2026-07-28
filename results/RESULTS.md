@@ -86,8 +86,13 @@
 
 - **Tier B taint** — LLM 라운드트립으로 래퍼 세탁 → value-provenance 휴리스틱으로 실동작 부여했으나 egress allowlist 가 선점 → 애블레이션 독립 기여 미미(분기 B). "taint 도 세탁된다 → Tier C 필요"의 논지 강화로 서술.
 - **DLP × Tier A 합성** — vault 가 수신자 이메일도 토큰화하면 Tier A allowlist 검사가 토큰을 봄. 그래서 DLP 는 독립 축(H7)으로 측정.
-- **모델 단일** — gpt-4o-mini 만. 다중 모델 미검증.
-- **코퍼스 소규모** — 60 공격 + 2 정상(BPR 얇음). benign 확장 필요.
+- **모델 단일** — gpt-4o-mini 만. **교차-provider(Gemini) 확인 시도했으나 free-tier 쿼터
+  소진(429 RESOURCE_EXHAUSTED)으로 미완**(60 에피소드 중 59 실패, n=1). 단발 호출은 성공하므로
+  모델 능력이 아니라 과금 티어 제약 — 유료 티어/쿼터 리셋 후 `--provider gemini` 재실행 필요.
+  상세: `results/gemini_confirmatory_note.md`. 런타임은 provider-무관(동일 게이트).
+- **코퍼스 소규모** — v0.1 60 공격 + 2 정상(BPR 얇음). **v0.2 확대: 독립 시나리오 2→12
+  (`eval/expansion_v2.py`), 스타일-상관 보정해 시나리오 단위(n=12) McNemar 를 헤드라인으로 보고**
+  (results/expansion_v2.openai.md).
 - **한국어 번역 오염** — MAPS 부분번역, 자체 코퍼스는 템플릿 기반.
 
 ## 6b. 추가 비-GPU 실측 (2026-07-27)
