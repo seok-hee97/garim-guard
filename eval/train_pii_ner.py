@@ -112,9 +112,15 @@ def main() -> int:
     trainer.train()
     ev = trainer.evaluate()
     print("R6 span eval:", {k: round(v, 4) for k, v in ev.items() if "span" in k})
+    # ★ 저장 ★ — 지표 JSON + 모델 가중치(추론 재현용, 로컬 전용·gitignore).
+    out_dir = "train/artifacts/r6-pii-ner"
+    trainer.save_model(out_dir)
+    tok.save_pretrained(out_dir)
     json.dump({"model": BASE_MODEL, "entities": TRAIN_ENTITIES, "hparams": HP,
-               "eval": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in ev.items()}},
+               "eval": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in ev.items()},
+               "artifact": out_dir},
               open("results/r6_pii_ner.json", "w"), ensure_ascii=False, indent=2)
+    print(f"→ results/r6_pii_ner.json · 모델 {out_dir} (재배포 금지·로컬 전용)")
     print("비교(별도): Presidio-ko(vault_presidio, 결함패치) / vmaca123 개체 교집합.")
     return 0
 

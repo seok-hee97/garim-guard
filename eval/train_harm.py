@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 LABELS = ["origin", "physical", "politics", "profanity", "age",
           "gender", "race", "religion", "not_hate_speech"]
 BASE_MODEL = "klue/roberta-base"
@@ -73,7 +76,22 @@ def main() -> int:
                       tokenizer=tok, data_collator=DataCollatorWithPadding(tok),
                       compute_metrics=metrics)
     trainer.train()
-    print("R7 eval:", trainer.evaluate())
+    ev = trainer.evaluate()
+    print("R7 eval:", ev)
+
+    # ★ 저장 ★ — R6 와 대칭. (a) 산출 지표 JSON, (b) 모델 가중치(로컬 전용).
+    #   klue/roberta-base 라이선스 미명시 → train/artifacts/ 는 gitignore, 재배포 금지·수치만 보고.
+    out_dir = "train/artifacts/r7-kmhas"
+    trainer.save_model(out_dir)        # config+가중치
+    tok.save_pretrained(out_dir)       # 추론 재현용 토크나이저
+    Path("results").mkdir(exist_ok=True)
+    json.dump({"model": BASE_MODEL, "data": "K-MHaS", "labels": LABELS, "hparams": HP,
+               "test_n": len(test),
+               "macro_f1": round(float(ev.get("eval_macro_f1", 0.0)), 4),
+               "micro_f1": round(float(ev.get("eval_micro_f1", 0.0)), 4),
+               "artifact": out_dir},
+              open("results/r7_harm.json", "w"), ensure_ascii=False, indent=2)
+    print(f"→ results/r7_harm.json · 모델 {out_dir} (재배포 금지·로컬 전용)")
     print("비교: kanana-safeguard-8b 제로샷(7클래스 단일라벨 → 조야한 harm-vs-not 만). "
           "K-MHaS 9클래스 ↔ Kanana S1-7 매핑표 공개 + 손실성 명시.")
     return 0

@@ -1,0 +1,70 @@
+# ── requirements.core.lock — 서비스 런타임(HTTP) 재현 빌드 핀 ──
+# requirements.core.txt 의 전이 폐쇄집합을 requirements.lock(개발환경 핀) 제약 하에 동결.
+# → Docker/CI 가 개발·테스트와 '같은 버전'을 설치(torch/presidio 없음, 순수 core).
+# Docker/CI 가 이 파일로 설치 → 미래 버전 드리프트로 빌드가 조용히 깨지지 않는다.
+# 재생성: python3.11 -m venv /tmp/cl && /tmp/cl/bin/pip install -r requirements.core.txt -c requirements.lock && /tmp/cl/bin/pip freeze
+# (전체 개발환경 핀은 requirements.lock, GPU 학습 핀은 run_gpu.sh 참조)
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.1
+aiosignal==1.4.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.14.2
+attrs==26.1.0
+certifi==2026.6.17
+cffi==2.1.0
+charset-normalizer==3.4.9
+click==8.4.2
+cryptography==48.0.1
+datasets==5.0.0
+dill==0.4.1
+distro==1.9.0
+duckdb==1.5.4
+fastapi==0.140.1
+filelock==3.31.1
+frozenlist==1.8.0
+fsspec==2026.4.0
+google-auth==2.55.2
+google-genai==2.12.1
+h11==0.16.0
+hf-xet==1.5.2
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+huggingface_hub==1.24.0
+idna==3.18
+iniconfig==2.3.0
+multidict==6.7.1
+multiprocess==0.70.19
+numpy==2.4.6
+packaging==26.2
+pandas==3.0.3
+pluggy==1.6.0
+propcache==0.5.2
+pyarrow==25.0.0
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+pycparser==3.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+Pygments==2.20.0
+pytest-asyncio==1.4.0
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+PyYAML==6.0.3
+requests==2.34.2
+six==1.17.0
+sniffio==1.3.1
+starlette==1.3.1
+tenacity==9.1.4
+tqdm==4.69.0
+typing-inspection==0.4.2
+typing_extensions==4.16.0
+urllib3==2.7.0
+uvicorn==0.51.0
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==16.1.1
+xxhash==3.8.1
+yarl==1.24.5

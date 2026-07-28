@@ -15,10 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install core deps
+      - name: Install core deps (핀 고정 lock — 재현 빌드)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.core.txt
+          pip install -r requirements.core.lock
       - name: Lint (syntax)
         run: python -m compileall -q src eval scripts
       - name: Policy schema sanity (log-only 봉인 + AFC=False 불변식)

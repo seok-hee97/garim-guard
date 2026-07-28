@@ -11,13 +11,19 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# 의존성 먼저(레이어 캐시). core 만 — presidio/torch 는 서비스 런타임에 불필요.
-COPY requirements.core.txt ./
-RUN pip install --no-cache-dir -r requirements.core.txt
+# 의존성 먼저(레이어 캐시). ★재현 빌드: 핀 고정 core.lock★ — presidio/torch 는 서비스 런타임에 불필요.
+#   *.txt(>= 범위)가 아니라 *.lock(== 고정)을 써 미래 버전 드리프트로 빌드가 조용히 깨지지 않게.
+COPY requirements.core.lock ./
+RUN pip install --no-cache-dir -r requirements.core.lock
 
 # 앱 소스만 복사(.dockerignore 로 .venv/.git/results/data/models 제외).
 COPY src ./src
 COPY config ./config
+
+# ★비루트 실행★ — 컨테이너 탈취 시 권한 최소화. 앱 파일은 읽기전용(소유권만 이전).
+RUN useradd --system --uid 10001 --no-create-home appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 

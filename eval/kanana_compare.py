@@ -34,6 +34,13 @@ def _build_rail(name: str, threshold: float):
             return KananaRail(threshold=threshold)
         except Exception as e:  # noqa: BLE001
             raise SystemExit(f"Kanana 레일 미설치(RunPod 전용): {e}")
+    if name == "shieldgemma":
+        # RunPod: ShieldGemma 로짓 레일 — EN-vs-KO 교차언어 갭(log-only). run_gpu.sh §2.
+        try:
+            from src.rails.shieldgemma import ShieldGemmaRail
+            return ShieldGemmaRail(threshold=threshold)
+        except Exception as e:  # noqa: BLE001
+            raise SystemExit(f"ShieldGemma 레일 미설치(RunPod 전용·gated): {e}")
     if name == "heuristic":
         from src.rails.base import HeuristicRail
         return HeuristicRail(threshold=threshold)
@@ -43,7 +50,8 @@ def _build_rail(name: str, threshold: float):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rail", default="ko_agentguard", choices=["ko_agentguard", "kanana", "heuristic"])
+    ap.add_argument("--rail", default="ko_agentguard",
+                    choices=["ko_agentguard", "kanana", "shieldgemma", "heuristic"])
     ap.add_argument("--threshold", type=float, default=0.5)
     args = ap.parse_args()
 

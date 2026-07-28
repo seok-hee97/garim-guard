@@ -17,6 +17,18 @@ from __future__ import annotations
 
 MODEL_ID = "kakaocorp/kanana-safeguard-prompt-2.1b"
 TOK_SAFE, TOK_A1, TOK_A2 = 128257, 128256, 128258
+MIN_TRANSFORMERS = (4, 51, 3)   # Llama-3 확장 vocab + safeguard chat template 정상 적용 하한(run_gpu.sh 와 동일)
+
+
+def _assert_transformers_version() -> None:
+    """버전 하한 검증 — 낮으면 apply_chat_template 이 assistant 헤더/특수토큰을 조용히
+    다르게 구성해 마지막 토큰 로짓이 taxonomy 코드가 아니게 된다(무증상 오점수). 실패는 명시적으로."""
+    import transformers
+    ver = tuple(int(x) for x in transformers.__version__.split(".")[:3] if x.isdigit())
+    if ver < MIN_TRANSFORMERS:
+        raise RuntimeError(
+            f"transformers {transformers.__version__} < {'.'.join(map(str, MIN_TRANSFORMERS))} — "
+            "Kanana safeguard 채점이 무증상으로 틀립니다. `pip install -U 'transformers>=4.51.3'`.")
 
 
 class KananaRail:
@@ -30,6 +42,7 @@ class KananaRail:
 
     def load(self) -> None:
         import torch
+        _assert_transformers_version()
         from transformers import AutoModelForCausalLM, AutoTokenizer
         self._tok = AutoTokenizer.from_pretrained(self.model_id)
         self._model = AutoModelForCausalLM.from_pretrained(
