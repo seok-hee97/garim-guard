@@ -11,10 +11,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from .hooks import Block
+
+DEMO_KEYS = ("demo-agent-key", "demo-approver-key", "demo-auditor-key")
 
 
 @dataclass(frozen=True)
@@ -26,9 +30,9 @@ class Principal:
     verified_accounts: frozenset[str] = field(default_factory=frozenset)  # 환불 허용 계좌
 
 
-def registry_from_world(world: Any) -> dict[str, Principal]:
+def _demo_registry(world: Any) -> dict[str, Principal]:
     """데모 키 3종 — 역할분리(직무분리): 에이전트 실행 / 승인 / 감사 키를 분리한다.
-    실운영은 IdP/OAuth 역할 클레임으로 교체."""
+    ⚠️ 비-prod 전용. 실운영은 IdP/OAuth 역할 클레임 또는 주입 자격증명으로 교체."""
     custs = getattr(world, "customers", []) or []
     scope = dict(
         customer_ids=frozenset(c["id"] for c in custs),
@@ -40,6 +44,59 @@ def registry_from_world(world: Any) -> dict[str, Principal]:
         "demo-approver-key": Principal(id="approver:demo", role="approver", **scope),
         "demo-auditor-key": Principal(id="auditor:demo", role="auditor", **scope),
     }
+
+
+def _registry_from_injected(raw: str, world: Any) -> dict[str, Principal]:
+    """주입 자격증명(env SAFEAGENT_API_KEYS, JSON)에서 레지스트리 구성.
+
+    형식: {"<api-key>": {"id","role","customer_ids":[...],
+                          "verified_emails":[...],"verified_accounts":[...]}}
+    scope 필드 생략 시 customer_ids 로 world 고객에서 유도(테넌트/고객 스코프 강제).
+    실운영은 이 JSON 을 Secret Manager/IdP 에서 주입한다(코드/이미지에 넣지 않음)."""
+    custs = {c["id"]: c for c in (getattr(world, "customers", []) or [])}
+    conf = json.loads(raw)
+    reg: dict[str, Principal] = {}
+    for key, v in conf.items():
+        if key in DEMO_KEYS:
+            raise RuntimeError(f"주입 자격증명에 데모 키({key})를 쓸 수 없습니다(prod 금지).")
+        cids = frozenset(v.get("customer_ids", []))
+        emails = v.get("verified_emails")
+        accts = v.get("verified_accounts")
+        # scope 미지정 시 담당 고객에서 유도(전체 flat scope 아님 — 지정 고객만).
+        if emails is None:
+            emails = [custs[c]["email"] for c in cids if c in custs and custs[c].get("email")]
+        if accts is None:
+            accts = [custs[c]["account"] for c in cids if c in custs and custs[c].get("account")]
+        reg[key] = Principal(id=v.get("id", "principal"), role=v.get("role", "agent"),
+                             customer_ids=cids, verified_emails=frozenset(emails),
+                             verified_accounts=frozenset(accts))
+    if not reg:
+        raise RuntimeError("SAFEAGENT_API_KEYS 가 비어 있습니다.")
+    return reg
+
+
+def build_registry(world: Any, *, app_env: str | None = None) -> dict[str, Principal]:
+    """환경별 principal 레지스트리. ★prod 는 데모 키를 절대 등록하지 않는다★.
+
+    - prod: env SAFEAGENT_API_KEYS(주입 자격증명) 필수 — 없으면 부팅 실패(fail-closed).
+    - 그 외(dev/test): 주입 있으면 사용, 없으면 데모 키 3종.
+    """
+    app_env = (app_env if app_env is not None else os.getenv("APP_ENV", "")).lower()
+    injected = os.getenv("SAFEAGENT_API_KEYS")
+    if app_env == "prod":
+        if not injected:
+            raise RuntimeError(
+                "APP_ENV=prod 인데 SAFEAGENT_API_KEYS(주입 자격증명)가 없습니다. "
+                "데모 키 등록을 거부합니다 — Secret Manager/IdP 로 자격증명을 주입하세요.")
+        return _registry_from_injected(injected, world)
+    if injected:
+        return _registry_from_injected(injected, world)
+    return _demo_registry(world)
+
+
+def registry_from_world(world: Any) -> dict[str, Principal]:
+    """하위호환 별칭 — 환경 인지 build_registry 로 위임(비-prod 는 데모 키)."""
+    return build_registry(world)
 
 
 def check_action(principal: Principal, tool: str, args: dict, tools_spec: dict) -> Block | None:

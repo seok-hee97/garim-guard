@@ -160,13 +160,18 @@ async def run_episode(
             except Exception as e:  # noqa: BLE001 — 게이트 실패 = fail-closed 차단
                 gate = Block(rule="gate.fail_closed", reason=f"{type(e).__name__}: {e}")
                 alog.event(_log, "error", "gate.fail_closed", tool=call.name, err=type(e).__name__)
+            # ── 논리적 액션 멱등성 키(P0-3): 스코프 + 단조 ordinal. HITL 적재·직접 실행이 같은 키를
+            #    쓰게 하여, 같은 논리적 환불이 승인 두 건으로 갈라져 이중 실행되는 것을 막는다.
+            #    (Block 도 ordinal 을 소비 — 키 유일성만 필요, 값 자체는 의미 없음.)
+            _action_ordinal += 1
+            _ik = f"{_idem_scope}:{_action_ordinal}"
             # ── HITL 필요: 승인 큐가 있으면 액션을 적재(배치 내 다건도 전부 적재 — 유실 방지) ──
             if isinstance(gate, HITLRequired):
                 if hitl_queue is not None:
                     pid = getattr(getattr(hooks, "principal", None), "id", "")
                     approval_id = hitl_queue.submit(
                         tool=gate.tool, args=gate.args, episode_id=ep.episode_id,
-                        principal=pid, rule=gate.rule)
+                        principal=pid, rule=gate.rule, idem_key=_ik)
                     hop.executed = False
                     hop.gate_decision = "HITL_DENY"
                     hop.gate_rule = gate.rule
@@ -199,12 +204,10 @@ async def run_episode(
             hop.effective_args = dict(args_for_exec)     # 복원된 실행 인자(DLP 어댑터 경계 계측용)
 
             # ── 도구 실행 ──
-            #  멱등성 키 = 스코프 + 단조 ordinal(call_id 리셋 충돌 회피).
+            #  멱등성 키 _ik 는 위(HITL 분기 전)에서 이미 생성됨(스코프+ordinal, HITL 과 동일 키).
             #  ★부작용 도구(issue_refund/send_email)는 wait_for abandon 금지★ — to_thread 는 만료해도
             #  스레드를 못 멈춰 '유령 부작용'(사용자엔 실패, 실제론 발송)이 생긴다. 완료까지 대기하고
             #  실 결과를 보고한다(실 API 는 자체 소켓 타임아웃으로 무한대기 방지). 읽기 도구만 abandon-timeout.
-            _action_ordinal += 1
-            _ik = f"{_idem_scope}:{_action_ordinal}"
             try:
                 _exec = asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
                                           call.call_id, world=world, taint_enabled=taint_on,

@@ -18,6 +18,8 @@ idempotency 를 갖고, 비가역 도구는 HITL 승인 큐를 거쳐 사람 승
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -29,7 +31,7 @@ from pydantic import BaseModel, Field
 from ..config import ROOT, gen_config, load_policy
 from . import log as alog
 from . import tools as toolmod
-from .authz import registry_from_world
+from .authz import build_registry
 from .backend import service_world
 from .hitl import ApprovalQueue
 from .loop import run_episode
@@ -68,13 +70,19 @@ async def lifespan(app: FastAPI):
         alog.event(logger, "warning", "system_instruction_missing", path=str(_sys))
     _state["policy"] = policy
     _state["cfg"] = gen_config(policy)
+    # 요청 멱등성용 정책 지문(정책이 바뀌면 같은 키라도 다른 요청으로 취급).
+    _state["policy_hash"] = hashlib.sha256(
+        json.dumps(policy, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    _state["idem"] = {}    # (principal_id, Idempotency-Key) → {hash, status, response}
 
     # 상태 있는 백엔드(부작용·idempotency) + HITL 승인 큐 + principal 레지스트리(싱글턴).
     world = service_world()
     _state["world"] = world
     _state["hitl"] = ApprovalQueue()
-    _state["principals"] = registry_from_world(world)
-    _state["default_principal"] = _state["principals"]["demo-agent-key"]
+    # ★prod 는 데모 키 거부 + 주입 자격증명(SAFEAGENT_API_KEYS) 필수 → 없으면 부팅 실패(fail-closed).★
+    _state["principals"] = build_registry(world, app_env=os.getenv("APP_ENV"))
+    alog.event(logger, "info", "principals_loaded",
+               n=len(_state["principals"]), env=os.getenv("APP_ENV", "dev"))
 
     rail = _build_rail()
     _state["rail"] = rail
@@ -123,7 +131,7 @@ class RunResponse(BaseModel):
 
 class ApproveRequest(BaseModel):
     decision: str = Field(..., pattern="^(approve|deny)$")
-    approver: str = Field("human", max_length=100)
+    # approver 는 클라이언트가 지정하지 않는다 — 인증 토큰의 principal 로만 결정/기록(P1 로그위조 방지).
 
 
 def _business_status(ep) -> str:
@@ -177,15 +185,43 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
     episode_id = uuid.uuid4().hex[:12]
     alog.bind(episode_id=episode_id)
     principal = _require(x_api_key, {"agent"})
+
+    # ── ★요청 멱등성(P0-2)★ — (principal, Idempotency-Key)로 요청 저장. canonical hash 로
+    #    같은 키/같은 요청은 원 응답 재생, 같은 키/다른 요청은 409, 진행중 재요청도 409. ──
+    idem_store = _state["idem"]
+    store_key = None
+    if idempotency_key:
+        req_hash = hashlib.sha256(json.dumps(
+            {"input": req.input, "scenario": req.scenario, "principal": principal.id,
+             "policy": _state["policy_hash"], "provider": _state["cfg"].provider,
+             "model": _state["cfg"].model}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        store_key = (principal.id, idempotency_key)
+        prev = idem_store.get(store_key)
+        if prev is not None:
+            if prev["hash"] != req_hash:
+                raise HTTPException(status_code=409, detail={
+                    "error": "idempotency_key_reused_with_different_request",
+                    "idempotency_key": idempotency_key})
+            if prev["status"] == "in_flight":
+                raise HTTPException(status_code=409, detail={
+                    "error": "request_in_progress", "idempotency_key": idempotency_key})
+            return prev["response"]         # 완료된 원 응답 재생(부작용 재실행 없음)
+        idem_store[store_key] = {"hash": req_hash, "status": "in_flight", "response": None}
+
     hooks = DefenseHooks(_state["policy"], dict(SERVER_DEFENSES),
                          rail=_state["rail"], principal=principal)
-    ep = await run_episode(
-        req.input, _state["provider"], _state["cfg"],
-        hooks=hooks, world=_state["world"], defenses=dict(SERVER_DEFENSES),
-        scenario=req.scenario, episode_id=episode_id, hitl_queue=_state["hitl"],
-        idempotency_scope=(idempotency_key or ""),   # 클라이언트 재시도 dedup(같은 키→같은 스코프)
-    )
-    return RunResponse(
+    try:
+        ep = await run_episode(
+            req.input, _state["provider"], _state["cfg"],
+            hooks=hooks, world=_state["world"], defenses=dict(SERVER_DEFENSES),
+            scenario=req.scenario, episode_id=episode_id, hitl_queue=_state["hitl"],
+            idempotency_scope=(idempotency_key or episode_id),   # 액션 단위 dedup(같은 키→같은 스코프)
+        )
+    except Exception:
+        if store_key is not None:
+            idem_store.pop(store_key, None)   # 실패는 굳히지 않음 → 재시도 허용
+        raise
+    resp = RunResponse(
         episode_id=ep.episode_id,
         status=_business_status(ep),
         finish_reason=ep.finish_reason,
@@ -198,6 +234,9 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
         pending_approval=ep.pending_approval,
         latency_ms=ep.total_latency_ms,
     )
+    if store_key is not None:
+        idem_store[store_key] = {"hash": req_hash, "status": "done", "response": resp}
+    return resp
 
 
 @app.get("/v1/approvals")
@@ -224,9 +263,13 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
 
     world = _state["world"]
 
+    # ★백엔드 멱등성 키 = 승인의 logical_key(P0-3)★ — approval_id 가 아니라 논리적 액션 키를 써야
+    #   두 승인이 같은 논리적 환불이면 백엔드에서 한 번만 실행된다(방어 심화).
+    backend_key = appr.logical_key or approval_id
+
     def _executor(tool: str, args: dict) -> dict:
-        # 승인된 액션을 백엔드에 실행. approval_id 를 idempotency_key 로 → 중복 승인 시 이중환불 방지.
-        raw = toolmod.execute(tool, dict(args), approval_id, world=world)
+        raw = toolmod.execute(tool, dict(args), approval_id, world=world,
+                              idempotency_key=backend_key)   # 논리적 키로 백엔드 dedup
         return {"executed": True, "result": raw}
 
     resolved = q.resolve(approval_id, approve=(req.decision == "approve"),
@@ -239,8 +282,10 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
         raise HTTPException(status_code=502,
                             detail={"error": "backend_execution_failed",
                                     "retryable": True, "approval": resolved.public()})
+    # ★감사 로그는 인증 토큰의 principal 만 기록(P1)★ — 클라이언트가 보낸 req.approver 문자열은
+    #   실행 권한에도, 감사에도 쓰지 않는다(로그 위조 방지). req.approver 필드는 제거 예정.
     alog.event(alog.get_logger(), "info", "approval_resolved",
-               id=approval_id, decision=req.decision, approver=req.approver)
+               id=approval_id, decision=req.decision, approver=approver.id)
     return resolved.public()
 
 

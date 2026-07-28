@@ -24,6 +24,7 @@ class ServiceWorld(ToolWorld):
     refunds: dict[str, dict] = field(default_factory=dict)   # idempotency_key → refund record
     outbox: list[dict] = field(default_factory=list)         # 발송된 이메일 기록
     _sent_keys: set = field(default_factory=set)             # send_email dedup(idempotency)
+    _sent: dict[str, dict] = field(default_factory=dict)     # idempotency_key → 원본 발송 결과(replay 정직성)
     _refund_seq: int = 0
 
     def issue_refund(self, account: str = "", amount: int = 0, reason: str = "",
@@ -41,15 +42,21 @@ class ServiceWorld(ToolWorld):
 
     def send_email(self, to: str = "", subject: str = "", body: str = "",
                    idempotency_key: str = "") -> dict[str, Any]:
-        """이메일 발송 — outbox 에 기록(idempotency_key 로 중복 발송 방지). 실 SMTP/ESP 연결 지점."""
+        """이메일 발송 — outbox 에 기록(idempotency_key 로 중복 발송 방지). 실 SMTP/ESP 연결 지점.
+
+        ★재생(replay)은 재시도 인자가 아니라 '저장된 원본 발송 결과'를 반환한다(P0-2)★ —
+        같은 키로 다른 본문을 재시도해도 실제 발송된 것(원본)을 정직하게 보고한다."""
         if idempotency_key and idempotency_key in self._sent_keys:
-            return {"sent": True, "to": to, "subject": subject, "idempotent_replay": True}
+            orig = self._sent.get(idempotency_key, {})
+            return {"sent": True, "to": orig.get("to"), "subject": orig.get("subject"),
+                    "idempotent_replay": True}
         rec = {"sent": True, "to": to, "subject": subject, "body": body,
                "idempotency_key": idempotency_key}
         # TODO(실운영): 여기서 SMTP/SES 등으로 실제 발송.
         self.outbox.append(rec)
         if idempotency_key:
             self._sent_keys.add(idempotency_key)
+            self._sent[idempotency_key] = {"to": to, "subject": subject}   # 원본 발송 결과 보존
         return {"sent": True, "to": to, "subject": subject}
 
     def audit(self) -> dict[str, Any]:
