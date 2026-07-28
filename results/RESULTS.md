@@ -93,7 +93,7 @@
 > ★ effective_args(복원된 실제 PII)는 in-memory 계측에만 쓰고 traces.jsonl 로는 직렬화하지 않는다
 > (PII-in-logs 회귀 차단, test_eval_metrics).
 
-> ⚠️ **계측 경계 재정의(중요):** 이 0%는 **트레이스에 기록된 모델 인자**(비식별 상태)를 검사한 값이다 — 즉 정확히 측정하는 것은 **"모델이 원본 PII 를 보지 못한다"**(참). 서비스의 egress 사전복원(DLP×TierA 수정)은 send_email 수신자·계좌를 **라우팅을 위해 실제 값으로 복원해 백엔드에 넘긴다** — 따라서 *"외부 도구가 원본 PII 를 전혀 받지 않는다"* 는 **성립하지 않는다**(수신자 주소는 본질적으로 데이터주체 식별자). 정직한 분리 지표: (a) 모델 입력 원본 PII 노출=0, (b) 승인된 라우팅 식별자(to/account)=실제값(설계), (c) subject/body/reason 의 **비인가** PII=차단(dlp_scan_args), (d) 비인가 목적지=authz/egress 차단. H7 의 유효 주장은 (a)·(c)·(d) 이지 "외부로 원본 0" 전체가 아니다.
+> ⚠️ **계측 경계 재정의(중요):** 이 0%는 **모델이 생성한 도구 인자**(tool_args, 비식별 상태)를 검사한 값 — 즉 정확히 측정하는 것은 **"모델이 뱉은 인자에 원본 PII 가 없다"(모델 출력 기준)**이다. 모델이 **입력에서** 원본을 보지 못하는 것은 이 지표가 아니라 **볼트의 before_model 토큰화가 설계로 보장하는 별개 속성**이다(이 지표로 증명하지 않는다). 서비스의 egress 사전복원(DLP×TierA)은 send_email 수신자·계좌를 **라우팅을 위해 실제 값으로 복원해 백엔드에 넘긴다** — 따라서 *"외부 도구가 원본 PII 를 전혀 받지 않는다"* 는 **성립하지 않는다**(수신자 주소는 본질적으로 데이터주체 식별자). 정직한 분리 지표: (a) 모델 출력(tool_args) 원본 PII=0, (b) 승인된 라우팅 식별자(to/account)=실제값(설계), (c) subject/body/reason 의 **비인가** PII=차단(dlp_scan_args), (d) 비인가 목적지=authz/egress 차단. H7 의 유효 주장은 (a)·(c)·(d) 이지 "외부로 원본 0" 전체가 아니다.
 
 ## 5. Presidio 한국어 인식기 결함 2건 (재현 확인, 설치본 2.2.364)
 
@@ -174,6 +174,6 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 
 ## 7. 테스트 / 재현성
 
-- 유닛/통합 테스트 **99 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**·**군집McNemar 교집합·DLP경계분리·트레이스 PII 미직렬화**. (CI core 는 `--ignore=test_dlp_defenses` 로 **93 통과**; presidio 없으면 그 6건이 빠진다.)
+- 유닛/통합 테스트 **104 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**·**군집McNemar 교집합·DLP경계분리·트레이스 PII 미직렬화**. (CI core 는 `--ignore=test_dlp_defenses` 로 **98 통과**; presidio 없으면 그 6건이 빠진다.)
 - 재현 범위: **헤드라인 애블레이션은 라이브 OpenAI 호출**(temp=0 근사 재현 — gpt-4o-mini는 bit-exact 보장 안 함). 카세트 record/replay는 FakeProvider 경로 전용. DLP·channel_gap·R6/R7·e5·shieldgemma는 RunPod GPU 스크립트 산출로 단일 명령에 미포함.
 - GPU 실측 **완료**(§6c): Kanana P1a 격차 1.0 · ShieldGemma EN-KO 0.268 · R6 span 0.985 · R7 Macro 0.709 · e5 교차언어. (⚠️ P1b 난독화 붕괴는 사전등록 미달 0.1 — 정직 보고)

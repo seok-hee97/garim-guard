@@ -219,8 +219,11 @@ async def main() -> int:
     # 실행 조건 메타 — 결과 행에 각인해 재현/재개 시 조건 혼입을 막는다.
     model = policy["provider"].get(args.provider, {}).get("model", "")
     prov = _provenance(policy, args.split)
+    # ★run_id 에 계보 지문 포함(R3-6)★ — 데이터·정책이 다른 실행은 run_id 자체가 달라져,
+    #   ablation 의 run_id 필터가 신·구 결과를 분리한다(동결 backfill 데이터와 자동 격리).
+    run_id = f"{_run_id(args.provider, model, args.rail, args.split)}.{prov['dataset_hash'][:6]}.{prov['policy_hash'][:6]}"
     run_meta = {"provider": args.provider, "model": model, "rail": args.rail, "split": args.split,
-                "run_id": _run_id(args.provider, model, args.rail, args.split), **prov}
+                "run_id": run_id, **prov}
     print(f"계보: dataset={prov['dataset_hash']} policy={prov['policy_hash']} "
           f"commit={prov['commit']} sdk={prov['sdk']}")
     # 기존 runs.jsonl 에 다른 계보가 섞였으면 경고(코드/데이터 변경 후 stale 재사용 방지).

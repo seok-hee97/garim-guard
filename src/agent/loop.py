@@ -14,6 +14,8 @@ text-only 응답이면 종료한다. iteration cap 으로 무한 루프를 막�
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 import uuid
 from typing import Any
@@ -23,6 +25,13 @@ from . import log as alog
 from . import tools as toolmod
 from .hooks import Block, GuardrailHooks, HITLRequired, NoOpHooks, Redacted, Rehydrated, Tainted_
 from .taint import sources_of, unwrap
+
+
+def idem_ns(*parts: object) -> str:
+    """단사(injective) 멱등성 키 — 구성요소를 JSON 리스트로 해시한다. ':' 문자열 결합은
+    principal.id('agent:demo')·클라이언트 키가 ':'를 포함해 접두 충돌이 나므로(R3-1) 금지."""
+    return hashlib.sha256(
+        json.dumps([str(p) for p in parts], ensure_ascii=False).encode()).hexdigest()[:32]
 from .trace import EpisodeTrace, HopTrace
 
 _log = alog.get_logger()
@@ -164,7 +173,7 @@ async def run_episode(
             #    쓰게 하여, 같은 논리적 환불이 승인 두 건으로 갈라져 이중 실행되는 것을 막는다.
             #    (Block 도 ordinal 을 소비 — 키 유일성만 필요, 값 자체는 의미 없음.)
             _action_ordinal += 1
-            _ik = f"{_idem_scope}:{_action_ordinal}"
+            _ik = idem_ns(_idem_scope, _action_ordinal)   # ★단사 인코딩(R3-1)★ — ':' 결합 금지
             # ── HITL 필요: 승인 큐가 있으면 액션을 적재(배치 내 다건도 전부 적재 — 유실 방지) ──
             if isinstance(gate, HITLRequired):
                 if hitl_queue is not None:

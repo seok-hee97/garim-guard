@@ -34,7 +34,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 | **구조적 로깅** | JSON 로그 + `episode_id` 상관(contextvar), ★PII 미로깅★ | [log.py](../src/agent/log.py) |
 | **DLP 배선** | `vault.restore`(최종 응답만)·egress DLP scan(외부싱크 잔여 원본 PII 차단)·after_tool fail-closed | loop.py·policy.py |
 | **Tier A 엄격 스키마** | 미선언 인자 거부 + 정수 암묵 형변환 거부 (gated: 서비스 on / 평가 off → 재현성 보존) | policy.py |
-| **테스트** | 99 통과(CI-core 93·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
+| **테스트** | 104 통과(CI-core 98·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
 
 **라이브 검증(2026-07):** 실 gpt-4o-mini 로 `POST /v1/agent/run` → `lookup_customer(phone=<KR_PHONE_1>)`
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
@@ -54,7 +54,8 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 > - **refund authz ≡ egress(demo)** — `authz.account_unverified` 는 `egress.refund_accounts` allowlist 와 동치라 데모에선 egress 가 먼저 차단(구조적 도달 불가). 실운영은 전역 유효계좌 ⊋ 담당계좌 로 분리해야 authz 가 의미.
 > - **인메모리 상태** — 큐/백엔드가 프로세스 메모리에 있어 재시작 시 소실(실운영은 DB/redis). 승인 TTL(기본 3600s)·정책변경 후 금액한도 재검사·요청/HITL 멱등성은 **구현됨**. **부수효과 outbox 상태모델(submitted/completed/unknown)과 실 job queue 는 미구현**(현재는 완료까지 동기 대기 — deadline 벽시계 보장 없음).
 > - 승인자 authN·**직무분리(요청자≠승인자)는 강제됨**(역할키 분리 + `appr.principal == approver.id` 차단, 테스트 고정). 데모 자격증명은 비-prod 전용(prod 는 주입 자격증명 필수).
-> - **본문(body) 토큰 유지 · lookup_customer 자체 접근제어 미제한(대화-고객 바인딩은 customer_id 로 지원) · 대시보드/경보 미구현 · 전체 대화 재개 미구현.**
+> - **본문(body) 토큰 유지 · 대시보드/경보 미구현 · 전체 대화 재개 미구현.** (lookup_customer 읽기-경로 스코프는 **구현됨** — 바인딩 고객 밖 phone/rrn 조회 차단 `authz.lookup_out_of_scope`.)
+> - **멀티테넌트 격리(2차 하드닝):** 멱등성 키 단사 인코딩(테넌트 충돌 방지)·빈 scope 승인 fail-closed·`/v1/audit` 테넌트 필터·in_flight 용량 상한 적용. 단 실 IdP/DB/분산 job queue 는 여전히 실운영 몫.
 
 ---
 

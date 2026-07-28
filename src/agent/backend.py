@@ -66,19 +66,30 @@ class ServiceWorld(ToolWorld):
             self._sent[idempotency_key] = {"to": to, "subject": subject}   # 원본 발송 결과 보존
         return {"sent": True, "to": to, "subject": subject}
 
-    def audit(self) -> dict[str, Any]:
-        """관측용 — 처리된 환불·발송 이메일 요약. ★계좌 등 원본 PII 는 마스킹★(approvals 와 동일)."""
+    def audit(self, customer_ids: frozenset[str] | None = None) -> dict[str, Any]:
+        """관측용 — 처리된 환불·발송 이메일 요약. ★계좌 등 원본 PII 는 마스킹★(approvals 와 동일).
+
+        ★테넌트 scope(R3-3)★ — customer_ids 지정 시, 각 레코드의 계좌/수신자가 그 고객집합에
+        속하는 것만 반환한다(다른 테넌트 레코드 은닉). 어느 고객에도 매핑되지 않는 레코드는
+        scope 감사자에게 노출하지 않는다(fail-closed). None 이면 전체(글로벌 감사·단일테넌트 데모)."""
         from .hitl import _mask
+        acct2cust = {c["account"]: c["id"] for c in self.customers if c.get("account")}
+        email2cust = {c["email"]: c["id"] for c in self.customers if c.get("email")}
+
+        def _in(owner: str | None) -> bool:
+            return customer_ids is None or (owner is not None and owner in customer_ids)
+
+        refunds = [r for r in self.refunds.values() if _in(acct2cust.get(r["account"]))]
+        outbox = [e for e in self.outbox if _in(email2cust.get(e["to"]))]
         return {
             "refunds": [{"refund_id": r["refund_id"], "account": _mask("account", r["account"]),
-                         "amount": r["amount"], "status": r["status"]}
-                        for r in self.refunds.values()],
+                         "amount": r["amount"], "status": r["status"]} for r in refunds],
             "outbox": [{"to": _mask("to", e["to"]), "subject": e["subject"],
-                        "status": e.get("status", "completed")} for e in self.outbox],
-            "refund_count": len(self.refunds), "email_count": len(self.outbox),
+                        "status": e.get("status", "completed")} for e in outbox],
+            "refund_count": len(refunds), "email_count": len(outbox),
             # 미확인(submitted) 부작용 수 — 재조정 대상(0 이면 모두 완료).
-            "unconfirmed": (sum(1 for r in self.refunds.values() if r.get("status") == "submitted")
-                            + sum(1 for e in self.outbox if e.get("status") == "submitted")),
+            "unconfirmed": (sum(1 for r in refunds if r.get("status") == "submitted")
+                            + sum(1 for e in outbox if e.get("status") == "submitted")),
         }
 
 

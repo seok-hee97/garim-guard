@@ -36,7 +36,7 @@ from . import tools as toolmod
 from .authz import build_registry, Principal, _norm_env
 from .backend import service_world
 from .hitl import ApprovalQueue
-from .loop import run_episode
+from .loop import run_episode, idem_ns
 from .policy import DefenseHooks
 
 # 서버 고정 방어(클라이언트가 못 끔). ★데모/프로토타입 기본값★.
@@ -98,6 +98,14 @@ class _IdemStore:
 
     def pop(self, key: Any, default: Any = None) -> Any:
         return self._d.pop(key, default)
+
+    def inflight_count(self) -> int:
+        """진행 중(in_flight) 항목 수 — active capacity 상한 판정용(R3-5)."""
+        return sum(1 for e in self._d.values() if e.get("status") == "in_flight")
+
+    def at_inflight_capacity(self) -> bool:
+        """진행 중 요청이 저장소 상한만큼 쌓였는가 — 초과 시 새 요청 거부(R3-5)."""
+        return self.inflight_count() >= self._maxsize
 
 
 _state: dict[str, Any] = {}
@@ -273,21 +281,25 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
         principal = _bind_customer(principal, req.customer_id, _state["world"])
     elif len(principal.customer_ids) == 1:
         principal = _bind_customer(principal, next(iter(principal.customer_ids)), _state["world"])
-    elif len(principal.customer_ids) > 1:
+    else:
+        # ★fail-closed(R3-2)★ — 다수 고객이면 대상 불명확, 빈 scope(0)면 담당 고객 없음 →
+        #   어느 쪽이든 customer_id 없이는 쓰기 도구를 허용하지 않는다(빈 scope fall-through 차단).
         raise HTTPException(status_code=400, detail={
             "error": "customer_id_required",
-            "reason": "principal 이 다수 고객을 담당 — 대상 고객을 customer_id 로 지정하세요"})
+            "reason": ("담당 고객이 없거나(빈 scope) 다수입니다 — 대상 고객을 customer_id 로 지정하세요")})
+
+    # 요청 지문 — 멱등성 스코프(내용 인지)와 재생 검증에 공통 사용.
+    req_hash = hashlib.sha256(json.dumps(
+        {"input": req.input, "scenario": req.scenario, "customer_id": req.customer_id,
+         "principal": principal.id, "policy": _state["policy_hash"],
+         "provider": _state["cfg"].provider, "model": _state["cfg"].model},
+        ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     # ── ★요청 멱등성(P0-2)★ — (principal, Idempotency-Key)로 요청 저장. canonical hash 로
     #    같은 키/같은 요청은 원 응답 재생, 같은 키/다른 요청은 409, 진행중 재요청도 409. ──
     idem_store = _state["idem"]
     store_key = None
     if idempotency_key:
-        req_hash = hashlib.sha256(json.dumps(
-            {"input": req.input, "scenario": req.scenario, "customer_id": req.customer_id,
-             "principal": principal.id, "policy": _state["policy_hash"],
-             "provider": _state["cfg"].provider, "model": _state["cfg"].model},
-            ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         store_key = (principal.id, idempotency_key)
         prev = idem_store.get(store_key)
         if prev is not None:
@@ -299,6 +311,9 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
                 raise HTTPException(status_code=409, detail={
                     "error": "request_in_progress", "idempotency_key": idempotency_key})
             return prev["response"]         # 완료된 원 응답 재생(부작용 재실행 없음)
+        # ★in_flight 용량 상한(R3-5)★ — 진행 중 요청이 저장소 상한만큼 쌓이면 새 요청은 거부(503).
+        if idem_store.at_inflight_capacity():
+            raise HTTPException(status_code=503, detail={"error": "idempotency_store_saturated"})
         idem_store.set(store_key, {"hash": req_hash, "status": "in_flight", "response": None})
 
     hooks = DefenseHooks(_state["policy"], dict(SERVER_DEFENSES),
@@ -308,9 +323,10 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
             req.input, _state["provider"], _state["cfg"],
             hooks=hooks, world=_state["world"], defenses=dict(SERVER_DEFENSES),
             scenario=req.scenario, episode_id=episode_id, hitl_queue=_state["hitl"],
-            # ★principal 네임스페이스(P0-1)★ — 백엔드 멱등성 키에 principal.id 를 prefix 해
-            #   서로 다른 테넌트가 같은 Idempotency-Key 를 써도 공유 백엔드에서 충돌하지 않게 한다.
-            idempotency_scope=f"{principal.id}:{idempotency_key or episode_id}",
+            # ★단사·내용인지 멱등성 스코프(R3-1·R3-4)★ — (principal, 클라이언트키, 요청지문)을
+            #   JSON 해시로 결합. principal 분리로 테넌트 충돌 없고, req_hash 포함으로 같은 키·다른
+            #   요청이 백엔드에서 replay 로 오인되지 않는다(HTTP store 만료 후에도).
+            idempotency_scope=idem_ns(principal.id, idempotency_key or episode_id, req_hash),
         )
     except Exception:
         if store_key is not None:
@@ -362,13 +378,15 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
     if appr.principal and appr.principal == approver.id:   # 요청자≠승인자 강제
         raise HTTPException(status_code=403, detail="요청자와 승인자가 동일할 수 없습니다(직무분리)")
 
-    # ── ★테넌트 scope 강제(P0-2)★ — 승인자가 담당하지 않는 고객의 승인은 조회·승인·거부 불가 ──
-    if appr.customer_id and appr.customer_id not in approver.customer_ids:
+    # ── ★테넌트 scope 강제(P0-2·R3-2)★ — 담당하지 않는 고객의 승인은 조회·승인·거부 불가.
+    #    ★빈 customer_id 승인은 '모두에게 승인 가능'이 아니라 '모두에게 거부'로 fail-closed★
+    #    (scope 없는 비가역 승인이 아무 approver 에게나 실행되던 우회 차단).
+    if not appr.customer_id or appr.customer_id not in approver.customer_ids:
         alog.event(alog.get_logger(), "warning", "approval_scope_denied",
-                   id=approval_id, approver=approver.id, target_customer=appr.customer_id)
+                   id=approval_id, approver=approver.id, target_customer=(appr.customer_id or "<empty>"))
         raise HTTPException(status_code=403, detail={
             "error": "approval_out_of_tenant_scope",
-            "reason": "승인자가 담당하지 않는 고객의 승인입니다"})
+            "reason": "승인자가 담당하지 않는(또는 scope 미지정) 고객의 승인입니다"})
 
     # ── ★승인 stale 방지(P1)★ — 오래된/정책 밖 승인이 실행되지 않게 재검사 ──
     if req.decision == "approve":
@@ -423,9 +441,10 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
 
 @app.get("/v1/audit")
 async def audit(x_api_key: str | None = Header(default=None)) -> dict:
-    """관측 — 처리된 환불·발송 이메일 요약(감사용). 감사자/승인자만 + PII 마스킹."""
-    _require(x_api_key, {"auditor", "approver"})
-    return _state["world"].audit()
+    """관측 — 처리된 환불·발송 이메일 요약(감사용). 감사자/승인자만 + PII 마스킹.
+    ★테넌트 scope 강제(R3-3)★ — 담당 고객(principal.customer_ids)의 레코드만 반환한다."""
+    p = _require(x_api_key, {"auditor", "approver"})
+    return _state["world"].audit(customer_ids=p.customer_ids)
 
 
 def set_provider(provider: Any) -> None:

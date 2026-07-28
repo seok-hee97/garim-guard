@@ -70,8 +70,8 @@ pip install -U "transformers>=4.51.3" "torch>=2.2" "datasets>=2.20" \
 ### 5. 결과 폴드백 (cassettes → eval.ablation)
 현 코드로는 **자동 폴드백 안 됨**. 실블로커:
 1. ~~`src/rails/kanana.py`, `src/rails/shieldgemma.py`, e5 레일 모듈 전부 부재~~ → **구현 완료**(2026-07): `src/rails/kanana.py`·`shieldgemma.py`·`e5_lr.py` 존재, `eval/kanana_compare.py`가 `--rail kanana|shieldgemma|e5` 지원(RunPod 미설치 시 SystemExit 안내). GPU 미설치 로컬에서는 지연 임포트로 import 시점엔 실패하지 않는다. (이 문단은 초기 스켈레톤 기준 기록이며 현재는 해소됨.)
-2. `eval/run.py`의 `_build_rail()`이 KoAgentGuardRail/HeuristicRail을 **하드코딩** → Kanana/ShieldGemma/e5 선택 불가. `--rail` 플래그 추가 또는 `_build_rail` 수정 필요. 안 하면 GPU 레일 점수는 ablation 테이블이 아니라 **kanana_compare가 내는 별도 channel_gap.json**이 산출물.
-3. `eval/kanana_compare.py`가 utter(a)=tool_str(b2)=`it['kb_doc']`로 동일하게 세팅 → **P1a 발화 vs b1 대화채널 갭이 실제 계산 안 됨**. KananaRail에 `score_conversation(messages)`(멀티턴 b1 붕괴 경로) 추가 필요.
+2. ~~`_build_rail()` 하드코딩 → Kanana/ShieldGemma/e5 선택 불가~~ → **해소**: `eval/run.py:_build_rail`이 `--rail ko_agentguard|heuristic|kanana|shieldgemma|e5` 지원(RunPod GPU 레일 선택 가능). GPU 레일 편입은 여전히 `channel_gap.json` 별도 산출이 기본(ablation 테이블 편입은 선택).
+3. ~~kanana_compare가 발화=대화 동일 세팅 → P1a 갭 계산 안 됨~~ → **해소**: `KananaRail.score_conversation(messages)`(멀티턴 b1 붕괴 경로) 구현, `eval/kanana_compare.py`가 `has_conversation_path`로 b1(대화)·b2(문자열)를 분리 계측(P1a 갭 실제 산출). CPU 레일은 b1=a 폴백임을 명시.
 
 ### 6. 작성해야 할 코드 파일 (아직) vs 준비됨
 **작성 필요 (RunPod에서)**:

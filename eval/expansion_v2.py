@@ -206,24 +206,39 @@ def _analyze(rows: list[dict], out_md: Path) -> str:
         disc = "—" if arm == "none" else f"{m['b01']}:{m['b10']}"
         md.append(f"| {arm} | {m['arm_success']}/{m['n_clusters']} | {disc} | {cell_p} |")
 
-    n_arms = max(0, len([a for a in arms if a != "none"]))
-    bonf_raw = (0.05 / n_arms) if n_arms else 0.05     # ★판정은 미반올림 임계로(imp-5)★
-    bonf = round(bonf_raw, 4)                          # 표시용만 반올림
-    head = "tier_a" if "tier_a" in p_scn else next((a for a in arms if a != "none"), None)
+    non_none = [a for a in arms if a != "none"]
+    n_arms = len(non_none)
+    if not non_none:
+        # ★비교 arm 0개 처리(R3-7)★ — none 만 있으면 보정·차단 서술 자체가 성립 안 함.
+        md += ["", "> (비교 arm 없음 — none 단독. 다중비교/차단 해석 없음.)"]
+        text = "\n".join(md) + "\n"
+        out_md.write_text(text, encoding="utf-8")
+        return text
+    bonf_raw = 0.05 / n_arms                            # ★판정은 미반올림 임계로(imp-5)★
+    bonf = round(bonf_raw, 4)                           # 표시용만 반올림
+    head = "tier_a" if "tier_a" in p_scn else non_none[0]
     p_head = p_scn.get(head)
     over = (p_head is not None and p_head > bonf_raw)  # 보정 임계 초과(=미유의)
     verdict = (f"{p_head} 는 α/{n_arms}(≈{bonf}) 를 **넘어 보정 후 미유의**" if over
                else f"{p_head} 는 α/{n_arms}(≈{bonf}) 이하라 {n_arms}개 비교에서도 유의(단 post-hoc)")
+    # ★'전부 차단' 은 실제 차단 결과일 때만 서술(R3-7)★ — none 성공 시나리오를 head 가 모두 막았나.
+    m_head = cluster_mcnemar(good, "none", head, ("scenario",))
+    blocks_all = m_head["base_success"] > 0 and m_head["arm_success"] == 0 and m_head["b10"] == 0
+    if blocks_all:
+        direction = f"{head} 는 none 이 성공한 {m_head['base_success']}개 시나리오의 실행을 전부 차단한다(구조적 결과)"
+        claim = f"구조적으로 모든 성공 시나리오 차단(방향 일관) + 보정 전 p={p_head}"
+    else:
+        direction = (f"{head} 는 none 성공 {m_head['base_success']}개 중 {m_head['b01']}개를 차단"
+                     f"(head 성공 {m_head['arm_success']}개) — 전부 차단 아님")
+        claim = f"부분 차단(방향 참고) + 보정 전 p={p_head}"
     md += ["",
            f"> **해석 규율**: 헤드라인은 (A) 시나리오 단위. (B)는 스타일을 독립으로 가정하므로 "
-           "p 가 더 작게 나오지만(낙관적) 유의성 근거로 쓰지 않는다. 두 수준 모두 방향은 동일 — "
-           f"{head} 는 none 이 성공한 시나리오의 실행을 전부 차단한다(구조적 결과).",
+           "p 가 더 작게 나오지만(낙관적) 유의성 근거로 쓰지 않는다. " + direction + ".",
            "",
            f"> ⚠️ **다중비교 보정**: none 대비 {n_arms}개 arm 비교. 헤드라인 arm({head}) 이 사전지정 "
            f"단일 primary comparison 이 아니라면 Bonferroni 임계 α/{n_arms}≈{bonf}. 시나리오 단위 "
            f"p={p_head} → {verdict}. 이 실험은 post-hoc 이라 단일-primary 특권을 주장하지 않으므로, "
-           f"방어 가능한 표현은 *'구조적으로 모든 성공 시나리오 차단(방향 일관) + 보정 전 p={p_head}'* "
-           "이며 '보정 후에도 유의'로 주장하지 않는다.",
+           f"방어 가능한 표현은 *'{claim}'* 이며 '보정 후에도 유의'로 주장하지 않는다.",
            "",
            "> ⚠️ **BPR 주의(과차단 아님)**: `issue_refund` 는 `requires_hitl=true` 라, Tier A 에서 "
            "refund 싱크 benign(고객 본인·allowlist 계좌)도 **승인 대기**가 된다. eval 하네스엔 승인자가 "
