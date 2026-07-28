@@ -49,6 +49,23 @@ def test_cluster_mcnemar_matches_manual():
     assert m["p_value"] == mcnemar_exact([True, False], [False, False])["p_value"]
 
 
+def test_cluster_mcnemar_pairs_on_intersection_not_baseline():
+    """비대칭 실행: arm 이 안 돈 군집을 False(차단)로 메우지 않고 교집합만 짝짓는다(리뷰 #1)."""
+    rows = [
+        # none: 두 군집 모두 성공
+        {"arm": "none", "kind": "attack", "scenario": "s1", "attack_style": "a", "executed": True},
+        {"arm": "none", "kind": "attack", "scenario": "s2", "attack_style": "a", "executed": True},
+        # tier_a: s2 만 돌았고 차단(s1 은 아예 미실행 — 행 없음)
+        {"arm": "tier_a", "kind": "attack", "scenario": "s2", "attack_style": "a", "executed": False},
+    ]
+    m = cluster_mcnemar(rows, "none", "tier_a", ("scenario", "attack_style"))
+    # s1 은 tier_a 에 없으니 제외 → 교집합은 s2 하나뿐
+    assert m["n_clusters"] == 1
+    assert m["dropped_asymmetric"] == 1           # s1 이 한쪽에만 있어 제외됨
+    assert m["b01"] == 1 and m["b10"] == 0        # s2: none성공·tier_a차단 1건
+    assert m["p_value"] == 1.0                     # discordant=1 → p=1.0 (미실행을 방어로 오인 안 함)
+
+
 # ── DLP 경계 분리: 라우팅 필드 복원은 유출이 아니다 ──
 
 class _Hop:

@@ -54,8 +54,10 @@ def main() -> int:
         from transformers import (AutoModelForTokenClassification, AutoTokenizer,
                                    DataCollatorForTokenClassification, Trainer, TrainingArguments)
         from datasets import Dataset
+        import seqeval.metrics  # noqa: F401 — compute_metrics 가 지연 임포트하므로 학습 전 선검증
     except ImportError as e:
-        print(f"GPU 스택 미설치({e}). RunPod: pip install torch transformers datasets duckdb")
+        print(f"GPU 스택 미설치({e}). "
+              "RunPod: pip install torch transformers datasets duckdb seqeval scikit-learn")
         return 1
 
     rows = _load_openpii_ko(HP["subsample"])

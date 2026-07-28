@@ -71,7 +71,7 @@ def _done() -> set[tuple]:
         if r.get("finish_reason") == "error":
             continue
         out.add((r["arm"], r["case_id"], r.get("provider", ""),
-                 r.get("model", ""), r.get("rail", "")))
+                 r.get("model", ""), r.get("rail", ""), r.get("split", "")))
     return out
 
 
@@ -154,7 +154,7 @@ async def main() -> int:
                 "run_id": _run_id(args.provider, model, args.rail, args.split)}
 
     def _key(arm: str, cid: str) -> tuple:
-        return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"])
+        return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"], run_meta["split"])
 
     total = len(arms) * (len(attacks) + len(utility))
     n = 0

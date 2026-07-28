@@ -1,7 +1,8 @@
 # SafeAgent-KR — 실행 서비스(HTTP 런타임) 컨테이너 (core 런타임만; GPU 레일 제외).
 # 빌드:  docker build -t safeagent-kr .
 # 실행:  docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
-#        (또는 -e OPENAI_API_KEY=... 후 policy.yaml provider.active=openai)
+# ⚠️ 이 이미지는 core.lock 만 설치 → provider=gemini 전용(google-genai 포함, openai 미포함).
+#    OpenAI provider 로 쓰려면 requirements.core.txt 에 openai 를 추가하고 core.lock 재생성 후 재빌드.
 
 FROM python:3.11-slim AS base
 

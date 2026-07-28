@@ -36,8 +36,9 @@ def main() -> int:
         from datasets import load_dataset
         from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
                                    DataCollatorWithPadding, Trainer, TrainingArguments)
+        import sklearn.metrics  # noqa: F401 — compute_metrics 가 지연 임포트하므로 학습 전 선검증
     except ImportError as e:
-        print(f"GPU 스택 미설치({e}). RunPod: pip install torch transformers datasets")
+        print(f"GPU 스택 미설치({e}). RunPod: pip install torch transformers datasets scikit-learn")
         return 1
 
     ds = load_dataset("jeanlee/kmhas_korean_hate_speech", revision="refs/convert/parquet")

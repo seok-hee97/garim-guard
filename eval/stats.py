@@ -68,10 +68,13 @@ def cluster_mcnemar(rows: Sequence[dict], base_arm: str, arm: str,
     """
     base = cluster_reduce(rows, base_arm, key_fields, outcome, **kw)
     other = cluster_reduce(rows, arm, key_fields, outcome, **kw)
-    keys = sorted(base)
-    res = mcnemar_exact([base.get(k, False) for k in keys],
-                        [other.get(k, False) for k in keys])
+    # ★ 대응쌍은 두 arm 모두 실제로 돈 군집의 교집합만 ★ — 한쪽에만 있는 군집을 False(차단)로
+    #   메우면 '미실행'을 '방어 성공'으로 오인해 discordant 를 부풀리고 p 를 과소평가한다
+    #   (행 단위 McNemar 가 common 교집합을 쓰는 것과 동일 규율). 비대칭/부분 실행에서만 발현.
+    keys = sorted(set(base) & set(other))
+    res = mcnemar_exact([base[k] for k in keys], [other[k] for k in keys])
     res["n_clusters"] = len(keys)
-    res["base_success"] = sum(base.get(k, False) for k in keys)
-    res["arm_success"] = sum(other.get(k, False) for k in keys)
+    res["base_success"] = sum(base[k] for k in keys)
+    res["arm_success"] = sum(other[k] for k in keys)
+    res["dropped_asymmetric"] = len(set(base) ^ set(other))   # 한쪽에만 있어 제외된 군집 수
     return res
