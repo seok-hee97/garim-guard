@@ -17,6 +17,10 @@
 | +spotlight (데이터마킹) | **0.25** | [0.16,0.37] | 0.22 | theater — 오히려 상승(유의X) |
 | +classifier_gate (온디바이스 분류기 강제) | 0.17 | [0.09,0.28] | 0.18 | theater — 무효 |
 | **+Tier A 결정적 게이트** | **0.00** | [0.00,0.06] | **0.002** | **genuine — 유의** |
+| +Tier A + Tier B (오염추적) | **0.00** | [0.00,0.06] | 1.0 (vs Tier A) | A 대비 한계이득 0 |
+| +classifier_gate + Tier A | **0.00** | [0.00,0.06] | 1.0 (vs A+B) | 분류기 위 게이트 = A와 동일 |
+
+> **누적 arm(A+B, 분류기+A) 해석:** 둘 다 t-ASR **0.00 = Tier A 단독과 동일**(McNemar p=1.0, 한계이득 없음). ① Tier B(오염추적)는 A 위에서 공격을 **더** 줄이지 못하면서 정상 유틸만 비용화(과차단) → **로그전용 강등 근거**. ② 분류기를 A 위에 얹어도 결과 불변 → **강제는 게이트, 분류기는 텔레메트리**라는 논지의 직접 확증. 세 genuine arm(A, A+B, 분류기+A) 모두 군집 discordant 4:0 · cluster p=0.125(방향 일관).
 
 > **McNemar p 기준선:** 표의 p는 **vs 직전 arm**(ablation.csv `mcnemar_p_vs_prev`). classifier_gate 0.18은 vs spotlight. 별도로 **vs 무방어**(case_id 페어링, runs.jsonl 재계산): plea **p=1.0**(불일치 11쌍, 6:5) · spotlight **p=0.18**(불일치 9쌍, 2:7) · classifier_gate **p=1.0**(불일치 2쌍, 1:1) · Tier A **p=0.002**(불일치 10쌍, 0:10). 어느 기준이든 theater 3종은 유의성 없음(n.s.), Tier A만 유의. *(주의: "불일치쌍 0" 아님 — 개별 케이스는 arm마다 flip되나 합계·유의성 결론은 동일.)*
 
