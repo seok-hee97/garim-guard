@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from eval.stats import cluster_reduce, cluster_mcnemar, mcnemar_exact
 from eval.dlp_eval import _measure_episode
+from src.agent.trace import EpisodeTrace, HopTrace
 
 
 # ── 군집 축소: 같은 (scenario, style) 변형들은 1표로 합쳐진다 ──
@@ -83,3 +84,20 @@ def test_dlp_pii_in_content_field_is_leak():
     model_view, unauthorized = _measure_episode(_Ep([hop]), pii)
     assert unauthorized["rrn"] is True           # body 에 원본 RRN → 유출
     assert unauthorized["email"] is False         # to 는 라우팅 → 제외
+
+
+# ── effective_args(복원된 실제 PII)는 디스크 직렬화에서 제거되어야 한다 ──
+
+def test_effective_args_not_serialized_to_trace():
+    """to_dict()(→ traces.jsonl)에 복원된 원본 PII 가 새지 않는지. in-memory 는 유지."""
+    ep = EpisodeTrace(episode_id="t")
+    h = HopTrace(episode_id="t", hop=0, tool_name="issue_refund",
+                 tool_args={"account": "<KR_ACCOUNT_1>", "reason": "환불"},
+                 effective_args={"account": "110-000-000001", "reason": "환불"})
+    ep.add(h)
+    d = ep.to_dict()
+    blob = str(d)
+    assert "effective_args" not in d["hops"][0]     # 필드 자체 제거
+    assert "110-000-000001" not in blob              # 원본 계좌가 직렬화에 없음
+    assert "<KR_ACCOUNT_1>" in blob                  # 토큰화된 tool_args 는 보존
+    assert h.effective_args["account"] == "110-000-000001"   # in-memory DLP 계측용 유지

@@ -91,6 +91,10 @@ class EpisodeTrace:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("untrusted_corpus", None)   # 전이 상태 + 원문(PII 가능) → 트레이스에 남기지 않음
+        # ★ effective_args 는 복원된 실제 PII(계좌/이메일/RRN) → 디스크(traces.jsonl)에 남기지 않는다.
+        #   DLP 계측(eval/dlp_eval)은 in-memory ep 객체에서만 읽으므로 직렬화 불필요.
+        for h in d.get("hops", []):
+            h.pop("effective_args", None)
         return d
 
 
