@@ -95,10 +95,10 @@ uvicorn src.agent.server:app --port 8000
 |---|---|
 | `GET /healthz` | liveness (의존성 무관 200) |
 | `GET /readyz` | readiness (provider·rail 준비 여부) |
-| `POST /v1/agent/run` | 에이전트 실행 (**`X-API-Key` 필수**) |
-| `GET /v1/approvals` | 대기 중 HITL 승인 목록 (PII 마스킹) |
-| `POST /v1/approvals/{id}` | 승인/거부 → 승인 시 백엔드 실행(idempotent) |
-| `GET /v1/audit` | 처리된 환불·이메일 관측 (계좌 마스킹) |
+| `POST /v1/agent/run` | 에이전트 실행 (**agent 역할 키 필수**, 없으면 401·역할 불일치 403) |
+| `GET /v1/approvals` | 대기 중 HITL 승인 목록 (PII 마스킹) — **approver/auditor** |
+| `POST /v1/approvals/{id}` | 승인/거부 → 백엔드 실행(idempotent) — **approver, 요청자≠승인자** |
+| `GET /v1/audit` | 처리 내역 관측 (PII 마스킹) — **auditor/approver** |
 
 ```bash
 KEY='X-API-Key: demo-agent-key'      # ★fail-closed: 키 없으면 401★
@@ -119,21 +119,22 @@ curl -s -XPOST localhost:8000/v1/agent/run -H "$KEY" -H 'content-type: applicati
      -d '{"input":"이 고객 환불 처리해 주세요"}'
 #    → {"status":"hitl_pending","pending_approval":"appr_00001", ...}
 
-# 2) 운영자가 대기 목록 확인 (계좌는 110***01 로 마스킹)
-curl -s localhost:8000/v1/approvals
+# ★직무분리: 승인=demo-approver-key, 감사=demo-auditor-key (agent 키로는 자기승인 403)★
+# 2) 승인자가 대기 목록 확인 (계좌·사유 PII 마스킹)
+curl -s localhost:8000/v1/approvals -H 'X-API-Key: demo-approver-key'
 
-# 3) 승인 → 백엔드에 실제 환불 실행 (거부는 {"decision":"deny"})
+# 3) 승인자 승인 → 백엔드에 실제 환불 실행 (거부는 {"decision":"deny"}). approver 는 토큰에서 결정
 curl -s -XPOST localhost:8000/v1/approvals/appr_00001 \
-     -H 'content-type: application/json' -d '{"decision":"approve","approver":"manager"}'
+     -H 'X-API-Key: demo-approver-key' -H 'content-type: application/json' -d '{"decision":"approve"}'
 
-# 4) 감사 — 처리된 환불 확인 (재승인은 409, 이중환불 없음)
-curl -s localhost:8000/v1/audit
+# 4) 감사자가 처리 내역 확인 (재승인은 409, 이중환불 없음)
+curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ```
 
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 66 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 70 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -171,7 +172,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **66 통과** (.venv) |
+| 유닛/통합 테스트 | ✅ **70 통과** (.venv) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 

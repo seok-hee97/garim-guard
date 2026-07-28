@@ -20,21 +20,25 @@ from .hooks import Block
 @dataclass(frozen=True)
 class Principal:
     id: str
+    role: str = "agent"                                                   # agent | approver | auditor
     customer_ids: frozenset[str] = field(default_factory=frozenset)
     verified_emails: frozenset[str] = field(default_factory=frozenset)   # 발송 허용 수신자
     verified_accounts: frozenset[str] = field(default_factory=frozenset)  # 환불 허용 계좌
 
 
 def registry_from_world(world: Any) -> dict[str, Principal]:
-    """데모: 단일 상담원 키가 데모 고객 전부를 담당(등록 이메일/계좌 스코프)."""
+    """데모 키 3종 — 역할분리(직무분리): 에이전트 실행 / 승인 / 감사 키를 분리한다.
+    실운영은 IdP/OAuth 역할 클레임으로 교체."""
     custs = getattr(world, "customers", []) or []
+    scope = dict(
+        customer_ids=frozenset(c["id"] for c in custs),
+        verified_emails=frozenset(c["email"] for c in custs if c.get("email")),
+        verified_accounts=frozenset(c["account"] for c in custs if c.get("account")),
+    )
     return {
-        "demo-agent-key": Principal(
-            id="agent:demo",
-            customer_ids=frozenset(c["id"] for c in custs),
-            verified_emails=frozenset(c["email"] for c in custs if c.get("email")),
-            verified_accounts=frozenset(c["account"] for c in custs if c.get("account")),
-        )
+        "demo-agent-key": Principal(id="agent:demo", role="agent", **scope),
+        "demo-approver-key": Principal(id="approver:demo", role="approver", **scope),
+        "demo-auditor-key": Principal(id="auditor:demo", role="auditor", **scope),
     }
 
 

@@ -45,6 +45,7 @@ async def run_episode(
     deadline_s: float = 60.0,
     per_call_timeout_s: float = 30.0,
     hitl_queue: Any = None,
+    idempotency_scope: str = "",
 ) -> EpisodeTrace:
     # ★ 설정 불변식은 진입에서 fail-fast (오설정=프로그래밍 오류, 런타임 예외 처리와 구분).
     #   런타임/일시 예외(429·타임아웃)는 아래 루프에서 잡아 우아하게 error 종료한다.
@@ -59,6 +60,11 @@ async def run_episode(
     )
     alog.bind(episode_id=ep.episode_id)
     t_ep = time.perf_counter()
+    # 멱등성 스코프: 클라이언트 Idempotency-Key(있으면) 아니면 episode_id. 그 아래 ★단조 ordinal★을
+    # 붙여 키를 만든다 — 모델 call_id(send_email#0)는 매 응답마다 리셋되어 같은 에피소드 다른 호출이
+    # 충돌하므로 쓰지 않는다.
+    _idem_scope = idempotency_scope or ep.episode_id
+    _action_ordinal = 0
     messages: list[Msg] = [Msg(role="user", text=user_input)]
 
     for _ in range(max_iterations):
@@ -191,15 +197,23 @@ async def run_episode(
                 args_for_exec = gate.args
             hop.gate_decision = "ALLOW"
 
-            # ── 도구 실행 (실도구가 걸려도 요청을 붙잡지 못하게 스레드+타임아웃) ──
+            # ── 도구 실행 ──
+            #  멱등성 키 = 스코프 + 단조 ordinal(call_id 리셋 충돌 회피).
+            #  ★부작용 도구(issue_refund/send_email)는 wait_for abandon 금지★ — to_thread 는 만료해도
+            #  스레드를 못 멈춰 '유령 부작용'(사용자엔 실패, 실제론 발송)이 생긴다. 완료까지 대기하고
+            #  실 결과를 보고한다(실 API 는 자체 소켓 타임아웃으로 무한대기 방지). 읽기 도구만 abandon-timeout.
+            _action_ordinal += 1
+            _ik = f"{_idem_scope}:{_action_ordinal}"
             try:
-                _tbudget = min(per_call_timeout_s,
-                               max(0.0, deadline_s - (time.perf_counter() - t_ep)))
-                raw = await asyncio.wait_for(
-                    asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
-                                      call.call_id, world=world, taint_enabled=taint_on,
-                                      idempotency_key=f"{ep.episode_id}:{call.call_id}"),
-                    timeout=_tbudget)
+                _exec = asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
+                                          call.call_id, world=world, taint_enabled=taint_on,
+                                          idempotency_key=_ik)
+                if call.name in ("issue_refund", "send_email"):
+                    raw = await _exec                      # 부작용: abandon 금지(유령 부작용 방지)
+                else:
+                    _tbudget = min(per_call_timeout_s,
+                                   max(0.0, deadline_s - (time.perf_counter() - t_ep)))
+                    raw = await asyncio.wait_for(_exec, timeout=_tbudget)
                 hop.executed = True
                 hop.taint_sources = sorted(sources_of(raw))
             except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001 — 도구 오류도 트레이스에

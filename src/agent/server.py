@@ -137,13 +137,22 @@ def _business_status(ep) -> str:
 
 
 def _resolve_principal(x_api_key: str | None):
-    """X-API-Key → principal. ★fail-closed★ — 키 없거나 미등록이면 401(무인증 전-고객 접근 차단).
-    데모 키: `demo-agent-key`. 실운영은 IdP/OAuth 로 교체."""
+    """X-API-Key → principal. ★fail-closed★ — 키 없거나 미등록이면 401.
+    데모 키: agent=`demo-agent-key`, 승인=`demo-approver-key`, 감사=`demo-auditor-key`."""
     if not x_api_key:
         raise HTTPException(status_code=401, detail="X-API-Key 헤더가 필요합니다")
     p = _state["principals"].get(x_api_key)
     if p is None:
         raise HTTPException(status_code=401, detail="유효하지 않은 API 키")
+    return p
+
+
+def _require(x_api_key: str | None, roles: set[str]):
+    """인증 + 역할 인가(직무분리). 역할 불일치 시 403."""
+    p = _resolve_principal(x_api_key)
+    if p.role not in roles:
+        raise HTTPException(status_code=403,
+                            detail=f"역할 '{p.role}' 은 권한 없음(필요: {sorted(roles)})")
     return p
 
 
@@ -160,19 +169,21 @@ async def readyz() -> dict:
 
 
 @app.post("/v1/agent/run", response_model=RunResponse)
-async def run(req: RunRequest, x_api_key: str | None = Header(default=None)) -> RunResponse:
+async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
+              idempotency_key: str | None = Header(default=None)) -> RunResponse:
     if not _state.get("ready") or _state.get("provider") is None:
         raise HTTPException(status_code=503, detail="provider not ready")
 
     episode_id = uuid.uuid4().hex[:12]
     alog.bind(episode_id=episode_id)
-    principal = _resolve_principal(x_api_key)
+    principal = _require(x_api_key, {"agent"})
     hooks = DefenseHooks(_state["policy"], dict(SERVER_DEFENSES),
                          rail=_state["rail"], principal=principal)
     ep = await run_episode(
         req.input, _state["provider"], _state["cfg"],
         hooks=hooks, world=_state["world"], defenses=dict(SERVER_DEFENSES),
         scenario=req.scenario, episode_id=episode_id, hitl_queue=_state["hitl"],
+        idempotency_scope=(idempotency_key or ""),   # 클라이언트 재시도 dedup(같은 키→같은 스코프)
     )
     return RunResponse(
         episode_id=ep.episode_id,
@@ -191,23 +202,25 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None)) -> 
 
 @app.get("/v1/approvals")
 async def list_approvals(x_api_key: str | None = Header(default=None)) -> dict:
-    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹). 운영자 인증 필요."""
-    _resolve_principal(x_api_key)          # 무인증 접근 차단(401)
+    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹). 승인자/감사자만."""
+    _require(x_api_key, {"approver", "auditor"})
     return {"pending": [a.public() for a in _state["hitl"].list_pending()]}
 
 
 @app.post("/v1/approvals/{approval_id}")
 async def resolve_approval(approval_id: str, req: ApproveRequest,
                            x_api_key: str | None = Header(default=None)) -> dict:
-    """승인/거부. 승인 시 보류된 액션을 백엔드에 실제 실행(idempotent, approval_id 를 키로).
-    ★운영자 인증 필요★(무인증 비가역 실행 차단). 데모는 직무분리(요청자≠승인자) 미강제."""
-    _resolve_principal(x_api_key)          # 무인증 승인(비가역 실행) 차단(401)
+    """승인/거부. ★승인자 역할 필수 + 요청자≠승인자(직무분리)★. approver 는 클라이언트 문자열이
+    아니라 인증 토큰에서 결정한다. 승인 시 보류 액션을 백엔드에 실행(idempotent)."""
+    approver = _require(x_api_key, {"approver"})       # 승인자 역할만(에이전트 자기승인 차단)
     q = _state["hitl"]
     appr = q.get(approval_id)
     if appr is None:
         raise HTTPException(status_code=404, detail="approval not found")
     if appr.status != "pending":
         raise HTTPException(status_code=409, detail=f"already {appr.status}")
+    if appr.principal and appr.principal == approver.id:   # 요청자≠승인자 강제
+        raise HTTPException(status_code=403, detail="요청자와 승인자가 동일할 수 없습니다(직무분리)")
 
     world = _state["world"]
 
@@ -217,7 +230,7 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
         return {"executed": True, "result": raw}
 
     resolved = q.resolve(approval_id, approve=(req.decision == "approve"),
-                         approver=req.approver,
+                         approver=approver.id,          # ★토큰에서 결정(클라이언트 문자열 무시)★
                          executor=_executor if req.decision == "approve" else None)
     # executor 실패 시 approved 로 커밋되지 않음(pending 유지) → 재시도 가능한 502(자금 손실 방지).
     if req.decision == "approve" and resolved.status != "approved":
@@ -233,8 +246,8 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
 
 @app.get("/v1/audit")
 async def audit(x_api_key: str | None = Header(default=None)) -> dict:
-    """관측 — 처리된 환불·발송 이메일 요약(운영자 감사용). 인증 필요 + PII 마스킹."""
-    _resolve_principal(x_api_key)          # 무인증 PII 노출 차단(401)
+    """관측 — 처리된 환불·발송 이메일 요약(감사용). 감사자/승인자만 + PII 마스킹."""
+    _require(x_api_key, {"auditor", "approver"})
     return _state["world"].audit()
 
 
