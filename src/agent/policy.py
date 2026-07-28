@@ -30,6 +30,7 @@ from .taint import sources_of
 _STR_TYPES = {"str", "email", "kr_rrn", "kr_phone", "kr_account"}
 _HIGH_RISK_TIERS = {"external", "irreversible", "exfiltration"}
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")   # 빈 로컬파트·공백·도메인 누락 거부
+_DLP_TOKEN_RE = re.compile(r"<[A-Z_]+_\d+>")            # DLP 토큰(<KR_PHONE_1>) — html escape 시 보호
 
 
 def _dig(policy: dict, ref: str) -> Any:
@@ -357,10 +358,20 @@ class DefenseHooks:
                     rehydrated_any = True
 
         # 4) HTML 이스케이프 — 외부 싱크 본문의 이미지태그/HTML 인젝션 경유 유출(EchoLeak류) 차단.
+        #    ★DLP 토큰(<KR_PHONE_1>)은 보존★하고 그 외 HTML 만 이스케이프(토큰 훼손 방지).
         for a in spec.get("html_escape_args", []) or []:
-            if isinstance(exec_args.get(a), str) and ("<" in exec_args[a] or "&" in exec_args[a]):
-                exec_args[a] = html.escape(exec_args[a])
-                rehydrated_any = True
+            v = exec_args.get(a)
+            if isinstance(v, str) and ("<" in v or "&" in v):
+                out, last = [], 0
+                for m in _DLP_TOKEN_RE.finditer(v):
+                    out.append(html.escape(v[last:m.start()]))
+                    out.append(m.group(0))          # 토큰 스팬은 이스케이프하지 않음
+                    last = m.end()
+                out.append(html.escape(v[last:]))
+                escaped = "".join(out)
+                if escaped != v:
+                    exec_args[a] = escaped
+                    rehydrated_any = True
 
         return Rehydrated(args=exec_args) if rehydrated_any else None
 

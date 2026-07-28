@@ -22,7 +22,9 @@
 
 조건 분해(Tier A): 원본 clean 0.40→**0.00**, 난독화 obf 0.12→**0.00**(McNemar p=0.016). 게이트는 원본=난독화=0.00(P4).
 
-**교과서적 genuine vs theater:** 프롬프트/분류기 기반 방어 3종(애원·spotlight·분류기)은 무방어(0.17) 근처에 머물거나 상승(spotlight 0.25) — **전부 McNemar 유의성 없음.** 오직 결정적 게이트만 0.00으로 유의하게(p=0.002) 감소. spotlight 상승은 프롬프트 방어의 비신뢰성을 보이는 정직한 데이터.
+> ⚠️ **독립성 주의(중요 · p값 하향 표기):** 60건 = 2시나리오 × 5스타일 × **6난독화**. 같은 기본 공격의 난독화 6변형은 강하게 상관되어 있어, **행 단위 McNemar/Wilson은 독립을 과대가정**한다. 시나리오×스타일 **10군집** 단위 보수적 재분석(직접 재계산): 무방어 **4/10** 성공 → Tier A **0/10**, discordant 4:0, **McNemar exact p=0.125**(α=0.05 미유의). 따라서 **행 단위 p=0.002는 탐색적(exploratory)**으로 표기한다. 방어 가능한 정확한 주장은 *"통계적으로 유의하게 증명"*이 아니라 **"Tier A가 관측된 모든 실행(4/4 성공 군집)을 차단했고 방향이 일관된다(구조적 결과)"** 이다. 확증에는 30~50개 독립 공격 + 군집 순열/혼합효과 분석이 필요.
+
+**교과서적 genuine vs theater:** 프롬프트/분류기 기반 방어 3종(애원·spotlight·분류기)은 무방어(0.17) 근처에 머물거나 상승(spotlight 0.25) — **전부 McNemar 유의성 없음.** 오직 결정적 게이트만 0.00으로 감소(행 단위 p=0.002, 군집 단위 p=0.125 — 위 주의 참조). spotlight 상승은 프롬프트 방어의 비신뢰성을 보이는 정직한 데이터.
 
 **결론 (사전등록 예측 대조):**
 - **P2 확인(합계 수준)** — Tier A 에서 ASR_att **합계** 0.17 유지, executed 만 0. ⚠️ 조건 단위로는 clean 0.30→0.40(게이트 차단 후 대화 분기로 재시도) 발산 — "게이트는 시도를 안 바꾼다"는 **합계 수준 주장**이다.
@@ -49,6 +51,8 @@
 **P3 붕괴폭 0.9936 ≥ 0.25.** 강한 탐지기(F1 0.99)도 base64 에 F1 0 붕괴.
 교차언어(P6d): 한국어 오염문서 점수 **0.022** vs 영어 in-domain **0.948**.
 
+> ⚠️ **길이 누수 정직 표기(F1 0.99 하향 해석):** Nemotron 투영에서 양성=원문+인젝션 문장, 음성=그 문장 제거본이라 **양성이 체계적으로 더 길다**(test 평균 543자 vs 215자). **길이 단 하나로 학습한 LR 이 test F1 0.957**(직접 재계산) — 즉 ko_agentguard F1 0.994 의 상당 부분이 인젝션 의미가 아니라 **삽입량·문장 길이 shortcut**일 수 있다. contamination GREEN(중복 감사)은 label shortcut 부재를 보장하지 않는다. 따라서 이 표의 논지는 *"우리가 강한 탐지기를 만들었다"*가 아니라 **"길이 shortcut까지 얻은 최상의 CPU 탐지기조차 base64에 붕괴하고 한국어에 눈멀며, 강제는 게이트에 있어야 한다"** 로 읽어야 한다. 보강: 길이 일치 benign padding·동일길이 replacement·length-only baseline 병기 필요.
+
 ## 4. DLP 싱크별 원본 PII 유출률 (H7)
 
 외부 싱크(send_email/issue_refund) 인자에 고객 원본 PII 노출 비율. n=8 프로브.
@@ -62,6 +66,8 @@
 
 ¹ 이 프로브에서 모델이 RRN 은 외부로 보내지 않음(account/email 유출). vault ON 은 **전 싱크 0%**(목표 달성).
 홉 간 coreference 일관성·왕복 복원은 유닛테스트로 검증(test_vault_scope 6/6).
+
+> ⚠️ **계측 경계 재정의(중요):** 이 0%는 **트레이스에 기록된 모델 인자**(비식별 상태)를 검사한 값이다 — 즉 정확히 측정하는 것은 **"모델이 원본 PII 를 보지 못한다"**(참). 서비스의 egress 사전복원(DLP×TierA 수정)은 send_email 수신자·계좌를 **라우팅을 위해 실제 값으로 복원해 백엔드에 넘긴다** — 따라서 *"외부 도구가 원본 PII 를 전혀 받지 않는다"* 는 **성립하지 않는다**(수신자 주소는 본질적으로 데이터주체 식별자). 정직한 분리 지표: (a) 모델 입력 원본 PII 노출=0, (b) 승인된 라우팅 식별자(to/account)=실제값(설계), (c) subject/body/reason 의 **비인가** PII=차단(dlp_scan_args), (d) 비인가 목적지=authz/egress 차단. H7 의 유효 주장은 (a)·(c)·(d) 이지 "외부로 원본 0" 전체가 아니다.
 
 ## 5. Presidio 한국어 인식기 결함 2건 (재현 확인, 설치본 2.2.364)
 
@@ -137,6 +143,6 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 
 ## 7. 테스트 / 재현성
 
-- 유닛/통합 테스트 **63 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**. (CI core 는 `--ignore=test_dlp_defenses` 로 52 통과; presidio 없으면 그 6건이 빠진다.)
+- 유닛/통합 테스트 **66 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**. (CI core 는 `--ignore=test_dlp_defenses` 로 60 통과; presidio 없으면 그 6건이 빠진다.)
 - 재현 범위: **헤드라인 애블레이션은 라이브 OpenAI 호출**(temp=0 근사 재현 — gpt-4o-mini는 bit-exact 보장 안 함). 카세트 record/replay는 FakeProvider 경로 전용. DLP·channel_gap·R6/R7·e5·shieldgemma는 RunPod GPU 스크립트 산출로 단일 명령에 미포함.
 - GPU 실측 **완료**(§6c): Kanana P1a 격차 1.0 · ShieldGemma EN-KO 0.268 · R6 span 0.985 · R7 Macro 0.709 · e5 교차언어. (⚠️ P1b 난독화 붕괴는 사전등록 미달 0.1 — 정직 보고)

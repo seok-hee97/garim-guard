@@ -48,6 +48,7 @@ def test_tier_c_raises_not_silent_noop():
 # ── PresidioVault 결함 패치 ──
 
 def test_presidio_passport_defect_and_patch():
+    pytest.importorskip("presidio_analyzer")   # core 설치(presidio 미포함)에선 ERROR 아닌 SKIP
     from src.dlp.vault_presidio import _load_recognizers
     unpatched = {r.__class__.__name__: getattr(r, "supported_language", "?")
                  for r in _load_recognizers(patch_defects=False)}
@@ -61,6 +62,7 @@ def test_presidio_passport_defect_and_patch():
 
 
 def test_presidio_vault_roundtrip():
+    pytest.importorskip("presidio_analyzer")   # core 설치(presidio 미포함)에선 ERROR 아닌 SKIP
     from src.dlp.vault_presidio import PresidioVault
     v = PresidioVault()
     t = v.redact("주민등록번호 900101-1234561 여권 M12345678")

@@ -15,9 +15,9 @@
 - **① 채널 조건부 탐지 격차** — 같은 인젝션을 (a) 사용자 발화 vs (b) 도구 반환값으로 주면, 한국어 가드 모델은 (a)에서 동작하고 (b)에서 실패한다. 성능이 아니라 **단일 발화 채점 모델이 도구 경계 너머를 못 본다는 설계 귀결**. (Kanana 실측: 발화 recall 1.0 → 도구 채널 0.0)
 - **② 강제는 분류기가 아니라 게이트에** — 난독화(base64)로 CPU 레일은 F1 0.99→0.0 붕괴하지만, **결정적 정책 게이트(Tier A)의 t-ASR은 불변**이다. 게이트는 문자열을 읽지 않고 도구 identity·정책 테이블만 보기 때문.
 
-> **결론:** 분류기는 이 채널에서 강제 수단이 될 수 없으므로 **log-only 텔레메트리로 강등**하고, 강제는 **도구별 결정적 게이트**가 담당한다. 여기에 요청 스코프 가역 PII 볼트를 결합한다.
+> **결론:** **분류기 단독으로는 이 채널에서 하드 보장을 제공할 수 없으므로**(온디바이스든 아니든) log-only 텔레메트리로 두고, **강제의 최종 권한은 도구별 결정적 게이트**가 가진다. 여기에 요청 스코프 가역 PII 볼트를 결합한다. *(단 강한 한국어 모델 Kanana는 올바른 문자열 채널에서 recall 1.0·난독화에도 ≥0.9 — "분류기 전부 무효"로 일반화하지 않는다. 분류기 강제 실험은 한국어를 못 보는 영어 CPU 레일만 측정됨.)*
 
-**핵심 결과** (실측, `results/RESULTS.md`): Tier A 게이트가 인젝션 실행률을 **17% → 0%** 로 낮춤(McNemar **p=0.002**). 온디바이스 분류기 강제는 한국어 도구채널에서 통계적으로 무효(p=1.0).
+**핵심 결과** (실측, `results/RESULTS.md`): Tier A 게이트가 **관측된 모든 인젝션 실행을 차단**(17% → 0%). ⚠️ 행 단위 McNemar **p=0.002는 탐색적** — 60건이 2시나리오×5스타일×6난독화라 난독화 변형이 상관됨. **군집(시나리오×스타일 10개) 단위 보수적 재분석은 p=0.125**(미유의). 방어 가능한 주장은 "구조적으로 모든 실행 차단(4/4 군집, 방향 일관)"이지 "통계적 유의 증명"이 아니다. 분류기 강제(영어 CPU 레일)는 무효(p=1.0).
 
 ---
 
@@ -133,7 +133,7 @@ curl -s localhost:8000/v1/audit
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 63 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 66 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -171,7 +171,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **63 통과** (.venv) |
+| 유닛/통합 테스트 | ✅ **66 통과** (.venv) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 

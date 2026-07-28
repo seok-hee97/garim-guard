@@ -27,16 +27,35 @@ class Approval:
     result: dict[str, Any] | None = None
 
     def public(self) -> dict[str, Any]:
-        """API 노출용 — 원본 PII(계좌 등)를 마스킹한다."""
+        """API 노출용 — 원본 PII(계좌·이메일)를 재귀 마스킹하고 사유/본문은 제거한다.
+        승인 응답의 backend raw result 도 마스킹해 원본 계좌가 다시 새지 않게 한다."""
         masked = {k: _mask(k, v) for k, v in self.args.items()}
         return {"id": self.id, "tool": self.tool, "args": masked, "status": self.status,
                 "episode_id": self.episode_id, "principal": self.principal, "rule": self.rule,
-                "approver": self.approver, "result": self.result}
+                "approver": self.approver, "result": _sanitize(self.result)}
+
+
+def _sanitize(r: Any) -> Any:
+    """중첩 dict 를 재귀 마스킹 — 계좌/이메일 마스킹, 사유/본문 제거."""
+    if not isinstance(r, dict):
+        return r
+    out = {}
+    for k, v in r.items():
+        if isinstance(v, dict):
+            out[k] = _sanitize(v)
+        elif k in ("reason", "body"):
+            out[k] = "<redacted>"
+        else:
+            out[k] = _mask(k, v)
+    return out
 
 
 def _mask(key: str, val: Any) -> Any:
     if key in ("account", "rrn") and isinstance(val, str) and len(val) > 4:
         return val[:3] + "***" + val[-2:]
+    if key in ("to", "email") and isinstance(val, str) and "@" in val:
+        local, _, domain = val.partition("@")
+        return (local[:1] + "***@" + domain) if local else val
     return val
 
 

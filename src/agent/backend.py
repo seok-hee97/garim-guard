@@ -59,7 +59,7 @@ class ServiceWorld(ToolWorld):
             "refunds": [{"refund_id": r["refund_id"], "account": _mask("account", r["account"]),
                          "amount": r["amount"], "status": r["status"]}
                         for r in self.refunds.values()],
-            "outbox": [{"to": e["to"], "subject": e["subject"]} for e in self.outbox],
+            "outbox": [{"to": _mask("to", e["to"]), "subject": e["subject"]} for e in self.outbox],
             "refund_count": len(self.refunds), "email_count": len(self.outbox),
         }
 

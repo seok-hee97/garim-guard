@@ -197,7 +197,8 @@ async def run_episode(
                                max(0.0, deadline_s - (time.perf_counter() - t_ep)))
                 raw = await asyncio.wait_for(
                     asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
-                                      call.call_id, world=world, taint_enabled=taint_on),
+                                      call.call_id, world=world, taint_enabled=taint_on,
+                                      idempotency_key=f"{ep.episode_id}:{call.call_id}"),
                     timeout=_tbudget)
                 hop.executed = True
                 hop.taint_sources = sorted(sources_of(raw))

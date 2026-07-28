@@ -3,6 +3,12 @@
 > 이 문서는 시스템이 **왜** 이렇게 생겼는지를 설명한다.
 > 실행 계획·일정은 [../project_plan.md](../project_plan.md), 설정 값은 [../config/policy.yaml](../config/policy.yaml).
 
+> ⚠️ **구현 상태 범례(이 문서는 설계 의도를 담아 일부 미구현 요소를 포함한다):**
+> - ✅ **구현·런타임 배선**: Tier A 결정적 게이트 · before_model DLP 비식별 · after_tool DLP 토큰화 · before_tool 게이트 · authz/HITL/상태백엔드(서비스).
+> - 🟡 **부분/log-only**: 분류기 레일(score만 기록, 강제 아님) · Tier B taint(value-provenance, egress 선점으로 독립기여 미미) · spotlight(구조체 출력이라 부분).
+> - ⬜ **설계 전용/미구현**: **Tier C(고정계획·Q-LLM 격리)=`NotImplementedError`로 봉인** · **after_model 모더레이션=현재 no-op**(seam은 있으나 유해성 검사 미배선) · before_model 인젝션 레일 점수(after_tool 단일 레일만 실동작).
+> 아래 다이어그램/설명의 Tier C·Q-LLM·after_model 모더레이션·before_model 레일은 **설계**이며 위 범례로 실제 상태를 판별할 것.
+
 ---
 
 ## 1. 한 문장 요약

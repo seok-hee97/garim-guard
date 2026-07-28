@@ -137,6 +137,39 @@ def test_approval_executor_failure_keeps_pending_retryable():
         assert client.get("/v1/audit").json()["refund_count"] == 1
 
 
+def test_send_email_cross_episode_not_deduped():
+    """★idempotency 키 회귀★ — 서로 다른 에피소드의 다른 이메일이 모델 call_id 충돌로 유실되면 안 됨."""
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
+        server.set_provider(FakeProvider.scripted(
+            [[("send_email", {"to": "minjun.kim@customer.example.com", "subject": "A", "body": "x"})], "ok"]))
+        client.post("/v1/agent/run", json={"input": "A"})
+        server.set_provider(FakeProvider.scripted(
+            [[("send_email", {"to": "seoyeon.lee@customer.example.com", "subject": "B", "body": "y"})], "ok"]))
+        client.post("/v1/agent/run", json={"input": "B"})
+        assert client.get("/v1/audit").json()["email_count"] == 2   # 둘 다 발송(유실 없음)
+
+
+def test_unauthenticated_approvals_and_audit_blocked():
+    """★무인증 차단★ — /v1/approvals·/v1/audit 도 인증 없으면 401(비가역 실행·PII 노출 방지)."""
+    with TestClient(server.app) as client:                          # 헤더 없음
+        server.set_provider(FakeProvider.scripted(["x"]))
+        assert client.get("/v1/approvals").status_code == 401
+        assert client.get("/v1/audit").status_code == 401
+        assert client.post("/v1/approvals/appr_00001", json={"decision": "approve"}).status_code == 401
+
+
+def test_approval_result_masks_account():
+    """★result 마스킹★ — 승인 응답의 backend result 에도 원본 계좌가 노출되지 않는다."""
+    provider = FakeProvider.scripted([
+        [("issue_refund", {"account": "110-000-000001", "amount": 100, "reason": "t"})], "ok"])
+    with TestClient(server.app, headers={"X-API-Key": "demo-agent-key"}) as client:
+        server.set_provider(provider)
+        aid = client.post("/v1/agent/run", json={"input": "환불"}).json()["pending_approval"]
+        rr = client.post(f"/v1/approvals/{aid}", json={"decision": "approve"})
+        assert "110-000-000001" not in rr.text          # 원본 계좌 미노출
+        assert rr.json()["result"]["executed"] is True
+
+
 def test_parallel_hitl_batch_no_loss():
     """★병렬 HITL★ — 한 턴에 비가역 도구 2개면 둘 다 승인 큐에 적재(유실 없음)."""
     provider = FakeProvider.scripted([

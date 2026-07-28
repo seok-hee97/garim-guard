@@ -76,13 +76,15 @@ REGISTRY: dict[str, Callable[..., ToolOutput]] = {
 
 
 def execute(name: str, args: dict[str, Any], call_id: str, *, world: Any = None,
-            taint_enabled: bool = False) -> Any:
+            taint_enabled: bool = False, idempotency_key: str = "") -> Any:
     """도구를 실행하고, 비신뢰 출력이면 (taint on 시) Tainted 로 래핑한다."""
     fn = REGISTRY.get(name)
     if fn is None:
         raise KeyError(f"알 수 없는 도구: {name}")
-    if name in ("issue_refund", "send_email"):     # 비가역/외부 싱크는 idempotency_key(=call_id) 전달
-        out = fn(**args, world=world, idempotency_key=call_id)
+    if name in ("issue_refund", "send_email"):
+        # 비가역/외부 싱크는 idempotency 키 전달. ★모델 call_id(send_email#0)는 응답마다 반복되어
+        # 전역 키로 부적합★ → 호출측이 에피소드/승인 스코프 키를 주입(없으면 call_id 폴백).
+        out = fn(**args, world=world, idempotency_key=(idempotency_key or call_id))
     else:
         out = fn(**args, world=world)
     if out.untrusted and taint_enabled:

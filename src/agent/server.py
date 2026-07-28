@@ -190,14 +190,18 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None)) -> 
 
 
 @app.get("/v1/approvals")
-async def list_approvals() -> dict:
-    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹)."""
+async def list_approvals(x_api_key: str | None = Header(default=None)) -> dict:
+    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹). 운영자 인증 필요."""
+    _resolve_principal(x_api_key)          # 무인증 접근 차단(401)
     return {"pending": [a.public() for a in _state["hitl"].list_pending()]}
 
 
 @app.post("/v1/approvals/{approval_id}")
-async def resolve_approval(approval_id: str, req: ApproveRequest) -> dict:
-    """승인/거부. 승인 시 보류된 액션을 백엔드에 실제 실행(idempotent, approval_id 를 키로)."""
+async def resolve_approval(approval_id: str, req: ApproveRequest,
+                           x_api_key: str | None = Header(default=None)) -> dict:
+    """승인/거부. 승인 시 보류된 액션을 백엔드에 실제 실행(idempotent, approval_id 를 키로).
+    ★운영자 인증 필요★(무인증 비가역 실행 차단). 데모는 직무분리(요청자≠승인자) 미강제."""
+    _resolve_principal(x_api_key)          # 무인증 승인(비가역 실행) 차단(401)
     q = _state["hitl"]
     appr = q.get(approval_id)
     if appr is None:
@@ -228,8 +232,9 @@ async def resolve_approval(approval_id: str, req: ApproveRequest) -> dict:
 
 
 @app.get("/v1/audit")
-async def audit() -> dict:
-    """관측 — 처리된 환불·발송 이메일 요약(운영자 감사용)."""
+async def audit(x_api_key: str | None = Header(default=None)) -> dict:
+    """관측 — 처리된 환불·발송 이메일 요약(운영자 감사용). 인증 필요 + PII 마스킹."""
+    _resolve_principal(x_api_key)          # 무인증 PII 노출 차단(401)
     return _state["world"].audit()
 
 
