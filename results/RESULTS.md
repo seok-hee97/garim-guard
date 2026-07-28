@@ -1,7 +1,7 @@
 # SafeAgent-KR 실측 결과 요약 (2026-07-27)
 
 > 모든 수치는 실제 실행 산출물이다. 코퍼스 KoTIP-Bench v0.1, provider gpt-4o-mini(temp=0),
-> CPU 레일 ko_agentguard(sklearn). GPU 레일(Kanana·ShieldGemma)은 RunPod 이관 예정.
+> CPU 레일 ko_agentguard(sklearn). GPU 레일(Kanana·ShieldGemma·e5)은 RunPod 실측 완료(§6c).
 > 재현: `python -m eval.build_dataset && python -m eval.run --split test --provider openai && python -m eval.ablation`
 
 ---
