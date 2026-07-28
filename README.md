@@ -134,7 +134,7 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 92 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 99 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -145,7 +145,11 @@ open report/trace_view.html         # 정적 트레이스 뷰어
 
 ```bash
 docker build -t safeagent-kr .
+# 빠른 데모(데모 키로 부팅 — APP_ENV 미설정):
 docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
+# 프로덕션(데모 키 거부 — 주입 자격증명 필수):
+docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
+     -e SAFEAGENT_API_KEYS='{"<key>":{"id":"agent:acme","role":"agent","customer_ids":["cust_00042"]}}' safeagent-kr
 ```
 
 ---
@@ -172,7 +176,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **92 통과** (.venv; CI-core 86, presidio 6) |
+| 유닛/통합 테스트 | ✅ **99 통과** (.venv; CI-core 93, presidio 6) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 

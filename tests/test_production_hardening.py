@@ -168,8 +168,9 @@ def test_idem_store_bounded_lru_and_ttl():
     s.set(("p", "k2"), {"hash": "h", "status": "done", "response": 2})
     s.set(("p", "k3"), {"hash": "h", "status": "done", "response": 3})   # k1 축출
     assert s.get(("p", "k1")) is None and s.get(("p", "k3"))["response"] == 3
-    exp = server._IdemStore(maxsize=10, ttl_s=0.0)                        # 즉시 만료
+    exp = server._IdemStore(maxsize=10, ttl_s=1.0)
     exp.set(("p", "k"), {"hash": "h", "status": "done", "response": 1})
+    exp._d[("p", "k")]["created_at"] -= 100                               # 과거로 backdate → 만료
     assert exp.get(("p", "k")) is None
 
 

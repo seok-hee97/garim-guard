@@ -28,6 +28,7 @@ class Approval:
     result: dict[str, Any] | None = None
     logical_key: str = ""            # 논리적 액션 멱등성 키(P0-3) — 백엔드 실행·중복 승인 dedup 기준
     created_at: float = 0.0          # 적재 시각(epoch) — 승인 TTL 만료 판정(P1 stale approval)
+    customer_id: str = ""            # 대상 고객(테넌트) — 승인 조회/실행 scope 강제 기준(P0-2)
 
     def public(self) -> dict[str, Any]:
         """API 노출용 — args·result 모두 재귀 마스킹(계좌/이메일 마스킹, 사유/본문 제거).
@@ -72,10 +73,11 @@ class ApprovalQueue:
         self._seq = 0
 
     def submit(self, tool: str, args: dict, episode_id: str,
-               principal: str = "", rule: str = "", idem_key: str = "") -> str:
+               principal: str = "", rule: str = "", idem_key: str = "", customer_id: str = "") -> str:
         """승인 요청 적재. ★(principal, logical_key) 로 dedup(P0-3)★ — 같은 논리적 액션의
         재시도는 새 승인을 만들지 않고 기존(대기 또는 승인완료) 승인 id 를 반환한다.
-        → 동일 환불 재시도가 승인 두 건으로 갈라져 이중 실행되는 것을 차단."""
+        → 동일 환불 재시도가 승인 두 건으로 갈라져 이중 실행되는 것을 차단.
+        customer_id 는 승인 조회/실행 scope 강제 기준(P0-2)."""
         if idem_key:
             for a in self._store.values():
                 if (a.logical_key == idem_key and a.principal == principal
@@ -85,11 +87,17 @@ class ApprovalQueue:
         aid = f"appr_{self._seq:05d}"
         self._store[aid] = Approval(id=aid, tool=tool, args=dict(args),
                                     episode_id=episode_id, principal=principal, rule=rule,
-                                    logical_key=idem_key, created_at=time.time())
+                                    logical_key=idem_key, created_at=time.time(),
+                                    customer_id=customer_id)
         return aid
 
-    def list_pending(self) -> list[Approval]:
-        return [a for a in self._store.values() if a.status == "pending"]
+    def list_pending(self, customer_ids: frozenset[str] | None = None) -> list[Approval]:
+        """대기 승인 목록. ★customer_ids 지정 시 그 테넌트/고객 scope 로 필터★(P0-2) — 승인자가
+        담당하지 않는 고객의 승인은 조회되지 않는다. None 이면 전체(감사·단일테넌트 데모)."""
+        out = [a for a in self._store.values() if a.status == "pending"]
+        if customer_ids is not None:
+            out = [a for a in out if a.customer_id in customer_ids]
+        return out
 
     def get(self, aid: str) -> Approval | None:
         return self._store.get(aid)

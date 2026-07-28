@@ -168,10 +168,12 @@ async def run_episode(
             # ── HITL 필요: 승인 큐가 있으면 액션을 적재(배치 내 다건도 전부 적재 — 유실 방지) ──
             if isinstance(gate, HITLRequired):
                 if hitl_queue is not None:
-                    pid = getattr(getattr(hooks, "principal", None), "id", "")
+                    _prin = getattr(hooks, "principal", None)
+                    pid = getattr(_prin, "id", "")
+                    _cust = next(iter(getattr(_prin, "customer_ids", None) or []), "")   # 바인딩 고객(P0-2)
                     approval_id = hitl_queue.submit(
                         tool=gate.tool, args=gate.args, episode_id=ep.episode_id,
-                        principal=pid, rule=gate.rule, idem_key=_ik)
+                        principal=pid, rule=gate.rule, idem_key=_ik, customer_id=_cust)
                     hop.executed = False
                     hop.gate_decision = "HITL_DENY"
                     hop.gate_rule = gate.rule

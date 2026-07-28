@@ -28,6 +28,13 @@ class Principal:
     customer_ids: frozenset[str] = field(default_factory=frozenset)
     verified_emails: frozenset[str] = field(default_factory=frozenset)   # 발송 허용 수신자
     verified_accounts: frozenset[str] = field(default_factory=frozenset)  # 환불 허용 계좌
+    verified_phones: frozenset[str] = field(default_factory=frozenset)   # 조회 허용 전화(읽기 스코프)
+    verified_rrns: frozenset[str] = field(default_factory=frozenset)     # 조회 허용 주민번호(읽기 스코프)
+
+
+def _norm_env(app_env: str | None) -> str:
+    """APP_ENV 정규화 — 공백/대소문자 무시. server 와 authz 가 동일 규칙을 쓰게 하는 단일 파서(P0-5)."""
+    return (app_env or "").strip().lower()
 
 
 def _demo_registry(world: Any) -> dict[str, Principal]:
@@ -38,6 +45,8 @@ def _demo_registry(world: Any) -> dict[str, Principal]:
         customer_ids=frozenset(c["id"] for c in custs),
         verified_emails=frozenset(c["email"] for c in custs if c.get("email")),
         verified_accounts=frozenset(c["account"] for c in custs if c.get("account")),
+        verified_phones=frozenset(c["phone"] for c in custs if c.get("phone")),
+        verified_rrns=frozenset(c["rrn"] for c in custs if c.get("rrn")),
     )
     return {
         "demo-agent-key": Principal(id="agent:demo", role="agent", **scope),
@@ -67,9 +76,12 @@ def _registry_from_injected(raw: str, world: Any) -> dict[str, Principal]:
             emails = [custs[c]["email"] for c in cids if c in custs and custs[c].get("email")]
         if accts is None:
             accts = [custs[c]["account"] for c in cids if c in custs and custs[c].get("account")]
+        phones = [custs[c]["phone"] for c in cids if c in custs and custs[c].get("phone")]
+        rrns = [custs[c]["rrn"] for c in cids if c in custs and custs[c].get("rrn")]
         reg[key] = Principal(id=v.get("id", "principal"), role=v.get("role", "agent"),
                              customer_ids=cids, verified_emails=frozenset(emails),
-                             verified_accounts=frozenset(accts))
+                             verified_accounts=frozenset(accts), verified_phones=frozenset(phones),
+                             verified_rrns=frozenset(rrns))
     if not reg:
         raise RuntimeError("SAFEAGENT_API_KEYS 가 비어 있습니다.")
     return reg
@@ -81,17 +93,20 @@ def build_registry(world: Any, *, app_env: str | None = None) -> dict[str, Princ
     - prod: env SAFEAGENT_API_KEYS(주입 자격증명) 필수 — 없으면 부팅 실패(fail-closed).
     - 그 외(dev/test): 주입 있으면 사용, 없으면 데모 키 3종.
     """
-    app_env = (app_env if app_env is not None else os.getenv("APP_ENV", "")).lower()
+    env = _norm_env(app_env if app_env is not None else os.getenv("APP_ENV"))
     injected = os.getenv("SAFEAGENT_API_KEYS")
-    if app_env == "prod":
-        if not injected:
-            raise RuntimeError(
-                "APP_ENV=prod 인데 SAFEAGENT_API_KEYS(주입 자격증명)가 없습니다. "
-                "데모 키 등록을 거부합니다 — Secret Manager/IdP 로 자격증명을 주입하세요.")
-        return _registry_from_injected(injected, world)
-    if injected:
-        return _registry_from_injected(injected, world)
-    return _demo_registry(world)
+    # ★fail-closed★: 데모 키는 오직 명시적 dev/test 에서만. prod 및 알 수 없는 값은 주입 자격증명 필수
+    #   (공백·오타·대문자 APP_ENV 로 데모 키가 새는 fail-open 방지 — P0-5).
+    if env in ("dev", "test", ""):
+        if injected:
+            return _registry_from_injected(injected, world)
+        return _demo_registry(world)
+    # prod 또는 미지정 허용목록 밖(오타 포함) → 주입 필수
+    if not injected:
+        raise RuntimeError(
+            f"APP_ENV='{env}'(비 dev/test)인데 SAFEAGENT_API_KEYS(주입 자격증명)가 없습니다. "
+            "데모 키 등록을 거부합니다 — Secret Manager/IdP 로 자격증명을 주입하거나 APP_ENV=dev 를 쓰세요.")
+    return _registry_from_injected(injected, world)
 
 
 def registry_from_world(world: Any) -> dict[str, Principal]:

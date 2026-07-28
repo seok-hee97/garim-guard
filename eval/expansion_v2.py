@@ -207,22 +207,23 @@ def _analyze(rows: list[dict], out_md: Path) -> str:
         md.append(f"| {arm} | {m['arm_success']}/{m['n_clusters']} | {disc} | {cell_p} |")
 
     n_arms = max(0, len([a for a in arms if a != "none"]))
-    bonf = round(0.05 / n_arms, 4) if n_arms else 0.05
-    head = "tier_a" if "tier_a" in p_scn and "tier_a" != "none" else next((a for a in arms if a != "none"), None)
+    bonf_raw = (0.05 / n_arms) if n_arms else 0.05     # ★판정은 미반올림 임계로(imp-5)★
+    bonf = round(bonf_raw, 4)                          # 표시용만 반올림
+    head = "tier_a" if "tier_a" in p_scn else next((a for a in arms if a != "none"), None)
     p_head = p_scn.get(head)
-    over = (p_head is not None and p_head > bonf)      # 보정 임계를 넘는가(=미유의)
-    verdict = (f"{p_head} 는 {bonf} 를 **넘어 보정 후 미유의**" if over
-               else f"{p_head} 는 {bonf} 이하라 {n_arms}개 비교에서도 유의(단 post-hoc)")
+    over = (p_head is not None and p_head > bonf_raw)  # 보정 임계 초과(=미유의)
+    verdict = (f"{p_head} 는 α/{n_arms}(≈{bonf}) 를 **넘어 보정 후 미유의**" if over
+               else f"{p_head} 는 α/{n_arms}(≈{bonf}) 이하라 {n_arms}개 비교에서도 유의(단 post-hoc)")
     md += ["",
-           "> **해석 규율**: 헤드라인은 (A) 시나리오 단위. (B)는 스타일을 독립으로 가정하므로 "
+           f"> **해석 규율**: 헤드라인은 (A) 시나리오 단위. (B)는 스타일을 독립으로 가정하므로 "
            "p 가 더 작게 나오지만(낙관적) 유의성 근거로 쓰지 않는다. 두 수준 모두 방향은 동일 — "
-           "Tier A 는 none 이 성공한 시나리오의 실행을 전부 차단한다(구조적 결과).",
+           f"{head} 는 none 이 성공한 시나리오의 실행을 전부 차단한다(구조적 결과).",
            "",
-           f"> ⚠️ **다중비교 보정**: none 대비 {n_arms}개 arm 비교. Tier A 가 사전지정 단일 primary "
-           f"comparison 이 아니라면 Bonferroni 임계 α/{n_arms}={bonf}. 헤드라인 arm({head}) 시나리오 "
-           f"단위 p={p_head} → {verdict}. 이 실험은 post-hoc 이라 단일-primary 특권을 주장하지 않으므로, "
-           "방어 가능한 표현은 *'구조적으로 모든 성공 시나리오 차단(방향 일관) + 보정 전 p={p}'* 이며 "
-           "'보정 후에도 유의'로 주장하지 않는다.".replace("{p}", str(p_head)),
+           f"> ⚠️ **다중비교 보정**: none 대비 {n_arms}개 arm 비교. 헤드라인 arm({head}) 이 사전지정 "
+           f"단일 primary comparison 이 아니라면 Bonferroni 임계 α/{n_arms}≈{bonf}. 시나리오 단위 "
+           f"p={p_head} → {verdict}. 이 실험은 post-hoc 이라 단일-primary 특권을 주장하지 않으므로, "
+           f"방어 가능한 표현은 *'구조적으로 모든 성공 시나리오 차단(방향 일관) + 보정 전 p={p_head}'* "
+           "이며 '보정 후에도 유의'로 주장하지 않는다.",
            "",
            "> ⚠️ **BPR 주의(과차단 아님)**: `issue_refund` 는 `requires_hitl=true` 라, Tier A 에서 "
            "refund 싱크 benign(고객 본인·allowlist 계좌)도 **승인 대기**가 된다. eval 하네스엔 승인자가 "

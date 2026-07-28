@@ -312,6 +312,16 @@ class DefenseHooks:
         gate_call = (ToolCall(name=call.name, args=exec_args, call_id=call.call_id)
                      if rehydrated_any else call)
 
+        # 0.5) egress DLP 스캔 — ★HITL 분기보다 먼저★(P0-3). 외부/비가역 싱크의 비-egress 인자
+        #      (body/subject/reason)에 잔여 '원본' PII 가 있으면 HITL 로 보내지 않고 즉시 차단한다.
+        #      (issue_refund 는 requires_hitl 이라, 이 스캔이 Tier A HITL 반환 뒤에 있으면 영원히 도달 못 함.)
+        if self.vault is not None:
+            for a in spec.get("dlp_scan_args", []) or []:
+                v = call.args.get(a)
+                if isinstance(v, str) and self.vault.contains_raw(v):
+                    return Block(rule=f"dlp.egress:{a}",
+                                 reason="외부 싱크 인자에 잔여 원본 PII", decision="BLOCK")
+
         # 1) Tier A 결정적 게이트 — 항상 먼저(복원된 egress 인자로 판정). 구조적 Block 이 우선.
         if self.defenses.get("tier_a", False):
             decision = self.gate.check(gate_call, untrusted_corpus=corpus)
@@ -334,14 +344,7 @@ class DefenseHooks:
             if az is not None:
                 return az
 
-        # 1.5) egress DLP 스캔 — 외부 싱크의 비-egress 인자(body 등)에 잔여 '원본' PII 차단.
-        #      원본(call.args, 토큰 상태) 기준 검사 — 모델이 실수로 원본 PII 를 본문에 넣으면 차단.
-        if self.vault is not None:
-            for a in spec.get("dlp_scan_args", []) or []:
-                v = call.args.get(a)
-                if isinstance(v, str) and self.vault.contains_raw(v):
-                    return Block(rule=f"dlp.egress:{a}",
-                                 reason="외부 싱크 인자에 잔여 원본 PII", decision="BLOCK")
+        # (egress DLP 스캔은 0.5 단계로 이동 — HITL 분기보다 먼저 실행되어야 함, P0-3)
 
         # 2) classifier_gate — negative control. 격리 상태 + 고위험 도구면 추가 차단.
         if self.cg.get("enable") and getattr(ctx, "quarantined", False):
@@ -356,6 +359,18 @@ class DefenseHooks:
                 if isinstance(exec_args.get(a), str):
                     exec_args[a] = self.vault.rehydrate(exec_args[a])
                     rehydrated_any = True
+
+        # 3.5) ★조회 읽기-경로 스코프(P0-4)★ — lookup_customer 의 (복원된) phone/rrn 이 바인딩 고객
+        #      것이 아니면 차단. 쓰기(send/refund) 바인딩만으론 조회로 타-고객 PII 를 끌어와 최종
+        #      응답에서 복원·유출하는 confused-deputy 가 남기 때문. principal 없으면(중립 eval) 미적용.
+        if self.principal is not None and call.name == "lookup_customer":
+            for key, allowed in (("phone", self.principal.verified_phones),
+                                 ("rrn", self.principal.verified_rrns)):
+                v = exec_args.get(key)
+                if isinstance(v, str) and v and v not in allowed:
+                    return Block(rule="authz.lookup_out_of_scope",
+                                 reason="조회 대상이 바인딩 고객이 아님(읽기-경로 confused-deputy 차단)",
+                                 decision="BLOCK")
 
         # 4) HTML 이스케이프 — 외부 싱크 본문의 이미지태그/HTML 인젝션 경유 유출(EchoLeak류) 차단.
         #    ★DLP 토큰(<KR_PHONE_1>)은 보존★하고 그 외 HTML 만 이스케이프(토큰 훼손 방지).

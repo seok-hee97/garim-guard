@@ -7,8 +7,10 @@
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    APP_ENV=prod
+    PYTHONDONTWRITEBYTECODE=1
+# ⚠️ APP_ENV 는 이미지에 고정하지 않는다 — 미설정이면 데모 키로 부팅(빠른 데모).
+#    ★프로덕션 배포는 APP_ENV=prod + SAFEAGENT_API_KEYS(주입 자격증명)를 오케스트레이터가 주입★
+#    (prod 인데 SAFEAGENT_API_KEYS 없으면 데모 키를 거부하고 부팅 실패 — 의도된 fail-closed).
 
 WORKDIR /app
 

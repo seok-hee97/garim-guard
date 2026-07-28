@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from ..config import ROOT, gen_config, load_policy
 from . import log as alog
 from . import tools as toolmod
-from .authz import build_registry, Principal
+from .authz import build_registry, Principal, _norm_env
 from .backend import service_world
 from .hitl import ApprovalQueue
 from .loop import run_episode
@@ -43,10 +43,26 @@ from .policy import DefenseHooks
 # tier_b 는 기본 비활성(value-provenance 오탐) — confused-deputy 는 authz(principal 바인딩)로 차단.
 SERVER_DEFENSES: dict[str, Any] = {"tier_a": True, "dlp_vault": True}
 
+def _pos_float(name: str, default: str) -> float:
+    """양의 유한 float env — 잘못된 값(0·음수·NaN/inf)은 시작 시점에 fail-loud(imp-3)."""
+    import math
+    v = float(os.getenv(name, default))
+    if not math.isfinite(v) or v <= 0:
+        raise RuntimeError(f"{name}={v} 유효하지 않음(양의 유한값이어야 함)")
+    return v
+
+
+def _pos_int(name: str, default: str) -> int:
+    v = int(os.getenv(name, default))
+    if v < 1:
+        raise RuntimeError(f"{name}={v} 유효하지 않음(1 이상이어야 함)")
+    return v
+
+
 # 승인 만료(초) — 오래된 HITL 승인이 정책 변경 후 실행되지 않도록. env 로 조정 가능.
-APPROVAL_TTL_S: float = float(os.getenv("APPROVAL_TTL_S", "3600"))
-IDEM_MAXSIZE: int = int(os.getenv("IDEM_MAXSIZE", "10000"))
-IDEM_TTL_S: float = float(os.getenv("IDEM_TTL_S", "86400"))     # 요청 멱등성 창(기본 24h)
+APPROVAL_TTL_S: float = _pos_float("APPROVAL_TTL_S", "3600")
+IDEM_MAXSIZE: int = _pos_int("IDEM_MAXSIZE", "10000")
+IDEM_TTL_S: float = _pos_float("IDEM_TTL_S", "86400")     # 요청 멱등성 창(기본 24h)
 
 
 class _IdemStore:
@@ -72,8 +88,13 @@ class _IdemStore:
         v = dict(val); v["created_at"] = time.time()
         self._d[key] = v
         self._d.move_to_end(key)
+        # ★in_flight 는 축출하지 않는다(imp-1)★ — 진행 중 원 요청의 마커가 사라지면 재시도가
+        #   새 요청으로 접수돼 부작용이 이중 실행될 수 있다. 완료(done) 항목만 LRU 축출한다.
         while len(self._d) > self._maxsize:
-            self._d.popitem(last=False)            # LRU 축출
+            victim = next((k for k, e in self._d.items() if e.get("status") != "in_flight"), None)
+            if victim is None:
+                break                              # 전부 in_flight → 축출 보류(용량 초과 감수)
+            self._d.pop(victim, None)
 
     def pop(self, key: Any, default: Any = None) -> Any:
         return self._d.pop(key, default)
@@ -95,8 +116,8 @@ def _build_rail() -> Any:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = alog.configure(os.getenv("LOG_LEVEL", "INFO"))
-    if os.getenv("APP_ENV", "").strip().lower() != "prod":   # prod 는 오케스트레이터 env 주입만 신뢰
-        from dotenv import load_dotenv
+    if _norm_env(os.getenv("APP_ENV")) in ("dev", "test", ""):   # build_registry 와 동일 규칙(P0-5)
+        from dotenv import load_dotenv                            # prod 등은 오케스트레이터 env 주입만 신뢰
         load_dotenv(ROOT / ".env")
 
     policy = copy.deepcopy(load_policy())              # 캐시된 eval 정책과 격리
@@ -219,6 +240,8 @@ def _bind_customer(principal: Principal, customer_id: str, world: Any) -> Princi
         id=principal.id, role=principal.role, customer_ids=frozenset({customer_id}),
         verified_emails=frozenset({cust["email"]} if cust.get("email") else set()),
         verified_accounts=frozenset({cust["account"]} if cust.get("account") else set()),
+        verified_phones=frozenset({cust["phone"]} if cust.get("phone") else set()),   # 조회 읽기-스코프
+        verified_rrns=frozenset({cust["rrn"]} if cust.get("rrn") else set()),
     )
 
 
@@ -285,7 +308,9 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
             req.input, _state["provider"], _state["cfg"],
             hooks=hooks, world=_state["world"], defenses=dict(SERVER_DEFENSES),
             scenario=req.scenario, episode_id=episode_id, hitl_queue=_state["hitl"],
-            idempotency_scope=(idempotency_key or episode_id),   # 액션 단위 dedup(같은 키→같은 스코프)
+            # ★principal 네임스페이스(P0-1)★ — 백엔드 멱등성 키에 principal.id 를 prefix 해
+            #   서로 다른 테넌트가 같은 Idempotency-Key 를 써도 공유 백엔드에서 충돌하지 않게 한다.
+            idempotency_scope=f"{principal.id}:{idempotency_key or episode_id}",
         )
     except Exception:
         if store_key is not None:
@@ -316,9 +341,10 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
 
 @app.get("/v1/approvals")
 async def list_approvals(x_api_key: str | None = Header(default=None)) -> dict:
-    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹). 승인자/감사자만."""
-    _require(x_api_key, {"approver", "auditor"})
-    return {"pending": [a.public() for a in _state["hitl"].list_pending()]}
+    """대기 중인 HITL 승인 목록(원본 PII 는 마스킹). 승인자/감사자만.
+    ★테넌트 scope 강제(P0-2)★ — 담당 고객(principal.customer_ids)의 승인만 조회된다."""
+    p = _require(x_api_key, {"approver", "auditor"})
+    return {"pending": [a.public() for a in _state["hitl"].list_pending(p.customer_ids)]}
 
 
 @app.post("/v1/approvals/{approval_id}")
@@ -335,6 +361,14 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
         raise HTTPException(status_code=409, detail=f"already {appr.status}")
     if appr.principal and appr.principal == approver.id:   # 요청자≠승인자 강제
         raise HTTPException(status_code=403, detail="요청자와 승인자가 동일할 수 없습니다(직무분리)")
+
+    # ── ★테넌트 scope 강제(P0-2)★ — 승인자가 담당하지 않는 고객의 승인은 조회·승인·거부 불가 ──
+    if appr.customer_id and appr.customer_id not in approver.customer_ids:
+        alog.event(alog.get_logger(), "warning", "approval_scope_denied",
+                   id=approval_id, approver=approver.id, target_customer=appr.customer_id)
+        raise HTTPException(status_code=403, detail={
+            "error": "approval_out_of_tenant_scope",
+            "reason": "승인자가 담당하지 않는 고객의 승인입니다"})
 
     # ── ★승인 stale 방지(P1)★ — 오래된/정책 밖 승인이 실행되지 않게 재검사 ──
     if req.decision == "approve":
@@ -357,6 +391,7 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
                 if amt_num > cap:
                     raise HTTPException(status_code=409, detail={
                         "error": "amount_exceeds_current_limit", "amount": amt_num, "current_max": cap})
+                appr.args["amount"] = amt_num          # ★정규화값 저장(imp-2)★ — 백엔드에 int 전달
 
     world = _state["world"]
 

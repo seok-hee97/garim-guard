@@ -135,8 +135,11 @@ def _done() -> set[tuple]:
             continue
         if r.get("finish_reason") == "error":
             continue
-        out.add((r["arm"], r["case_id"], r.get("provider", ""),
-                 r.get("model", ""), r.get("rail", ""), r.get("split", "")))
+        # ★계보 포함(imp-4)★ — dataset/policy 지문을 완료 키에 넣어, 데이터·정책이 바뀌면
+        #   같은 (arm,case,provider,model,rail,split) 이라도 stale 로 재사용되지 않게 한다.
+        out.add((r["arm"], r["case_id"], r.get("provider", ""), r.get("model", ""),
+                 r.get("rail", ""), r.get("split", ""),
+                 r.get("dataset_hash", ""), r.get("policy_hash", "")))
     return out
 
 
@@ -224,7 +227,8 @@ async def main() -> int:
     _warn_provenance_drift(prov)
 
     def _key(arm: str, cid: str) -> tuple:
-        return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"], run_meta["split"])
+        return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"],
+                run_meta["split"], run_meta.get("dataset_hash", ""), run_meta.get("policy_hash", ""))
 
     total = len(arms) * (len(attacks) + len(utility))
     n = 0
