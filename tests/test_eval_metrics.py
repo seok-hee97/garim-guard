@@ -28,6 +28,25 @@ def _rows():
     ]
 
 
+def test_eval_rail_fail_loud_no_silent_fallback():
+    """★평가 레일 fail-loud(R5-#1)★ — 아티팩트 없으면 조용히 HeuristicRail 로 폴백해 결과에
+    잘못된 레일명(ko_agentguard)을 남기지 않는다. 명시적 heuristic 은 정상."""
+    import pytest
+    from eval.run import _build_rail
+    import src.rails.ko_agentguard as ka
+    assert _build_rail("heuristic").name == "heuristic"       # 명시적 폴백은 허용
+    orig = ka.KoAgentGuardRail
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise FileNotFoundError("artifact missing")
+    ka.KoAgentGuardRail = _Boom
+    try:
+        with pytest.raises(RuntimeError, match="ko_agentguard"):
+            _build_rail("ko_agentguard")                      # 조용한 폴백 아님 → 예외
+    finally:
+        ka.KoAgentGuardRail = orig
+
+
 def test_cluster_reduce_collapses_variants():
     cl = cluster_reduce(_rows(), "none", ("scenario", "attack_style"))
     assert cl == {("s1", "authority"): True, ("s2", "authority"): False}   # 3변형 → 1군집

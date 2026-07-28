@@ -278,6 +278,7 @@ async def main() -> int:
             policy["provider"][pv]["temperature"] = 0.0
     provider = _build_provider(args.provider)
     rail = _build_rail(args.rail)
+    actual_rail = getattr(rail, "name", type(rail).__name__)   # 요청 vs 실제 레일 분리(R5-#1)
     arms = [a for a in args.arms.split(",") if a in ARMS]
     model = policy["provider"].get(args.provider, {}).get("model", "")
     run_id = "v0.2." + _run_id(args.provider, model, args.rail, "test")
@@ -296,14 +297,14 @@ async def main() -> int:
             sc = score_attack(case, ep)
             exe_c += int(bool(sc["executed"])); err_c += int(sc["finish_reason"] == "error")
             rows.append({"arm": arm, "kind": "attack", "run_id": run_id, "provider": args.provider,
-                         "model": model, "rail": args.rail, "split": "test", **sc})
+                         "model": model, "rail": args.rail, "actual_rail": actual_rail, "split": "test", **sc})
         uc = 0
         for case in utility:
             ep = await run_case(case, provider, policy, defenses, rail=rail, customers=CUSTOMERS)
             sc = score_utility(case, ep)
             uc += int(bool(sc["completed"]))
             rows.append({"arm": arm, "kind": "utility", "run_id": run_id, "provider": args.provider,
-                         "model": model, "rail": args.rail, "split": "test", **sc})
+                         "model": model, "rail": args.rail, "actual_rail": actual_rail, "split": "test", **sc})
         print(f"  {arm:16s} exe={exe_c}/{len(attacks)}  BPR={uc}/{len(utility)}  err={err_c}")
 
     out_runs.parent.mkdir(parents=True, exist_ok=True)

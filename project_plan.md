@@ -300,7 +300,7 @@ class Vault(Protocol):                     # PresidioVault / RegexVault 공용
 | P-LLM (에이전트) | `gemini-3.5-flash` (2.5-flash는 2026-10-16 종료) | — |
 | Q-LLM (격리) | `gemini-3.5-flash` (도구 미부여) | — |
 | 인젝션 baseline | `kakaocorp/kanana-safeguard-prompt-2.1b` (Apache-2.0) | **Prompt Guard 2 86M** — 평가 언어에 한국어 부재. 이기든 지든 아무것도 측정되지 않는다 |
-| 유해 레일 | `kakaocorp/kanana-safeguard-8b` (Apache-2.0) | **`google/shieldgemma-2b`** — 모델카드가 영어 전용임을 자인 + manual gated + 비-OSI 라이선스. 3연속 결격 |
+| 유해 레일 | `kakaocorp/kanana-safeguard-8b` (Apache-2.0) | **`google/shieldgemma-2b`** — 모델카드가 "available in English"로 명시(한국어 지원·평가 미문서화) + manual gated + 비-OSI 라이선스. 3연속 결격 |
 | 본 레일 인코더 | `intfloat/multilingual-e5-small` + LogisticRegression | **QLoRA** — 기여는 *측정*이지 파인튜닝이 아니며, QLoRA는 GPU 시간이 아니라 주변 배관(평가 하네스·임계값·체크포인트)에서 솔로 프로젝트를 죽인다 |
 
 > ShieldGemma·Prompt Guard를 **조용히 빼지 않고 명시적으로 기각**하는 것이 Kanana 선택의 논리적 근거가 되며, 나쁘게 쓰는 것보다 강하다.

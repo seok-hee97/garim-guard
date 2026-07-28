@@ -65,9 +65,13 @@ def _provenance(policy: dict, split: str) -> dict:
         sdk = {p: version(p) for p in ("google-genai", "openai") if _safe_ver(p)}
     except Exception:  # noqa: BLE001
         sdk = {}
+    # 레일 학습 아티팩트 지문(R5-#1) — 아티팩트가 바뀌면 결과도 다르므로 계보에 포함.
+    rail_art = ROOT / "train" / "artifacts" / "ko-agentguard-lr.joblib"
+    rail_hash = _sha(rail_art.read_bytes()) if rail_art.exists() else ""
     return {
         "dataset_hash": _sha(ds),
         "policy_hash": _sha(_json.dumps(policy, sort_keys=True, default=str).encode()),
+        "rail_artifact_hash": rail_hash,
         "commit": commit,
         "sdk": sdk,
     }
@@ -138,8 +142,8 @@ def _done() -> set[tuple]:
         # ★계보 포함(imp-4)★ — dataset/policy 지문을 완료 키에 넣어, 데이터·정책이 바뀌면
         #   같은 (arm,case,provider,model,rail,split) 이라도 stale 로 재사용되지 않게 한다.
         out.add((r["arm"], r["case_id"], r.get("provider", ""), r.get("model", ""),
-                 r.get("rail", ""), r.get("split", ""),
-                 r.get("dataset_hash", ""), r.get("policy_hash", "")))
+                 r.get("rail", ""), r.get("split", ""), r.get("dataset_hash", ""),
+                 r.get("policy_hash", ""), r.get("rail_artifact_hash", "")))
     return out
 
 
@@ -165,12 +169,18 @@ def _build_rail(name: str = "ko_agentguard"):
     if name == "heuristic":
         from src.rails.base import HeuristicRail
         return HeuristicRail()
+    # ★평가는 fail-loud(R5-#1)★ — 아티팩트 없으면 조용히 HeuristicRail 로 폴백해 결과에 잘못된
+    #   레일명을 남기지 않는다. 폴백은 서버·CLI 데모(src/agent/cli.py)에서만 허용. 명시적으로
+    #   heuristic 을 원하면 `--rail heuristic`.
+    from src.rails.ko_agentguard import KoAgentGuardRail
     try:
-        from src.rails.ko_agentguard import KoAgentGuardRail
         return KoAgentGuardRail()
-    except Exception:  # noqa: BLE001
-        from src.rails.base import HeuristicRail
-        return HeuristicRail()
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"ko_agentguard 레일 로드 실패({type(e).__name__}: {e}). 평가는 폴백하지 않습니다. "
+            "학습 아티팩트를 받으세요: `python -m scripts.fetch_rail` 또는 "
+            "huggingface-cli download cycloevan/safeagent-kr → train/artifacts/. "
+            "(휴리스틱으로 실행하려면 명시적으로 --rail heuristic)") from e
 
 
 async def _safe_run_case(case, provider, policy, defenses, *, rail, customers, arm) -> EpisodeTrace:
@@ -221,17 +231,24 @@ async def main() -> int:
     prov = _provenance(policy, args.split)
     # ★run_id 에 계보 지문 포함(R3-6)★ — 데이터·정책이 다른 실행은 run_id 자체가 달라져,
     #   ablation 의 run_id 필터가 신·구 결과를 분리한다(동결 backfill 데이터와 자동 격리).
-    run_id = f"{_run_id(args.provider, model, args.rail, args.split)}.{prov['dataset_hash'][:6]}.{prov['policy_hash'][:6]}"
-    run_meta = {"provider": args.provider, "model": model, "rail": args.rail, "split": args.split,
-                "run_id": run_id, **prov}
+    _art6 = (prov.get("rail_artifact_hash") or "norail")[:6]
+    run_id = (f"{_run_id(args.provider, model, args.rail, args.split)}"
+              f".{prov['dataset_hash'][:6]}.{prov['policy_hash'][:6]}.{_art6}")
+    # ★요청 레일 vs 실제 레일 분리 기록(R5-#1)★ — 폴백/다른 레일이면 결과에 실제 레일명을 남긴다.
+    actual_rail = getattr(rail, "name", type(rail).__name__)
+    run_meta = {"provider": args.provider, "model": model, "rail": args.rail,
+                "actual_rail": actual_rail, "split": args.split, "run_id": run_id, **prov}
     print(f"계보: dataset={prov['dataset_hash']} policy={prov['policy_hash']} "
-          f"commit={prov['commit']} sdk={prov['sdk']}")
+          f"commit={prov['commit']} rail_artifact={prov.get('rail_artifact_hash','-')} sdk={prov['sdk']}")
+    if actual_rail != args.rail:
+        print(f"⚠️ 요청 레일 '{args.rail}' ≠ 실제 '{actual_rail}' — 결과엔 actual_rail 로 기록됨.")
     # 기존 runs.jsonl 에 다른 계보가 섞였으면 경고(코드/데이터 변경 후 stale 재사용 방지).
     _warn_provenance_drift(prov)
 
     def _key(arm: str, cid: str) -> tuple:
         return (arm, cid, run_meta["provider"], run_meta["model"], run_meta["rail"],
-                run_meta["split"], run_meta.get("dataset_hash", ""), run_meta.get("policy_hash", ""))
+                run_meta["split"], run_meta.get("dataset_hash", ""), run_meta.get("policy_hash", ""),
+                run_meta.get("rail_artifact_hash", ""))
 
     total = len(arms) * (len(attacks) + len(utility))
     n = 0

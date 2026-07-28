@@ -32,7 +32,7 @@
 |---|---|---|
 | `kanana-safeguard-prompt-2.1b` / `-8b` | 한국어 인젝션 baseline·레일(채널갭 실측) | Apache-2.0 |
 | `google/shieldgemma-2b` | EN-KO 유해 갭 실측(log-only) | Gemma(비-OSI, gated) |
-| `klue/roberta-small` / `-base` | R6/R7 파인튜닝 베이스 | **미표기 → 파생 가중치 공개 재배포 금지**(수치만 보고) |
+| `klue/roberta-small` / `-base` | R6/R7 파인튜닝 베이스 | **개별 HF 모델 카드엔 라이선스 메타 없음**; 상위 [KLUE 프로젝트](https://github.com/KLUE-benchmark/KLUE)는 **CC-BY-SA-4.0** 명시. 파생 가중치 재배포는 학습데이터 라이선스·출처표기·**SA(동일조건)** 확인 전까지 **보류**(현재는 수치만 보고) |
 | `intfloat/multilingual-e5-small` | e5 레일 인코더(동결) | MIT |
 
 ## 4. 민감 데이터·PII 취급 정책

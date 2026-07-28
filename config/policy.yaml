@@ -163,7 +163,7 @@ classifiers:
     model: kakaocorp/kanana-safeguard-8b
     mode: log_only
     seams: [after_model]
-    # 기각 사유(기획서에 명시): google/shieldgemma-2b 는 모델카드가 영어 전용임을
+    # 기각 사유(기획서에 명시): google/shieldgemma-2b 는 모델카드가 "available in English"로 명시(한국어 미문서화)임을
     # 자인하고, manual gated 이며, 비-OSI 라이선스다. 3연속 결격으로 명시적 기각.
 
 # ── DLP / PIIVault ─────────────────────────────────────────────────────

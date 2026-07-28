@@ -59,8 +59,8 @@ def build() -> graphviz.Digraph:
     node(
         g,
         "planner",
-        "P-LLM 계획 → FROZEN plan  [Tier C]\\n(비신뢰 콘텐츠 진입 前 도구 시퀀스 고정)",
-        C_MODEL,
+        "P-LLM 계획 → FROZEN plan  [Tier C · ⚠️설계전용/미구현]\\n(비신뢰 콘텐츠 진입 前 도구 시퀀스 고정)",
+        C_TELE,
     )
 
     # 에이전트 루프 클러스터
@@ -82,7 +82,7 @@ def build() -> graphviz.Digraph:
         node(
             c,
             "model",
-            "모델 호출  (P-LLM)\\nGemini / OpenAI / Gemma\\n+ safety_settings ×4",
+            "모델 호출  (P-LLM)\\nGemini / OpenAI\\n+ safety_settings ×4",
             C_MODEL,
         )
         node(
@@ -100,15 +100,15 @@ def build() -> graphviz.Digraph:
         node(
             c,
             "after_tool",
-            "╔ after_tool ╗  [Tier B/C]\\nQ-LLM 격리(Gemini Flash/로컬 Gemma)→Pydantic\\n·Prompt Guard 재스캔(LOG)·DLP 토큰화·Tainted 래핑",
+            "╔ after_tool ╗  [Tier B taint · DLP]\\nTainted 래핑·DLP 토큰화·레일 재스캔(LOG-ONLY)\\n(Q-LLM 격리는 Tier C ⚠️설계전용/미구현)",
             C_DLP,
         )
 
     node(
         g,
         "after_model",
-        "╔ after_model ╗\\nShieldGemma-2B 유해 + 한국어 레일\\n· DLP 재스캔 · HTML-escape · deanonymize",
-        C_MODEL,
+        "╔ after_model ╗  ⚠️pass-through(의도적 no-op)\\nprovider 자체 안전필터에 위임\\n(독립 분류기 강제 아님 — ShieldGemma 는 오프라인 LOG-ONLY 평가만)",
+        C_TELE,
     )
     node(g, "output", "② 최종 응답 + 트레이스\\n(plan·tool·taint·blocked·DLP spans·HITL·latency)", C_OUT, shape="stadium")
 
@@ -158,10 +158,10 @@ def build() -> graphviz.Digraph:
     # 범례
     with g.subgraph(name="cluster_legend") as lg:
         lg.attr(label="범례", style="rounded", color="#90a4ae", fontname=FONT, fontsize="12", labeljust="l")
-        node(lg, "lg_gate", "진짜 방어(결정적): Tier A 게이트·Tier B taint·Tier C 고정계획", C_GATE)
-        node(lg, "lg_tele", "텔레메트리(LOG-ONLY, 우회가능): Prompt Guard·ShieldGemma", C_TELE)
+        node(lg, "lg_gate", "진짜 방어(결정적·구현): Tier A 게이트·Tier B taint", C_GATE)
+        node(lg, "lg_tele", "텔레메트리(LOG-ONLY)·미구현: Prompt Guard·ShieldGemma·Tier C(설계전용)·after_model(no-op)", C_TELE)
         node(lg, "lg_dlp", "DLP/PII: PIIVault·Presidio 한국어 인식기", C_DLP)
-        node(lg, "lg_model", "Google/LLM 모델: Gemma·Gemini·OpenAI", C_MODEL)
+        node(lg, "lg_model", "LLM provider(구현): Gemini·OpenAI  (Gemma provider 없음)", C_MODEL)
         lg.edge("lg_gate", "lg_tele", style="invis")
         lg.edge("lg_tele", "lg_dlp", style="invis")
         lg.edge("lg_dlp", "lg_model", style="invis")

@@ -47,7 +47,7 @@ graph LR
 |---|---|
 | `kanana-safeguard-prompt` (한국어 인젝션 SOTA) | **단일 사용자 발화 채점기.** 도구 반환값을 볼 구조가 없다 |
 | `Llama-Prompt-Guard-2-86M` | **평가 언어에 한국어가 없다.** 이기든 지든 아무것도 측정되지 않는다 |
-| `google/shieldgemma-2b` | 모델카드가 **영어 전용임을 자인** + manual gated + 비-OSI |
+| `google/shieldgemma-2b` | 모델카드가 **"available in English"로 명시**(한국어 지원·평가 미문서화) + manual gated + 비-OSI |
 
 즉 한국어 에이전트에는 도구 채널을 보는 가드가 **존재하지 않는다.** 이것이 본 과제의 측정 대상이다.
 
