@@ -1,125 +1,184 @@
 # SafeAgent-KR
 
-> NIPA-Google 프로젝트 · 2026-07-13 ~ 2026-07-31 · Python · Google 모델 우선 · 개인(솔로)
-> 상세 기획·설계: **[project_plan.md](project_plan.md)**
+> **한국어 도구 사용 AI 에이전트 안전 런타임** — 도구 채널 인젝션·개인정보 유출을 막고, 강제를 결정적 게이트로 이관.
+> NIPA-Google 프로젝트 · 2026-07 · Python · 개인(솔로)
 >
 > **명명 규약** — `SafeAgent-KR` = 프로젝트/런타임 · `KoTIP-Bench` = 구축 평가셋 · `Ko-AgentGuard` = 학습 레일 모델
+> 상세: [project_plan.md](project_plan.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PRODUCTION.md](docs/PRODUCTION.md) · [results/RESULTS.md](results/RESULTS.md)
 
 ---
 
-## 프로젝트 주제 (제출용)
+## 1. 프로젝트 개요
 
-**프로젝트 명칭**
-**SafeAgent-KR — 한국어 도구 사용 AI 에이전트 안전 런타임**
-*(도구 채널 인젝션·개인정보 유출 평가셋 구축과, 단일 발화 가드레일의 구조적 사각지대 측정)*
+도구를 호출하는 한국어 AI 에이전트(ReAct 루프 + 5개 도구)를 `before_model / after_model / before_tool / after_tool` **4개 seam**으로 감싼 안전 런타임이다. 두 가지를 **측정으로 증명**하고, 그 논지를 **실제 구동 가능한 HTTP 서비스**로 구현했다.
 
-**분야**
-자연어처리(NLP) · LLM 안전(Safety AI) / 가드레일 · 개인정보 비식별화(DLP/PII) · AI 에이전트(도구 사용·함수 호출) · 데이터셋 구축 · 경량 탐지 모델 학습
+- **① 채널 조건부 탐지 격차** — 같은 인젝션을 (a) 사용자 발화 vs (b) 도구 반환값으로 주면, 한국어 가드 모델은 (a)에서 동작하고 (b)에서 실패한다. 성능이 아니라 **단일 발화 채점 모델이 도구 경계 너머를 못 본다는 설계 귀결**. (Kanana 실측: 발화 recall 1.0 → 도구 채널 0.0)
+- **② 강제는 분류기가 아니라 게이트에** — 난독화(base64)로 CPU 레일은 F1 0.99→0.0 붕괴하지만, **결정적 정책 게이트(Tier A)의 t-ASR은 불변**이다. 게이트는 문자열을 읽지 않고 도구 identity·정책 테이블만 보기 때문.
 
-**프로젝트 설명**
+> **결론:** 분류기는 이 채널에서 강제 수단이 될 수 없으므로 **log-only 텔레메트리로 강등**하고, 강제는 **도구별 결정적 게이트**가 담당한다. 여기에 요청 스코프 가역 PII 볼트를 결합한다.
 
-도구를 호출하는 한국어 AI 에이전트(ReAct 루프 + 5개 mock 도구)를 `before_model / after_model / before_tool / after_tool` 4개 seam으로 감싼 **안전 런타임**을 구현하고, 그 위에서 두 가지를 **측정으로 증명**한다.
-
-**① 채널 조건부 탐지 격차** — 동일한 인젝션 페이로드를 (a) 사용자 발화 (b) 도구 반환값으로 제시했을 때, 한국어 공개 가드 모델은 (a)에서 동작하고 (b)에서 실패한다. 성능 문제가 아니라 **단일 발화를 채점하도록 설계된 모델이 도구 경계 너머를 볼 수 없다는 설계 귀결**이며, 사전 등록한 **예측**으로 검정한다.
-
-**② 우리 CPU 레일의 붕괴** — 난독화(base64)를 적용하면 **우리가 만든 CPU 레일이 무너지지만**(F1 0.99→0.0) 결정적 정책 게이트(Tier A)의 t-ASR은 불변이다. *(단 "모든 분류기 붕괴"로 일반화하지 않는다 — 강한 한국어 모델 Kanana는 난독화에 견뎠다(붕괴폭 0.1, 사전등록 미달, 정직 보고). 논지를 지탱하는 건 난독화가 아니라 **채널 맹점**이다.)*
-
-결론은 "우리 분류기가 더 낫다"가 아니라 **"분류기는 이 채널에서 강제 수단이 될 수 없으므로 로그 전용으로 강등하고, 강제는 도구별 결정적 게이트가 담당해야 한다"**는 불가능성 논증이다. 여기에 홉 간 일관된 **요청 스코프 가역 PII 볼트**를 결합하고, 발견한 **Presidio 한국어 인식기 결함 2건**을 정량 보고한다.
-
-**핵심 산출물** — 방어층별 애블레이션 표(McNemar 검정) · 채널 조건부 격차 2×2 표 · KoTIP-Bench 평가셋 · Presidio 결함 정량화 · 라이브 데모 · 결과보고서
+**핵심 결과** (실측, `results/RESULTS.md`): Tier A 게이트가 인젝션 실행률을 **17% → 0%** 로 낮춤(McNemar **p=0.002**). 온디바이스 분류기 강제는 한국어 도구채널에서 통계적으로 무효(p=1.0).
 
 ---
 
-## 구성요소별 (공개 학습셋 × 평가셋 × 지표)
+## 2. 두 개의 얼굴 — 연구 하네스 + 실행 서비스
 
-**공개 평가셋 매핑 11/11(설계) · 공개 학습셋 3/11.** 강제 계층(Tier A/B/C)에 학습셋이 없는 것은 결함이 아니라 논지 그 자체다 — *학습된 것은 우회 가능하고 결정된 것은 우회 불가능하다*가 주장이므로 거기에 학습을 붙이면 자기모순이 된다.
+| | 연구/평가 하네스 | 실행 서비스 (HTTP) |
+|---|---|---|
+| 목적 | 논지를 애블레이션으로 측정 | 논지를 실제 에이전트로 구동 |
+| 진입점 | `python -m eval.run` · `src.agent.cli` | `uvicorn src.agent.server:app` |
+| 세계 | mock `ToolWorld`(부작용 없음, 결정적) | `ServiceWorld`(환불 원장·이메일 outbox·idempotency) |
+| 방어 | 애블레이션 축(none/tier_a/…) | 고정 `tier_a+dlp_vault+strict_schema` + authz |
+| 인가 | 없음(중립 baseline) | `X-API-Key`→principal, HITL 승인 큐 |
 
-> ⚠️ **실측 범위 정직 표기:** 헤드라인으로 실측·보고된 것은 R1·R2(Tier A)·R5(채널갭)·R8/R9(DLP)이다. **R10 과차단(XSTest_ko)·R11 적대적 강건성은 데이터셋 매핑만 있고 이번 제출에서 실행하지 않았다**(정상 case 2건만 실측 — BPR 얇음). R6/R7은 오프라인 부록(런타임 미연결). "11/11"은 각 구성요소에 공개 평가셋을 **매핑**했다는 설계 커버리지이지 11개 전부 실행했다는 뜻이 아니다.
-
-| 계층 | 구성요소 | 공개 학습 데이터 | 평가 |
-|---|---|---|---|
-| L0 기판 | R1 ReAct 코어 + 5 도구 + 4 seam | 없음 — 합성 | 자체 benign 100건 |
-| **L1 강제** *(결정적)* | R2 Tier A 게이트 · R3 Tier B taint · R4 Tier C | **없음 — 논지 그 자체** | MAPS ko 400건 (CC-BY-4.0) |
-| **L2 탐지** *(학습형)* | R5 인젝션 레일 | **Nemotron 간접인젝션 1,272행** (CC-BY-4.0) | Nemotron 홀드아웃 + MAPS + 네이티브 골드 40 |
-| | R6 비정형 PII | **openpii-1.5m `ko`** (CC-BY-4.0) | 템플릿 분리 test + KLUE NER |
-| | R7 유해성 레일 | **K-MHaS 109,692행** (CC-BY-SA-4.0) | K-MHaS test 21,939 |
-| L3 DLP | R8 Presidio-ko + 결함실험 · R9 PIIVault | 없음 — 합성이 유일한 선택 | 자체 Faker `ko_KR` 골드셋 |
-| L4 정직성 *(평가전용)* | R10 과차단 프로브 · R11 적대적 강건성 | 없음 — 평가 전용 | XSTest_ko 450행 |
-
-> 사용 자산 8종 중 **7종이 파생물 재배포 가능**. **NC·ND·게이트 데이터셋 0건** → 가공 분할과 자체 골드셋을 산출물과 함께 배포할 수 있다. 전체 라이선스 검증표는 [project_plan.md §6.1](project_plan.md).
+두 경로가 **같은 `run_episode`** 를 공유한다 — 서비스는 재작성이 아니라 배선이다.
 
 ---
 
-## 아키텍처
-
-> 상세 설명 — **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (신뢰 경계 · 4 seam · 방어 3계층 · Vault 수명 · 측정 설계)
+## 3. 아키텍처
 
 ```
-사용자 요청(신뢰)
-  → [P-LLM 계획 FROZEN]                                    ← Tier C
-  → ╔ before_model ╗ DLP 비식별 · spotlight · 분류기[LOG-ONLY]
-  → provider.generate(messages, cfg)  ★모든 functionCall part 순회★
-  → ╔ after_model ╗  per_hop (중간 홉 출력도 검사)
-  → ╔ before_tool ╗ ★진짜 게이트★ 위험티어·allowlist·인자검증·taint·HITL  ← Tier A+B
-  → [도구 실행 — mock]
-  → ╔ after_tool ╗ Q-LLM 격리 · 분류기 재스캔[LOG-ONLY] · DLP 토큰화 · Tainted 래핑
-  → 반복 (tool_calls 없으면 종료)
-→ 최종 응답 + 트레이스 JSONL (attempted / executed / gate_rule / taint_sources)
+요청 (+X-API-Key → principal)                         ← authN/authZ
+  → ╔ before_model ╗ DLP 비식별 · plea/spotlight · 분류기[LOG-ONLY]
+  → provider.generate  ★모든 functionCall part 순회 · async · 재시도★
+  → ╔ after_model  ╗ per-hop 모더레이션 (fail-closed)
+  → ╔ before_tool  ╗ ★결정적 게이트★                   ← Tier A + authz + HITL
+        위험티어 · allowlist · 인자 스키마 · egress DLP scan · principal 바인딩
+        └ 비가역 도구 → HITL 승인 큐(hitl_pending)
+  → 도구 실행 (ServiceWorld: 환불 원장 · 이메일 outbox · idempotency)
+  → ╔ after_tool  ╗ 분류기 재스캔[LOG-ONLY] · DLP 토큰화
+  → 반복 → 최종 응답 + 트레이스(attempted/executed/gate_rule)
 ```
 
-**설계 규율:** 게이트는 **문자열 내용을 읽지 않는다.** 페이로드가 한국어든 이모지든 base64든 판정이 동일하다 — 난독화 하에서 t-ASR이 불변인 이유이자 논지의 구조적 근거다.
+**설계 규율:** 게이트는 **문자열 내용을 읽지 않는다** — 페이로드가 한국어든 이모지든 base64든 판정이 같다(난독화 불변). 4 seam은 전부 **fail-closed**(예외 시 통과가 아니라 안전한 차단).
+
+상세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 프로덕션 전환: [docs/PRODUCTION.md](docs/PRODUCTION.md)
 
 ---
 
-## 실행
+## 4. 설치
 
 ```bash
-# 설치 (D0 는 core 만 — presidio/torch 는 쓰는 날로 격리)
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.core.txt
-cp .env.example .env    # GOOGLE_API_KEY
+pip install -r requirements.core.txt          # 서비스+평가 코어 (presidio/torch 제외)
+# DLP Presidio·GPU 레일까지: pip install -r requirements.txt
 
-# 환경·데이터 점검
-python -m scripts.check_env        # 키·모델ID·RPM 실측
-python -m eval.data_spike          # 6개 로더 관통 → data/manifest.json
-
-# ★ money smoke — 프로젝트의 핵심 증명 (CLI)
-python -m src.agent.cli --scenario poisoned_kb --defenses tier_a
-#   기대: 분류기 전부 OFF, 오염 KB → send_email(drop@mal.example.org) 시도 →
-#         gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
-
-# ★ 실제 구동 서비스 (HTTP 런타임) — 서버 고정 방어(tier_a+dlp_vault+strict)
-uvicorn src.agent.server:app --port 8000
-curl -s localhost:8000/healthz                         # {"status":"ok"}
-curl -s localhost:8000/readyz                          # provider 준비 여부
-curl -s -XPOST localhost:8000/v1/agent/run \
-     -H 'content-type: application/json' \
-     -d '{"input":"고객 010-1234-5678 환불 상태를 조회해 주세요"}'
-curl -s localhost:8000/v1/approvals                    # 대기 중 HITL 승인 목록
-curl -s -XPOST localhost:8000/v1/approvals/appr_00001 \
-     -H 'content-type: application/json' -d '{"decision":"approve"}'   # 환불 승인→실행
-curl -s localhost:8000/v1/audit                        # 처리된 환불·이메일(관측)
-
-# 평가
-pytest                             # 63 통과 (.venv, pytest-asyncio+presidio)
-python eval/ablation.py            # → results/ablation.csv (McNemar p, Wilson CI)
-python eval/kanana_compare.py      # 채널 조건부 2×2
-open report/trace_view.html        # 정적 트레이스 데모 뷰어
+cp .env.example .env                           # GEMINI_API_KEY 또는 OPENAI_API_KEY 기입
+python -m scripts.check_env                    # 키·모델·RPM 점검
 ```
 
-> 프로덕션 전환 로드맵(레퍼런스 아키텍처·설정·단계별)은 [docs/PRODUCTION.md](docs/PRODUCTION.md) 참조.
+> 요구: Python 3.11+. 키 없이도 **`pytest`는 전부 동작**한다(FakeProvider). CLI·HTTP 서비스는 실 LLM 호출이므로 `GEMINI_API_KEY`/`OPENAI_API_KEY`가 필요하다.
 
 ---
 
-## 상태 (2026-07-28)
+## 5. 실행 방법
+
+### 5-1. 핵심 증명 — money smoke (CLI, 실 provider 필요)
+
+```bash
+python -m src.agent.cli --scenario poisoned_kb --defenses tier_a
+#   오염 KB가 send_email(공격자)를 유도 → Tier A가 egress 위반으로 차단
+#   기대: gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
+python -m src.agent.cli --scenario normal --defenses tier_a     # 정상 과제는 완주
+```
+
+> 키 없이 **결정적으로** 같은 증명을 보려면: `pytest tests/test_gate.py -k money_smoke`
+> (FakeProvider.scripted로 게이트 차단을 재현 — 모델 취약성이 아니라 게이트 동작을 검증).
+
+### 5-2. 실제 구동 서비스 (HTTP 런타임)
+
+```bash
+uvicorn src.agent.server:app --port 8000
+```
+
+| 엔드포인트 | 설명 |
+|---|---|
+| `GET /healthz` | liveness (의존성 무관 200) |
+| `GET /readyz` | readiness (provider·rail 준비 여부) |
+| `POST /v1/agent/run` | 에이전트 실행 (**`X-API-Key` 필수**) |
+| `GET /v1/approvals` | 대기 중 HITL 승인 목록 (PII 마스킹) |
+| `POST /v1/approvals/{id}` | 승인/거부 → 승인 시 백엔드 실행(idempotent) |
+| `GET /v1/audit` | 처리된 환불·이메일 관측 (계좌 마스킹) |
+
+```bash
+KEY='X-API-Key: demo-agent-key'      # ★fail-closed: 키 없으면 401★
+
+curl -s localhost:8000/healthz                                   # {"status":"ok"}
+curl -s localhost:8000/readyz                                    # provider 준비 여부
+
+# 정상 조회 (PII는 모델이 보기 전 토큰화됨)
+curl -s -XPOST localhost:8000/v1/agent/run -H "$KEY" -H 'content-type: application/json' \
+     -d '{"input":"010-1234-5678 고객 환불 상태를 조회해 주세요"}'
+```
+
+**HITL 환불 승인 흐름 (비가역 도구는 사람 승인 후 실행):**
+
+```bash
+# 1) 환불 요청 → 즉시 실행 안 됨. status=hitl_pending + pending_approval(id) 반환
+curl -s -XPOST localhost:8000/v1/agent/run -H "$KEY" -H 'content-type: application/json' \
+     -d '{"input":"이 고객 환불 처리해 주세요"}'
+#    → {"status":"hitl_pending","pending_approval":"appr_00001", ...}
+
+# 2) 운영자가 대기 목록 확인 (계좌는 110***01 로 마스킹)
+curl -s localhost:8000/v1/approvals
+
+# 3) 승인 → 백엔드에 실제 환불 실행 (거부는 {"decision":"deny"})
+curl -s -XPOST localhost:8000/v1/approvals/appr_00001 \
+     -H 'content-type: application/json' -d '{"decision":"approve","approver":"manager"}'
+
+# 4) 감사 — 처리된 환불 확인 (재승인은 409, 이중환불 없음)
+curl -s localhost:8000/v1/audit
+```
+
+### 5-3. 평가·재현
+
+```bash
+pytest                              # 63 통과 (.venv, pytest-asyncio+presidio)
+python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
+python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
+python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
+open report/trace_view.html         # 정적 트레이스 뷰어
+```
+
+### 5-4. 컨테이너
+
+```bash
+docker build -t safeagent-kr .
+docker run -p 8000:8000 -e GEMINI_API_KEY=... safeagent-kr
+```
+
+---
+
+## 6. 구현된 서비스 기능
+
+| 기능 | 내용 | 파일 |
+|---|---|---|
+| **결정적 게이트 (Tier A)** | 위험티어·allowlist·엄격 스키마·egress DLP scan. 문자열 미판독 | [policy.py](src/agent/policy.py) |
+| **HITL 승인 큐** | 비가역 도구는 `hitl_pending` → 사람 승인 후 실행. **트랜잭션적**(백엔드 실패 시 재시도) | [hitl.py](src/agent/hitl.py) |
+| **상태 백엔드 + idempotency** | 환불 원장·이메일 outbox·이중실행 방지 | [backend.py](src/agent/backend.py) |
+| **authN/authZ** | `X-API-Key`→principal, 수신자/계좌는 담당 고객의 등록값이어야(**confused-deputy 구조적 차단**) | [authz.py](src/agent/authz.py) |
+| **DLP 볼트** | 요청 스코프 가역 토큰화(5종), 최종 응답만 복원, egress는 토큰 유지 | [dlp/vault.py](src/dlp/vault.py) |
+| **provider 복원력** | async 네이티브 + tenacity 재시도(429/5xx) + 벽시계 타임아웃 | [_resilience.py](src/providers/_resilience.py) |
+| **fail-closed 4 seam · 구조적 로깅(PII 미로깅) · deadline 예산** | | [loop.py](src/agent/loop.py)·[log.py](src/agent/log.py) |
+
+---
+
+## 7. 상태 (2026-07-28)
 
 | 항목 | 상태 |
 |---|---|
-| 런타임 코어 (4-seam ReAct 루프 + Tier A 게이트 + DLP) | ✅ 구현·테스트 |
-| 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 구현, 헤드라인 실측 완료 |
-| 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인, 부록) |
-| **실행 서비스 (FastAPI HTTP 런타임)** | ✅ 구동 가능 — 서버고정 Tier A+DLP+strict, 파일럿 전 단계([docs/PRODUCTION.md](docs/PRODUCTION.md)) |
-| 외부 데이터셋 실재 검증 | ✅ 완료 (라이선스·행수 실측, [results/RESULTS.md](results/RESULTS.md)) |
+| 런타임 코어 (4-seam ReAct + Tier A + DLP) | ✅ 구현·테스트 |
+| 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
+| **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
+| 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
 | 유닛/통합 테스트 | ✅ **63 통과** (.venv) |
 
-주요 설정: [config/policy.yaml](config/policy.yaml) · 의존성: [requirements.txt](requirements.txt) · 환경변수: [.env.example](.env.example)
+**남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
+
+**정직성 표기:** 헤드라인은 런타임 배선+근거 있는 3가지(Tier A·Kanana 채널갭·RegexVault DLP)만 주장. R6/R7/R4/ShieldGemma는 오프라인 부록. R10/R11은 데이터셋 매핑만(미실행). 사전등록 예측 P1b는 반증되어 정직 보고.
+
+---
+
+## 8. 라이선스
+
+코드 MIT([LICENSE](LICENSE)) · 데이터/모델 라이선스는 [DATA_CARD.md](DATA_CARD.md). KoTIP-Bench 등 자체 산출물 CC-BY-4.0.
