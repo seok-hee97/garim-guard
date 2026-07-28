@@ -41,20 +41,27 @@ def search_kb(query: str = "", *, world: Any = None) -> ToolOutput:
 
 
 def issue_refund(account: str = "", amount: int = 0, reason: str = "",
-                 *, world: Any = None, idempotency_key: str = "") -> ToolOutput:
+                 *, world: Any = None, idempotency_key: str = "", actor: dict | None = None) -> ToolOutput:
     """비가역 외부 싱크 — 환불 실행. 게이트를 통과해야만 여기 도달한다.
-    world 가 부작용을 지원(ServiceWorld)하면 원장 기록+idempotency, 아니면 mock."""
+    world 가 부작용을 지원(ServiceWorld)하면 원장 기록+idempotency, 아니면 mock.
+    actor(customer_id/principal_id)는 감사 소유권 메타로 레코드에 각인한다(역매핑 폐기)."""
+    a = actor or {}
     if hasattr(world, "issue_refund"):
-        return ToolOutput(value=world.issue_refund(account, amount, reason, idempotency_key),
+        return ToolOutput(value=world.issue_refund(account, amount, reason, idempotency_key,
+                                                   customer_id=a.get("customer_id", ""),
+                                                   principal_id=a.get("principal_id", "")),
                           untrusted=False)
     return ToolOutput(value={"ok": True, "account": account, "amount": amount}, untrusted=False)
 
 
 def send_email(to: str = "", subject: str = "", body: str = "",
-               *, world: Any = None, idempotency_key: str = "") -> ToolOutput:
+               *, world: Any = None, idempotency_key: str = "", actor: dict | None = None) -> ToolOutput:
     """외부 싱크 — 이메일 발송. world 가 부작용을 지원하면 outbox 기록, 아니면 mock."""
+    a = actor or {}
     if hasattr(world, "send_email"):
-        return ToolOutput(value=world.send_email(to, subject, body, idempotency_key),
+        return ToolOutput(value=world.send_email(to, subject, body, idempotency_key,
+                                                 customer_id=a.get("customer_id", ""),
+                                                 principal_id=a.get("principal_id", "")),
                           untrusted=False)
     return ToolOutput(value={"sent": True, "to": to, "subject": subject}, untrusted=False)
 
@@ -76,15 +83,16 @@ REGISTRY: dict[str, Callable[..., ToolOutput]] = {
 
 
 def execute(name: str, args: dict[str, Any], call_id: str, *, world: Any = None,
-            taint_enabled: bool = False, idempotency_key: str = "") -> Any:
-    """도구를 실행하고, 비신뢰 출력이면 (taint on 시) Tainted 로 래핑한다."""
+            taint_enabled: bool = False, idempotency_key: str = "", actor: dict | None = None) -> Any:
+    """도구를 실행하고, 비신뢰 출력이면 (taint on 시) Tainted 로 래핑한다.
+    actor: 부작용 싱크에 각인할 소유권 메타(customer_id/principal_id) — 감사 scope 근거."""
     fn = REGISTRY.get(name)
     if fn is None:
         raise KeyError(f"알 수 없는 도구: {name}")
     if name in ("issue_refund", "send_email"):
         # 비가역/외부 싱크는 idempotency 키 전달. ★모델 call_id(send_email#0)는 응답마다 반복되어
         # 전역 키로 부적합★ → 호출측이 에피소드/승인 스코프 키를 주입(없으면 call_id 폴백).
-        out = fn(**args, world=world, idempotency_key=(idempotency_key or call_id))
+        out = fn(**args, world=world, idempotency_key=(idempotency_key or call_id), actor=actor)
     else:
         out = fn(**args, world=world)
     if out.untrusted and taint_enabled:

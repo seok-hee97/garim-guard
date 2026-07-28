@@ -28,7 +28,7 @@ class ServiceWorld(ToolWorld):
     _refund_seq: int = 0
 
     def issue_refund(self, account: str = "", amount: int = 0, reason: str = "",
-                     idempotency_key: str = "") -> dict[str, Any]:
+                     idempotency_key: str = "", customer_id: str = "", principal_id: str = "") -> dict[str, Any]:
         """비가역 환불 — idempotency_key 로 중복 실행 방지. 실 결제 API 연결 지점.
 
         ★transactional-outbox 상태 모델(P1)★: 실 API 호출 '전에' status='submitted' 로 레코드를
@@ -40,14 +40,15 @@ class ServiceWorld(ToolWorld):
             return {**self.refunds[key], "idempotent_replay": True}
         self._refund_seq += 1
         rec = {"ok": True, "refund_id": f"rf_{self._refund_seq:05d}",
-               "account": account, "amount": amount, "reason": reason, "status": "submitted"}
+               "account": account, "amount": amount, "reason": reason, "status": "submitted",
+               "customer_id": customer_id, "principal_id": principal_id}   # 불변 소유권 메타(감사 scope)
         self.refunds[key] = rec                              # 1) durable write-first(submitted)
         # TODO(실운영): 2) 여기서 Stripe 등에 Idempotency-Key=key 헤더로 실제 환불 호출(별도 워커 가능).
         rec["status"] = "completed"                          # 3) 성공 전이(실패 시 submitted 로 잔존)
         return rec
 
     def send_email(self, to: str = "", subject: str = "", body: str = "",
-                   idempotency_key: str = "") -> dict[str, Any]:
+                   idempotency_key: str = "", customer_id: str = "", principal_id: str = "") -> dict[str, Any]:
         """이메일 발송 — outbox 에 기록(idempotency_key 로 중복 발송 방지). 실 SMTP/ESP 연결 지점.
 
         ★재생(replay)은 재시도 인자가 아니라 '저장된 원본 발송 결과'를 반환한다(P0-2)★ —
@@ -57,7 +58,8 @@ class ServiceWorld(ToolWorld):
             return {"sent": True, "to": orig.get("to"), "subject": orig.get("subject"),
                     "idempotent_replay": True}
         rec = {"sent": True, "to": to, "subject": subject, "body": body,
-               "idempotency_key": idempotency_key, "status": "submitted"}
+               "idempotency_key": idempotency_key, "status": "submitted",
+               "customer_id": customer_id, "principal_id": principal_id}   # 불변 소유권 메타(감사 scope)
         self.outbox.append(rec)                       # 1) durable write-first(submitted)
         # TODO(실운영): 2) 여기서 SMTP/SES 등으로 실제 발송(별도 워커 가능).
         rec["status"] = "completed"                   # 3) 성공 전이(실패 시 submitted 잔존→재조정)
@@ -69,18 +71,17 @@ class ServiceWorld(ToolWorld):
     def audit(self, customer_ids: frozenset[str] | None = None) -> dict[str, Any]:
         """관측용 — 처리된 환불·발송 이메일 요약. ★계좌 등 원본 PII 는 마스킹★(approvals 와 동일).
 
-        ★테넌트 scope(R3-3)★ — customer_ids 지정 시, 각 레코드의 계좌/수신자가 그 고객집합에
-        속하는 것만 반환한다(다른 테넌트 레코드 은닉). 어느 고객에도 매핑되지 않는 레코드는
-        scope 감사자에게 노출하지 않는다(fail-closed). None 이면 전체(글로벌 감사·단일테넌트 데모)."""
+        ★테넌트 scope(R3-3 강화)★ — 각 레코드에 **실행 시점 각인된 불변 소유권 메타
+        (record['customer_id'])**로 필터한다. 이메일·계좌 역매핑은 중복/재사용 시 마지막
+        매핑 고객에 오귀속돼 교차노출이 재발하므로 쓰지 않는다. customer_id 미기록(구식/빈)
+        레코드는 scope 감사자에게 **노출하지 않는다(fail-closed)**. None 이면 전체(글로벌 감사)."""
         from .hitl import _mask
-        acct2cust = {c["account"]: c["id"] for c in self.customers if c.get("account")}
-        email2cust = {c["email"]: c["id"] for c in self.customers if c.get("email")}
 
-        def _in(owner: str | None) -> bool:
-            return customer_ids is None or (owner is not None and owner in customer_ids)
+        def _in(owner: str) -> bool:
+            return customer_ids is None or (bool(owner) and owner in customer_ids)
 
-        refunds = [r for r in self.refunds.values() if _in(acct2cust.get(r["account"]))]
-        outbox = [e for e in self.outbox if _in(email2cust.get(e["to"]))]
+        refunds = [r for r in self.refunds.values() if _in(r.get("customer_id", ""))]
+        outbox = [e for e in self.outbox if _in(e.get("customer_id", ""))]
         return {
             "refunds": [{"refund_id": r["refund_id"], "account": _mask("account", r["account"]),
                          "amount": r["amount"], "status": r["status"]} for r in refunds],

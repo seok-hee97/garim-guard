@@ -74,6 +74,14 @@ class _IdemStore:
         self._maxsize = maxsize
         self._ttl_s = ttl_s
 
+    def _purge_expired(self) -> None:
+        """TTL 지난 항목 일괄 정리(R4-#2) — in_flight 든 done 이든 만료분을 제거해,
+        취소로 남은 stale in_flight 마커가 capacity 를 영구 점유(영구 503)하지 않게 한다."""
+        now = time.time()
+        dead = [k for k, e in self._d.items() if now - e.get("created_at", 0) > self._ttl_s]
+        for k in dead:
+            self._d.pop(k, None)
+
     def get(self, key: Any) -> dict | None:
         e = self._d.get(key)
         if e is None:
@@ -100,11 +108,12 @@ class _IdemStore:
         return self._d.pop(key, default)
 
     def inflight_count(self) -> int:
-        """진행 중(in_flight) 항목 수 — active capacity 상한 판정용(R3-5)."""
+        """진행 중(in_flight) 항목 수 — active capacity 판정용. ★만료분 먼저 정리★(R4-#2)."""
+        self._purge_expired()
         return sum(1 for e in self._d.values() if e.get("status") == "in_flight")
 
     def at_inflight_capacity(self) -> bool:
-        """진행 중 요청이 저장소 상한만큼 쌓였는가 — 초과 시 새 요청 거부(R3-5)."""
+        """진행 중 요청이 저장소 상한만큼 쌓였는가 — 초과 시 새 요청 거부(R3-5). 만료 stale 제외."""
         return self.inflight_count() >= self._maxsize
 
 
@@ -328,9 +337,9 @@ async def run(req: RunRequest, x_api_key: str | None = Header(default=None),
             #   요청이 백엔드에서 replay 로 오인되지 않는다(HTTP store 만료 후에도).
             idempotency_scope=idem_ns(principal.id, idempotency_key or episode_id, req_hash),
         )
-    except Exception:
+    except BaseException:                     # ★취소(CancelledError)·오류 모두★ in_flight 마커 정리(R4-#2)
         if store_key is not None:
-            idem_store.pop(store_key, None)   # 실패는 굳히지 않음 → 재시도 허용
+            idem_store.pop(store_key, None)   # 실패·취소는 굳히지 않음 → 재시도 허용
         raise
     resp = RunResponse(
         episode_id=ep.episode_id,
@@ -419,7 +428,8 @@ async def resolve_approval(approval_id: str, req: ApproveRequest,
 
     def _executor(tool: str, args: dict) -> dict:
         raw = toolmod.execute(tool, dict(args), approval_id, world=world,
-                              idempotency_key=backend_key)   # 논리적 키로 백엔드 dedup
+                              idempotency_key=backend_key,   # 논리적 키로 백엔드 dedup
+                              actor={"customer_id": appr.customer_id, "principal_id": appr.principal})
         return {"executed": True, "result": raw}
 
     resolved = q.resolve(approval_id, approve=(req.decision == "approve"),

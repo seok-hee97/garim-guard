@@ -20,7 +20,7 @@
 
 **R6 PII NER (학습)** — klue/roberta-small + TokenClassification 헤드. 데이터 ai4privacy/pii-masking-openpii-1.5m 한국어 슬라이스(~26,498행, 9개체: GIVENNAME/SURNAME/CITY/STREET/BUILDINGNUM/ZIPCODE/EMAIL/DATE/AGE, SOCIALNUM/TELEPHONENUM/IDCARDNUM 제외). hparams lr=3e-5, 3epoch, batch=16, seq=256, 20k 서브샘플. 메트릭은 스팬레벨 strict P/R/F1/F2. 이건 집행이 아니라 DLP 볼트의 한국어 개체 탐지 성능을 Presidio-ko / vmaca123/korean-pii-ner-v3와 비교하기 위한 독립 산출물이다.
 
-**R7 harm rail (학습)** — klue/roberta-base + 멀티라벨 SeqClassification. 데이터 jeanlee/kmhas_korean_hate_speech(train 78,977, label은 **가변길이 int 리스트**, 9클래스, idx8=not_hate). **정정/필수 작업**: label 리스트를 **9차원 multi-hot로 확장**해야 함(현 스켈레톤 미구현). 손실은 BCEWithLogitsLoss(softmax 금지), 추론은 라벨별 sigmoid + 라벨별 threshold. 메트릭 Macro-F1.
+**R7 harm rail (학습)** — klue/roberta-base + 멀티라벨 SeqClassification. 데이터 jeanlee/kmhas_korean_hate_speech(train 78,977, label은 **가변길이 int 리스트**, 9클래스, idx8=not_hate). label 리스트의 **9차원 multi-hot 확장은 `eval/train_harm.py`에 구현됨**(초기 스켈레톤에서 해소). 손실 BCEWithLogitsLoss(softmax 금지), 추론 라벨별 sigmoid + 라벨별 threshold, 메트릭 Macro-F1, 모델/지표 저장.
 
 **Ko-AgentGuard e5 업그레이드 (head만 학습)** — e5-small 인코더 동결, sklearn LogisticRegression만 학습. **#1 위험 = 접두 불일치**: 분류/클러스터링 용도이므로 학습·추론 **모든** 행에 `query: `를 붙여야 함. sentence-transformers는 접두를 자동으로 안 붙임(흔한 버그). 파이프라인: `query: `+text → tokenize(max_length=512) → model(no_grad, eval) → masked mean-pool → L2정규화(384d) → LR.fit/predict_proba. 이미 정규화된 벡터라 StandardScaler 불필요, 불균형시 class_weight='balanced' 고려.
 
@@ -73,17 +73,21 @@ pip install -U "transformers>=4.51.3" "torch>=2.2" "datasets>=2.20" \
 2. ~~`_build_rail()` 하드코딩 → Kanana/ShieldGemma/e5 선택 불가~~ → **해소**: `eval/run.py:_build_rail`이 `--rail ko_agentguard|heuristic|kanana|shieldgemma|e5` 지원(RunPod GPU 레일 선택 가능). GPU 레일 편입은 여전히 `channel_gap.json` 별도 산출이 기본(ablation 테이블 편입은 선택).
 3. ~~kanana_compare가 발화=대화 동일 세팅 → P1a 갭 계산 안 됨~~ → **해소**: `KananaRail.score_conversation(messages)`(멀티턴 b1 붕괴 경로) 구현, `eval/kanana_compare.py`가 `has_conversation_path`로 b1(대화)·b2(문자열)를 분리 계측(P1a 갭 실제 산출). CPU 레일은 b1=a 폴백임을 명시.
 
-### 6. 작성해야 할 코드 파일 (아직) vs 준비됨
-**작성 필요 (RunPod에서)**:
-- `src/rails/kanana.py` — RailScorer.score(text)→[0,1] + score_conversation(messages) b1 경로
-- `src/rails/shieldgemma.py` — 4-policy 루프, P('Yes')
-- e5 레일 모듈 + e5-small+LR 학습 스크립트
-- R6/R7 실제 학습 루프(R7 multi-hot 확장 포함)
-- `eval/run.py` `_build_rail()`에 GPU 레일 선택(--rail) 반영
-- `eval/kanana_compare.py`의 a≠b2 분리 + b1 붕괴 경로
-- RunPod entrypoint에 HF login/HF_TOKEN·HF_HOME 설정
+### 6. 코드 파일 상태 (구현 완료 vs 남은 것)
 
-**이미 준비됨**: KoTIP 데이터(`data/kotip/v0.1/attacks.test.jsonl`), cassettes, .env(provider+HF 키), kmhas/openpii parquet 브랜치, kmhas 라벨↔R7 LABELS 정합, multi-hot BCE 방침, datasets refs/convert/parquet 선택.
+> ⚠️ 이 문서 §1~§4 및 아래 목록의 초기 "작성 필요" 표현은 **초기 계획 시점 기준**이다.
+> 아래는 **현재(2026-07) 구현 상태**로 정정한 것이며, §5 blocker 정정(구현 완료)과 일치한다.
+
+**구현 완료 ✅**:
+- `src/rails/kanana.py` — `score(text)`+`score_conversation(messages)`(b1 붕괴 경로), transformers 버전 가드.
+- `src/rails/shieldgemma.py` — 4-policy 루프, P('Yes').
+- `src/rails/e5_lr.py` — e5-small+LR 레일. `eval/train_pii_ner.py`(R6)·`eval/train_harm.py`(R7, **multi-hot BCE 구현**+모델/지표 저장).
+- `eval/run.py:_build_rail()` — `--rail ko_agentguard|heuristic|kanana|shieldgemma|e5` 선택.
+- `eval/kanana_compare.py` — a(발화)·b1(대화, `has_conversation_path`)·b2(문자열) 분리 계측.
+
+**RunPod 실행 시 필요(코드 아님, 환경)**: entrypoint 에 HF login/HF_TOKEN·HF_HOME 설정, ShieldGemma 게이트 라이선스 수락.
+
+**이미 준비됨**: KoTIP 데이터, cassettes, .env(provider+HF 키), kmhas/openpii parquet 브랜치, kmhas 라벨↔R7 LABELS 정합, datasets refs/convert/parquet 선택.
 
 ### 7. DROP / 옵션 판단
 - **kanana-8b = 옵션**: 16GB·느림·택소노미 불일치라 R7을 대체 못 함. 필수 레일 완료 후 예산 남을 때만, 마지막·단독 실행. 조야한 harm + 구조적맹점 증거로만 프레이밍.

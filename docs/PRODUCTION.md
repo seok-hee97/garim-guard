@@ -34,7 +34,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 | **구조적 로깅** | JSON 로그 + `episode_id` 상관(contextvar), ★PII 미로깅★ | [log.py](../src/agent/log.py) |
 | **DLP 배선** | `vault.restore`(최종 응답만)·egress DLP scan(외부싱크 잔여 원본 PII 차단)·after_tool fail-closed | loop.py·policy.py |
 | **Tier A 엄격 스키마** | 미선언 인자 거부 + 정수 암묵 형변환 거부 (gated: 서비스 on / 평가 off → 재현성 보존) | policy.py |
-| **테스트** | 104 통과(CI-core 98·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
+| **테스트** | 106 통과(CI-core 100·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
 
 **라이브 검증(2026-07):** 실 gpt-4o-mini 로 `POST /v1/agent/run` → `lookup_customer(phone=<KR_PHONE_1>)`
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
@@ -50,7 +50,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 >
 > *아직 남은 한계(로드맵):*
 > - **실 외부 API 미연결** — ServiceWorld 는 인메모리(환불 원장·이메일 outbox). 실 Stripe/SMTP 연결 지점은 `backend.py` TODO. 실 API 시 `asyncio.to_thread` 만료해도 스레드 미회수 → 자체 소켓 타임아웃 필요. `_refund_seq` check-then-set 도 실 async/워커 도입 시 Lock 필요(현재는 이벤트루프 직렬화로 도달 불가).
-> - **cross-customer 스코프** — X-API-Key 는 fail-closed 이나 **데모 principal 은 전-고객 flat 스코프**라 담당 외 고객의 등록 이메일로도 발송 가능. 실운영은 **에피소드↔대상고객 per-ticket 바인딩** 필요(confused-deputy=미등록주소는 이미 차단).
+> - **cross-customer 스코프 — 구현됨**: `customer_id` **대화-고객 바인딩**으로 스코프를 한 고객으로 한정(다중 고객 principal 은 customer_id 필수·400 fail-closed), 발송/환불/조회 모두 그 고객만. 감사도 실행시 각인한 불변 소유권 메타로 테넌트 필터. 실 IdP/멀티테넌트 배정 DB 연결만 실운영 몫.
 > - **refund authz ≡ egress(demo)** — `authz.account_unverified` 는 `egress.refund_accounts` allowlist 와 동치라 데모에선 egress 가 먼저 차단(구조적 도달 불가). 실운영은 전역 유효계좌 ⊋ 담당계좌 로 분리해야 authz 가 의미.
 > - **인메모리 상태** — 큐/백엔드가 프로세스 메모리에 있어 재시작 시 소실(실운영은 DB/redis). 승인 TTL(기본 3600s)·정책변경 후 금액한도 재검사·요청/HITL 멱등성은 **구현됨**. **부수효과 outbox 상태모델(submitted/completed/unknown)과 실 job queue 는 미구현**(현재는 완료까지 동기 대기 — deadline 벽시계 보장 없음).
 > - 승인자 authN·**직무분리(요청자≠승인자)는 강제됨**(역할키 분리 + `appr.principal == approver.id` 차단, 테스트 고정). 데모 자격증명은 비-prod 전용(prod 는 주입 자격증명 필수).
@@ -109,13 +109,17 @@ flowchart TB
 - ~~HITL 실제 큐~~ → **완료**: `hitl_pending` → `/v1/approvals` 승인 → 백엔드 실행(idempotent). (전체 대화 재개 대신 보류-액션 실행 방식.)
 - ~~상태 백엔드 + idempotency~~ → **완료**: ServiceWorld 환불 원장·outbox·이중환불 방지.
 
+### 이미 완료된 것(이전 로드맵에서 이관) ✅
+- **컨테이너 + CI + lock** — Dockerfile(비루트·core.lock 핀), `requirements.core.lock`, GitHub Actions(CI-core). *(pip-compile --generate-hashes 는 선택)*
+- **재현성 키** — `eval/run.py` `_done()`/`_key()`·`run_id` 에 dataset_hash·policy_hash 포함, `build_dataset.py` `hashlib` 결정성. ⚠️ 단 **커밋된 frozen 결과(runs.jsonl 434·runs.v0.2 360)는 provenance 배선 이전 산출**이라 지문 0행 — 문서에서 계보를 backfill(`metadata_source=backfilled_from_docs`)했고, **신규 실행부터** dataset/policy 지문이 포함된 run_id 를 쓴다(신·구 자동 분리). 평가 코드 변경까지 자동 분리하려면 전체 git commit 보다 *평가 코드 hash* 를 run_id 에 추가하는 것이 적합(향후).
+- **승인 TTL·직무분리·멀티테넌트 격리**(테넌트 승인/조회/audit scope, 멱등성 단사 키).
+
 ### MVP-prod 나머지 (소규모 실파일럿 · 1개월)
 1. **실 외부 API 어댑터** — ServiceWorld 인메모리 → 실 Stripe/SMTP 연결(`backend.py` TODO). 실 API 는 자체 소켓 타임아웃 필요.
-2. **상태 영속화** — 승인 큐·백엔드를 DB/redis 로(재시작 생존) + 승인 TTL + 승인자 authN·직무분리.
+2. **상태 영속화** — 승인 큐·백엔드를 DB/redis 로(재시작 생존).
 3. **전체 대화 재개** — 현재 HITL 은 보류-액션만 실행. 승인 후 모델이 결과를 보고 대화를 이어가려면 checkpoint/resume + thought_signature 지속성 필요.
-4. **환경 오버레이 + 부팅 검증** — `APP_ENV` 기반 `policy.{env}.yaml` deep-merge, prod 는 시크릿 env 주입만, Pydantic `PolicySchema` fail-fast(`dlp.fail==closed`·`hitl.mode!=stub`·`afc==False` 단언).
-5. **컨테이너 + CI + lock** — 멀티스테이지 Dockerfile(core/full), `pip-compile --generate-hashes`, GitHub Actions(게이트 봉인 회귀 + presidio 스모크).
-6. **재현성 키** — `eval/run.py _done()` dedup 키에 provider/model/rail/dataset_hash 추가, `build_dataset.py` `hash()`→`hashlib`(cross-build 결정성).
+4. **환경 오버레이 + 부팅 검증** — `APP_ENV` 기반 `policy.{env}.yaml` deep-merge, prod 는 시크릿 env 주입만(구현됨: 데모키 거부), Pydantic `PolicySchema` fail-fast.
+5. **실 IdP/멀티테넌트 배정 DB** — 현재 주입 자격증명(`SAFEAGENT_API_KEYS`) 인터페이스 → 실 OAuth/IdP + 고객-상담원 배정 DB.
 
 ### hardened (규모·규제 발생 시)
 - 대시보드+경보 4종: `leak_total>0` 즉시 page · 차단율 밴드 · rail 드리프트 · 429율. prometheus_client + Grafana.

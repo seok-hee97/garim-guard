@@ -164,6 +164,31 @@ def test_r33_audit_tenant_scoped():
         os.environ.pop("SAFEAGENT_API_KEYS", None)
 
 
+# ── R4-1: audit 는 역매핑 아닌 불변 소유권 메타로 필터(중복 email/account 안전) ──
+
+def test_r4_audit_uses_stored_owner_not_reverse_map():
+    from src.agent.backend import ServiceWorld
+    w = ServiceWorld(customers=[{"id": "custA", "email": "s@x.com", "account": "110-1"},
+                                {"id": "custB", "email": "s@x.com", "account": "110-1"}])  # 중복
+    w.send_email(to="s@x.com", subject="A", body="b", idempotency_key="k1",
+                 customer_id="custA", principal_id="agent:A")
+    assert w.audit(frozenset({"custA"}))["email_count"] == 1     # 실제 소유자
+    assert w.audit(frozenset({"custB"}))["email_count"] == 0     # 오귀속 없음
+    # 소유권 미기록(구식) 레코드는 scope 감사자에 미노출(fail-closed)
+    w.issue_refund(account="110-1", amount=1, idempotency_key="r0")
+    assert w.audit(frozenset({"custA"}))["refund_count"] == 0
+
+
+# ── R4-2: 만료된 in_flight 는 capacity 에서 제외(영구 503 방지) ──
+
+def test_r4_expired_inflight_purged_from_capacity():
+    s = server._IdemStore(maxsize=1, ttl_s=1.0)
+    s.set(("p", "k"), {"hash": "h", "status": "in_flight", "response": None})
+    s._d[("p", "k")]["created_at"] -= 100                        # TTL 만료로 backdate
+    assert s.at_inflight_capacity() is False                     # 만료분 정리 → capacity 여유
+    assert len(s._d) == 0
+
+
 # ── R3-5: in_flight 가 저장소 상한을 넘으면 새 요청은 503 ──
 
 def test_r35_inflight_capacity_saturation():

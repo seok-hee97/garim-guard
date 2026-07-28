@@ -219,10 +219,13 @@ async def run_episode(
             #  ★부작용 도구(issue_refund/send_email)는 wait_for abandon 금지★ — to_thread 는 만료해도
             #  스레드를 못 멈춰 '유령 부작용'(사용자엔 실패, 실제론 발송)이 생긴다. 완료까지 대기하고
             #  실 결과를 보고한다(실 API 는 자체 소켓 타임아웃으로 무한대기 방지). 읽기 도구만 abandon-timeout.
+            _prin2 = getattr(hooks, "principal", None)
+            _actor = {"customer_id": next(iter(getattr(_prin2, "customer_ids", None) or []), ""),
+                      "principal_id": getattr(_prin2, "id", "")}    # 부작용 소유권 각인(감사 scope)
             try:
                 _exec = asyncio.to_thread(toolmod.execute, call.name, unwrap(args_for_exec),
                                           call.call_id, world=world, taint_enabled=taint_on,
-                                          idempotency_key=_ik)
+                                          idempotency_key=_ik, actor=_actor)
                 if call.name in ("issue_refund", "send_email"):
                     raw = await _exec                      # 부작용: abandon 금지(유령 부작용 방지)
                 else:
