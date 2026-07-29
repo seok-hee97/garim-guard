@@ -562,7 +562,8 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     [td("ASR_attempted"), td("모델이 공격 도구 호출을 시도한 비율 — ★전체 합계 기준★ 불변(조건별: clean 0.30→0.40, obf 0.14→0.12)"),
      td("±5pp 불변", { align: "center" }), td("유지 (실행만 0)", { align: "center" })],
     [td("난독화 불변"), td("원본 대비 난독화에서 t-ASR 변화 (KoTIP test 5계열)"), td("±2pp", { align: "center" }), td("원본=난독화=0.00", { align: "center" })],
-    [td("탐지기 붕괴폭"), td("분류기 F1 이 난독화로 얼마나 무너지나"), td("≥ 0.25", { align: "center" }), td("0.99 (0.99→0.0)", { align: "center", color: RED })],
+    [td("탐지기 붕괴"), td("Ko-AgentGuard F1 이 어디서 무너지나 — ★난독화 4종 중 base64 에서만★"), td("≥ 0.25", { align: "center" }), td("base64 0.994→0.0\n(호모글리프 0.97·자모분해 0.994 견딤)", { align: "center", color: RED })],
+    [td("교차언어 전이", { bold: true }), td("영어 학습 레일이 한국어에서 작동하나 — ★붕괴의 주된 원인★"), td("—", { align: "center" }), td("Ko-AgentGuard KO 0.0 · e5 KO 0.0", { align: "center", bold: true, color: RED })],
     [td("PII 유출률"), td("매핑된 PII 기준, 모델 생성 인자·비인가 필드의 원본 노출"), td("0%", { align: "center" }), td("볼트 ON 전 항목 0.00", { align: "center", bold: true, color: GREEN_D })],
     [td("BPR · 과차단"), td("정상 업무 완수율 / 정상인데 막힌 비율 (안전의 비용)"), td("완수 유지", { align: "center" }), td("비-환불 완주 · n=2 얇음", { align: "center" })],
     [td("span F1 / Macro-F1"), td("학습형 레일(R6 PII NER · R7 유해성) 품질 — 부록 축"), td("—", { align: "center" }), td("0.9845 / 0.709", { align: "center" })],
@@ -630,7 +631,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     { text: "requires_hitl", options: { fontFace: MONO, fontSize: 10.5 } },
     { text: " 이라 승인자 없는 평가 하네스에서 미완료된 것 — 차단이 아니라 설계된 사람 확인(v0.1 정상셋 2건이라 BPR 판별력은 얇다).",
       options: { breakLine: true } },
-    { text: "분류기 arm은 한국어를 0.022로 채점하는 영어학습 CPU 레일(교차언어 눈멂) · spotlight는 지시문 주입 + 비신뢰 도구 출력 구분자 래핑까지 수행(완전 구현)", options: {} },
+    { text: "★분류기 arm에 쓴 건 Kanana 가 아니라 한국어를 0.022로 채점하는 영어학습 CPU 레일이다 — 한국어를 보는 분류기로 강제했을 때는 미측정 · spotlight는 지시문 주입 + 비신뢰 도구 출력 구분자 래핑까지 수행(완전 구현)", options: {} },
   ], { x: M, y: 5.86, w: CW, h: 0.7, fontFace: FONT, fontSize: 11, color: GREY, valign: "top" });
 }
 
@@ -671,6 +672,10 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
       t: [{ text: "★우리 런타임은 ③★ — ", bold: true, color: GREEN_D },
           { text: "after_tool 이 도구 반환 문자열을 직접 채점한다" }],
       sub: "즉 이 구성에서 Kanana 는 잘 잡는다(1.0). 탐지 성패를 가른 건 모델이 아니라 어댑터 배선이다",
+    },
+    {
+      t: [{ text: "그럼 Kanana 로 강제하면? — ", bold: true }, { text: "이번 실험에서는 미측정", color: RED }],
+      sub: "S9 의 분류기 강제 arm 은 Kanana 가 아니라 한국어를 0.022로 채점하는 영어 CPU 레일이었다",
     },
     {
       t: [{ text: "게이트 t-ASR: 배선·난독화와 무관하게 ", }, { text: "0.00", bold: true, color: GREEN_D }],
