@@ -255,7 +255,7 @@ def build() -> str:
     P.append(line(883, y2 + 112, "탐지 5종", size=17, color=MUTED, bold=True))
     P.append(line(1020, y2 + 112, "RRN · 전화 · 카드 · 계좌 · 이메일", size=18))
     P.append(line(883, y2 + 148, "대안/실험", size=17, color=MUTED, bold=True))
-    P.append(line(1020, y2 + 148, "Presidio 2.2.361 · 한국어 결함 2건 패치", size=18))
+    P.append(line(1020, y2 + 148, "Presidio 2.2.364(실측) · 한국어 결함 2건 패치", size=18))
     P.append(line(883, y2 + 184, "경계 규칙", size=17, color=MUTED, bold=True))
     P.append(line(1020, y2 + 184, "비식별 실패=차단 · 요청 종료 시 매핑 폐기", size=18,
                   color=BLUE, bold=True))
