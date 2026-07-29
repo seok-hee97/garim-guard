@@ -30,7 +30,7 @@ TRACES = ROOT / "results" / "demo_traces.jsonl"
 OUT_PNG = ROOT / "docs" / "workflow_example.png"
 OUT_SVG = ROOT / "docs" / "workflow_example.svg"
 
-W, H = 1720, 640
+W, H = 1720, 596
 FONT = "'Apple SD Gothic Neo','AppleGothic','Malgun Gothic','Noto Sans KR',sans-serif"
 MONO = "ui-monospace,'SF Mono',Menlo,monospace"
 
@@ -202,11 +202,8 @@ def build() -> str:
                         ("★불변식", "leaks_total = 0  (allowlist 밖 실행 0건)")],
                   accent=INK, bg=GREY_BG))
 
-    # 하단 결론
-    P.append(f'<rect x="40" y="{H-74}" width="{W-80}" height="46" rx="10" fill="{INK}"/>')
-    P.append(f'<text x="{W/2}" y="{H-44}" font-size="16.5" font-weight="700" fill="#fff" '
-             'text-anchor="middle">탐지(④⑤)는 실패했지만 강제(⑥)가 성립했다 — '
-             '이것이 &quot;분류기는 계측, 게이트는 강제&quot;의 실물</text>')
+    # ★하단 결론 배너는 넣지 않는다★ — 슬라이드 배너가 같은 문장을 말한다.
+    #   그림 안에 또 두면 화면에 결론이 두 줄 연달아 나온다(중복). 회수한 높이는 카드에 준다.
     P.append("</svg>")
     return "".join(P)
 

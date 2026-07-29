@@ -35,7 +35,7 @@ ICONS = json.loads((ROOT / "scripts" / "assets" / "brand_icons.json").read_text(
 OUT_PNG = ROOT / "docs" / "architecture_stack.png"
 OUT_SVG = ROOT / "docs" / "architecture_stack.svg"
 
-W, H = 1680, 900                      # 가로:세로 ≈1.8 — 슬라이드 `![h:540]` 에서 폭을 최대로
+W, H = 1680, 856                      # 가로:세로 ≈1.8 — 슬라이드 `![h:540]` 에서 폭을 최대로
 FONT = "'Apple SD Gothic Neo','AppleGothic','Malgun Gothic','Noto Sans KR',sans-serif"
 MONO = "ui-monospace,'SF Mono',Menlo,monospace"
 
@@ -153,17 +153,14 @@ def build() -> str:
     P.append(f'<rect width="{W}" height="{H}" fill="#ffffff"/>')
 
     # ── 헤더 ──
-    # ★큰 제목 제거★ — 슬라이드 제목과 중복. 논지 한 줄만 남기고 공간을 밴드에 넘긴다.
-    P.append(f'<text x="44" y="30" font-size="16" fill="{MUTED}">'
-             '강제(enforcement)는 결정적 게이트가, 탐지(detection)는 학습형 레일이 담당한다 — '
-             '두 축이 코드 구조로 분리돼 있다</text>')
-    P.append(f'<path d="M44 44 L{W - 44} 44" stroke="{GREEN}" stroke-width="2.5"/>')
+    # ★제목도 논지 줄도 넣지 않는다★ — 슬라이드 제목이 이름을, 하단 배너가 논지를 말한다.
+    #   그림 안에 또 쓰면 한 화면에 같은 말이 세 번 나온다. 회수한 높이는 밴드 판독성에 쓴다.
 
     LX, RW = 44, W - 88          # 밴드 x, 폭
     CX = LX + 250                # 밴드 내부 콘텐츠 시작 x
 
     # ── ① 서비스 계층 ──
-    y = 56
+    y = 20
     P.append(band(LX, y, RW, 112, bg="#ffffff", border=LINE))
     P.append(band_title(LX + 18, y + 32, "①", "서비스 계층", "HTTP · 인증 · 승인 큐", INK))
     P.append(chips_row(CX, y + 10, [
@@ -182,7 +179,7 @@ def build() -> str:
              'fail-closed: 키 없거나 역할 불일치 → 401/403 · prod 부팅 시 데모키 거부</text>')
 
     # ── ② 에이전트 런타임 (핵심) ──
-    y = 180
+    y = 144
     P.append(band(LX, y, RW, 212, bg=GREEN_BG, border=GREEN))
     P.append(band_title(LX + 18, y + 32, "②", "에이전트 런타임 (4-seam)",
                         "★강제가 일어나는 유일한 지점★", GREEN))
@@ -211,7 +208,7 @@ def build() -> str:
              '★게이트는 공격 텍스트의 의미를 분류하지 않는다 — 도구 identity·구조화 인자·allowlist 로만 판정(난독화 불변)★</text>')
 
     # ── ③ 모델 & 레일 ──
-    y = 404
+    y = 368
     P.append(band(LX, y, RW, 178, bg="#ffffff", border=LINE))
     P.append(band_title(LX + 18, y + 34, "③", "모델 · 안전 레일",
                         "운영 설정 log-only 봉인 · classifier_gate 는 대조군 전용", ORANGE))
@@ -258,7 +255,7 @@ def build() -> str:
              'ShieldGemma: EN-KO 오프라인 실험 · FakeProvider(scripted): 키 불요 결정적 데모</text>')
 
     # ── ④ 관측 ──
-    y = 594
+    y = 558
     P.append(band(LX, y, RW, 100, bg=TEAL_BG, border=TEAL))
     P.append(band_title(LX + 18, y + 34, "④", "관측 · 모니터링",
                         "PII 없음 — 정수 + enum 라벨만", TEAL))
@@ -277,7 +274,7 @@ def build() -> str:
     ]))
 
     # ── ⑤ 평가·재현 ──
-    y = 706
+    y = 670
     P.append(band(LX, y, RW, 100, bg="#ffffff", border=LINE))
     P.append(band_title(LX + 18, y + 34, "⑤", "평가 · 재현성",
                         "수치는 전부 results/ 에서 유도", INK))
