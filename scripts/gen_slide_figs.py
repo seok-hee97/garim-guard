@@ -161,7 +161,7 @@ def _channel_gap():
     ax.set_title("같은 페이로드도 채널이 바뀌면 탐지가 무너진다 (Kanana, n=10) — 강제는 게이트로",
                  fontproperties=KFONT, fontsize=13, fontweight="bold", pad=12)
     ax.annotate("같은 페이로드,\n채널만 발화→도구\n= recall 1.0 → 0.0",
-                xy=(1, 0.03), xytext=(0.55, 0.55), fontproperties=KFONT, fontsize=10.5,
+                xy=(0.72, 0.02), xytext=(0.42, 0.55), fontproperties=KFONT, fontsize=10.5,
                 color=C_THEATER, arrowprops=dict(arrowstyle="->", color=C_THEATER))
     ax.grid(axis="y", ls=":", alpha=0.5, zorder=0)
     _kf(ax)
@@ -191,11 +191,13 @@ def _dlp():
     # 볼트 ON 은 전 항목 0 → 캡이 없으면 범례의 파란색이 그림에 한 번도 안 나타난다.
     _zero_caps(ax, x - w / 2, off_mv, [C_LEAK] * len(fields), half=w / 2 - 0.01, lw=4.5)
     _zero_caps(ax, x + w / 2, on_mv, [C_SAFE] * len(fields), half=w / 2 - 0.01, lw=4.5)
+    # ★표와 같은 정밀도로★ — 0.125 를 0.12 로 반올림하면 S11 표(0.125)와 어긋난다.
+    lab = lambda v: "0.00" if v == 0 else f"{v:g}"
     for i, v in enumerate(off_mv):
-        ax.text(i - w / 2, v + 0.015, f"{v:.2f}", ha="center", va="bottom",
+        ax.text(i - w / 2, v + 0.015, lab(v), ha="center", va="bottom",
                 fontproperties=KFONT, fontsize=10.5, fontweight="bold")
     for i, v in enumerate(on_mv):
-        ax.text(i + w / 2, v + 0.015, f"{v:.2f}", ha="center", va="bottom",
+        ax.text(i + w / 2, v + 0.015, lab(v), ha="center", va="bottom",
                 fontproperties=KFONT, fontsize=10.5, color=C_SAFE, fontweight="bold")
     ax.set_xticks(x)
     ax.set_xticklabels(fields, fontproperties=KFONT, fontsize=11)

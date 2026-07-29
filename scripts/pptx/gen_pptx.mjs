@@ -318,7 +318,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     { t: [{ text: "목표: ", bold: true }, { text: "① 4-seam 안전 런타임  ② KoTIP-Bench 평가셋  ③ 게이트 vs 분류기 애블레이션 실증  ④ PII 유출 억제" }] },
     { t: [{ text: "산출물: ", bold: true }, { text: "구동 HTTP 서비스 + 평가 하네스 + 공개 목표 데이터셋 + 7-arm 결과" }],
       sub: "적용 분야: 한국어 고객지원·업무비서 등 도구 사용 LLM 에이전트 (도메인 재스킨 가능)" },
-    { t: [{ text: "기간·규모: ", bold: true }, { text: "2026-07-13 ~ 07-31 · 개인(솔로) · Python 3.11 · 코드 약 4,500줄 · 테스트 125" }] },
+    { t: [{ text: "기간·규모: ", bold: true }, { text: "2026-07-13 ~ 07-31 · 개인(솔로) · Python 3.11 · 코드 8,800줄(테스트 1,800줄 별도) · 테스트 125" }] },
   ], { y: 1.32, h: 3.6, fontSize: 16 });
   banner(s, "한 줄 논지 — 강제(enforcement)는 결정적 게이트가, 탐지(detection)는 분류기가. 둘을 섞으면 안전이 탐지 성능에 인질로 잡힌다",
     { y: 5.28, fill: NAVY, size: 15.5, h: 0.7 });

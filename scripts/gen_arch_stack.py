@@ -269,9 +269,13 @@ def build() -> str:
     P.append(chips_row(310, y3 + 18, [
         dict(label="JSONL trace", size=16, mono=True),
         dict(label="GET /v1/metrics", size=16, mono=True),
-        dict(label="Streamlit trace viewer", size=16),
+        # ★Streamlit 은 쓰지 않는다★ — app/trace_view.py 첫 줄 "Streamlit 대체(컷)".
+        # 뷰어는 의존성 0 의 정적 HTML 이다. requirements 에 선언만 남아 있어도 그림엔 못 쓴다.
+        dict(label="정적 HTML 뷰어(의존성 0)", size=16),
         dict(label="pytest 125", ico="pytest", size=16),
-        dict(label="statsmodels McNemar", ico="scipy", size=16),
+        # ★statsmodels·scipy 도 import 하지 않는다★ — eval/stats.py 가 math.comb 로
+        # McNemar exact·Wilson CI 를 자체 구현한다.
+        dict(label="McNemar exact · Wilson CI (자체 구현)", size=16),
         dict(label="Docker", ico="docker", size=16),
     ], gap=12))
     P.append(line(310, y3 + 85,
