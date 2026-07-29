@@ -34,17 +34,23 @@ open http://127.0.0.1:8501
 **5분 영상용 — 총 35초 컷 3개.** 대본 낭독이 251초이고 여유가 49초이므로 데모 화면은
 35초를 넘기지 않습니다. 나머지 장면은 아래 §1~§3(대면 시연·Q&A용)으로 돌립니다.
 
-| 컷 | 화면 조작 | 길이 | 화면에서 보여줄 것 |
+| 컷 | 주소창에 붙여넣을 URL | 길이 | 화면에서 확인할 것 |
 |---|---|---|---|
-| ① | `poisoned_kb / scripted / none` 실행 | 12초 | `search_kb` 가 반환한 오염 문서 본문, 이어서 `send_email` 이 **실행**되고 outbox 1건 |
-| ② | 방어만 `tier_a` 로 바꿔 재실행 | 12초 | 같은 호출이 `egress.email_domains` 로 **차단**, `attempted=True · executed=False` |
-| ③ | `3개 Arm 비교` 클릭 | 11초 | 세 구성의 executed 3/3/... 차이가 한 화면에 정렬 |
+| ① | `http://127.0.0.1:8501/?scenario=poisoned_kb&defense=none&autorun=1` | 12초 | 상단 카드 **Executed 4 · Blocked 0** · `send_email` ✅실행 |
+| ② | `http://127.0.0.1:8501/?scenario=poisoned_kb&defense=tier_a&autorun=1` | 12초 | 같은 위치 카드가 **Executed 3 · Blocked 1** 로 바뀜 · `send_email` 🔴`egress.email_domains` |
+| ③ | `http://127.0.0.1:8501/?scenario=poisoned_kb&autorun=compare` | 11초 | 3열 비교 — none `executed=4` / tier_a `egress.email_domains` / +dlp `dlp.egress:body` |
 
-컷 ①②는 **같은 화면에서 방어 선택만 바꿉니다.** 시나리오·provider 를 그대로 두어야
-"입력이 같고 방어만 다르다"가 시각적으로 성립합니다.
+**URL 로 컷을 고정합니다.** 드롭다운을 카메라 앞에서 조작하지 않아도 되고, 재촬영해도
+같은 화면이 나옵니다. 페이지가 열리면서 자동 실행되므로 녹화 시작과 동시에 결과가 뜹니다.
 
-`tier_a+dlp_vault` 구성의 토큰화(`<KR_RRN_1>` 등)는 5분 영상에서는 생략하고 S11 슬라이드
-표로 대체합니다. 화면으로 보이려면 컷 하나가 더 필요한데 예산을 넘습니다.
+컷 ①→② 는 **상단 지표 카드의 숫자만 바뀝니다**(4·0 → 3·1). 카드가 화면 상단에 고정
+위치라 스크롤 없이 대비가 보입니다. 이 두 컷이 이 프로젝트의 주장 그 자체입니다.
+
+컷 ③ 은 세 구성을 한 프레임에 나란히 보여주므로 스크롤이 필요 없습니다.
+
+DLP 토큰화를 화면으로 보이려면 컷 ①의 TURN 1 로 스크롤해 `TOOL RAW RESULT`(원본
+주민등록번호)와 바로 아래 `AFTER_TOOL → MODEL`(`<KR_RRN_1>`)을 대비시킵니다. 다만
+스크롤 시간이 들어 5분 예산에서는 S11 슬라이드 표로 대체합니다.
 
 **녹화 전 점검**
 

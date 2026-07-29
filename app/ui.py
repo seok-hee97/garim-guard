@@ -271,8 +271,20 @@ function renderCompare(data){
   $("out").className="";$("out").innerHTML=h;
 }
 function renderError(e){$("out").className="";$("out").innerHTML=`<div class="notice warn"><b>실행 실패</b><br>${esc(e.message)}</div>`}
+// 녹화용 딥링크 — 컷마다 URL 하나로 상태를 고정한다(카메라 앞에서 드롭다운을 만지지 않는다).
+//   ?scenario=poisoned_kb&defense=none&autorun=1        → 무방어 실행
+//   ?scenario=poisoned_kb&defense=tier_a&autorun=1      → 같은 호출이 게이트에 차단
+//   ?scenario=poisoned_kb&autorun=compare               → 3개 arm 비교
 init().then(()=>{
-  if(new URLSearchParams(location.search).get("autorun")==="1")$("run").click();
+  const q=new URLSearchParams(location.search), set=(id,v)=>{
+    if(!v)return; const el=$(id);
+    if([...el.options].some(o=>o.value===v))el.value=v;
+  };
+  set("scenario",q.get("scenario")); setInput();
+  set("provider",q.get("provider")); set("defense",q.get("defense"));
+  if(q.get("input"))$("input").value=q.get("input");
+  const a=q.get("autorun");
+  if(a==="compare")$("compare").click(); else if(a==="1")$("run").click();
 }).catch(renderError);
 </script>
 </body></html>"""
