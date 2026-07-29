@@ -212,9 +212,10 @@ def build() -> str:
     P.append(card("2", x2, top, cw, ch, "P-LLM이 도구 계획 생성", accent=ORANGE,
                   bg=ORANGE_BG, subtitle="라이브 실험과 영상 데모의 역할을 분리"))
     P.append(txt(x2 + 25, top + 105, "라이브", size=17, color=MUTED, bold=True))
-    P.append(txt(x2 + 110, top + 105, "gpt-4o-mini · Gemini 3.5 Flash", size=18, bold=True))
-    P.append(txt(x2 + 25, top + 148, "영상", size=17, color=MUTED, bold=True))
-    P.append(txt(x2 + 110, top + 148, "FakeProvider(scripted)", size=18, bold=True, mono=True))
+    P.append(txt(x2 + 110, top + 105, "gpt-4o-mini (헤드라인 60건 단독)", size=16, bold=True))
+    P.append(txt(x2 + 110, top + 126, "Gemini 3.5 Flash — 계약 스모크만", size=14, color=MUTED))
+    P.append(txt(x2 + 25, top + 156, "영상", size=17, color=MUTED, bold=True))
+    P.append(txt(x2 + 110, top + 156, "FakeProvider(scripted)", size=18, bold=True, mono=True))
     P.append(txt(x2 + 25, top + 184, "동일 tool_call을 고정해 게이트 차이만 재현", size=17))
     P.append(txt(x2 + 25, top + 222, "→ 데모는 모델 취약성 증명이 아니라 실행 차단 증명", size=16,
                  color=ORANGE, bold=True))
