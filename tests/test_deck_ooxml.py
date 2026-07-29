@@ -87,3 +87,38 @@ def test_deck_has_no_star_markers_and_keeps_bold():
                 bold += xml.count('b="1"')
     assert stars == 0, f"★ 기호가 {stars}개 남아 있다 — starRuns/starMd 전개 누락"
     assert bold > 50, f"볼드 런이 {bold}개뿐 — 강조가 서식으로 옮겨가지 않았다"
+
+
+def test_pptx_notes_match_script_markdown():
+    """★PPT 발표자 노트 == 발표자료.md 대본★ — 두 산출물이 갈리면 발표 중 다른 걸 읽게 된다.
+
+    회귀 이력: S1 만 newSlide() 를 거치지 않고 손으로 만들어져, 노트를 addNotes(PPT용)와
+    DECK.notes(대본용)에 따로 적었다. 그 결과 PPT 노트에는 상세 노트만 들어가고 표준 대본·
+    용어 블록은 .md 에만 있었다. 한 소스에서 두 산출물을 낸다는 이 파일의 전제가 S1 에서만
+    깨져 있었던 것이다.
+    """
+    md_path = ROOT / "report" / "발표자료.md"
+    if not md_path.exists():
+        pytest.skip("발표자료.md 미생성")
+    md = md_path.read_text("utf-8")
+    sections = re.split(r"^## S(\d+)\. ", md, flags=re.M)
+    script = {int(sections[i]): sections[i + 1] for i in range(1, len(sections), 2)}
+
+    with zipfile.ZipFile(DECK) as z:
+        for no in range(1, 19):
+            rels = z.read(f"ppt/slides/_rels/slide{no}.xml.rels").decode("utf-8")
+            m = re.search(r'Target="\.\./(notesSlides/notesSlide\d+\.xml)"', rels)
+            assert m, f"S{no} 에 발표자 노트가 없다"
+            xml = z.read("ppt/" + m.group(1)).decode("utf-8")
+            note = "".join(re.findall(r"<a:t>(.*?)</a:t>", xml, re.S))
+            note = note.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            body = script[no]
+            for block in ("🎬", "📖 [용어·배경]", "[상세 노트"):
+                if block in body:
+                    assert block in note, f"S{no}: 대본의 '{block}' 블록이 PPT 노트에 없다"
+            # 대본 첫 문장이 노트에도 있어야 한다(내용 동일성 표본 검증)
+            first = next((l.strip() for l in body.splitlines()
+                          if l.strip().startswith("🎬")), "")
+            if first:
+                probe = first[first.find("]") + 1:].strip()[:24]
+                assert probe and probe in note, f"S{no}: 표준 대본 본문이 PPT 노트와 다르다"
