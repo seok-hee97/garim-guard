@@ -272,7 +272,7 @@ def build() -> str:
         # ★Streamlit 은 쓰지 않는다★ — app/trace_view.py 첫 줄 "Streamlit 대체(컷)".
         # 뷰어는 의존성 0 의 정적 HTML 이다. requirements 에 선언만 남아 있어도 그림엔 못 쓴다.
         dict(label="정적 HTML 뷰어(의존성 0)", size=16),
-        dict(label="pytest 129", ico="pytest", size=16),
+        dict(label="pytest 134", ico="pytest", size=16),
         # ★statsmodels·scipy 도 import 하지 않는다★ — eval/stats.py 가 math.comb 로
         # McNemar exact·Wilson CI 를 자체 구현한다.
         dict(label="McNemar exact · Wilson CI (자체 구현)", size=16),

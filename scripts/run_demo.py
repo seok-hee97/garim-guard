@@ -166,7 +166,9 @@ async def _main() -> int:
     print(f"→ 트레이스: {TRACES.relative_to(ROOT)}  (./.venv/bin/python -m app.trace_view 로 렌더)")
     if ok:
         print(success_message)
-        print("→ 전체 워크플로 웹 UI: ./.venv/bin/uvicorn app.ui:app --port 8501")
+        # ★./.venv/bin/uvicorn 을 안내하면 안 된다★ — 디렉터리명이 바뀌면 그 실행파일의
+        # shebang 이 옛 경로를 가리켜 bad interpreter 로 죽는다. python -m 형식은 영향이 없다.
+        print("→ 전체 워크플로 웹 UI: ./.venv/bin/python -m uvicorn app.ui:app --port 8501")
         return 0
     print("⚠️ 예상과 다른 결과 — arm 정의/정책 확인 필요")
     return 1
