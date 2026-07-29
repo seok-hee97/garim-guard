@@ -249,10 +249,17 @@ function turnHtml(t,m){
   return h+`</div></div>`;
 }
 function actionHtml(a){
-  const blocked=!a.executed;let h=`<div class="action ${blocked?"blocked":"allow"}"><div class="action-title">
-  <span>${esc(a.tool)}</span><span class="tag ${blocked?"bad":"good"}">${blocked?"🛑 "+esc(a.decision):"✅ ALLOW · 실행"}</span></div>
-  <div class="flowline">MODEL TOOL_CALL → before_tool → ${blocked?"BLOCK":"TOOL EXECUTE"} → after_tool → MODEL</div>
-  <div class="stage gate ${blocked?"block":""}"><div class="stage-title">BEFORE_TOOL · 결정적 정책 게이트</div>
+  // 결과는 workflow.py 가 분류한 outcome 을 따른다 — !executed 를 차단으로 읽으면
+  // 도구 오류가 게이트 성과로 둔갑한다.
+  const oc=a.outcome||(a.executed?"executed":"blocked"), ok=oc==="executed";
+  const badge={executed:"✅ ALLOW · 실행",blocked:"🛑 "+esc(a.decision)+" · 차단",
+    error:"⚠️ "+esc(a.decision)+" · 실행 실패(도구 오류)",unknown:"— 판정 없음"}[oc];
+  const flow={executed:"TOOL EXECUTE",blocked:"BLOCK",error:"TOOL ERROR",unknown:"—"}[oc];
+  const cls={executed:"allow",blocked:"blocked",error:"blocked",unknown:"blocked"}[oc];
+  let h=`<div class="action ${cls}"><div class="action-title">
+  <span>${esc(a.tool)}</span><span class="tag ${ok?"good":"bad"}">${badge}</span></div>
+  <div class="flowline">MODEL TOOL_CALL → before_tool → ${flow} → after_tool → MODEL</div>
+  <div class="stage gate ${ok?"":"block"}"><div class="stage-title">BEFORE_TOOL · 결정적 정책 게이트</div>
   ${pre({decision:a.decision,rule:a.rule||null,reason:a.reason||null,args:a.args})}</div>`;
   if(a.raw_tool_result!==null)h+=`<div class="stage tool"><div class="stage-title">TOOL RAW RESULT · 합성 로컬 데이터</div>${pre(a.raw_tool_result)}</div>`;
   if(a.model_visible_result!==null)h+=`<div class="stage model"><div class="stage-title">AFTER_TOOL → MODEL · DLP/TAINT 처리 후</div>${pre(a.model_visible_result)}</div>`;

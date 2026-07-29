@@ -169,7 +169,23 @@ def workflow_document(
             raw = (_jsonable(hop.tool_result_raw)
                    if include_raw and hop is not None and hop.tool_result_raw is not None
                    else None)
+            # ★'실행 안 됨' 을 전부 '차단' 으로 뭉치면 안 된다★ — loop.py 는 실행 직전에
+            # gate_decision='ALLOW' 를 확정하고, 도구가 예외를 던지면 executed 만 False 로
+            # 남긴다. 표시 계층이 !executed 를 차단으로 읽으면 ★게이트가 막지 않은 것을
+            # 막았다고 말하게 된다★(CLI 에 "ALLOW → 차단" 이라는 자기모순 줄이 찍혔다).
+            note = str(getattr(hop, "note", "") or "")
+            if hop is None:
+                outcome = "unknown"          # 절단·중단되어 판정 자체가 없었던 호출
+            elif hop.executed:
+                outcome = "executed"
+            elif hop.gate_decision in ("BLOCK", "HITL_DENY"):
+                outcome = "blocked"          # 게이트가 실제로 막음
+            elif note.startswith("tool_error"):
+                outcome = "error"            # 게이트는 통과, 도구 실행이 실패
+            else:
+                outcome = "blocked"
             actions.append({
+                "outcome": outcome,
                 "tool": call.get("name", ""),
                 "call_id": call.get("call_id", ""),
                 "args": call.get("args", {}),
@@ -203,7 +219,10 @@ def workflow_document(
                 first_user = str(message.get("text", ""))
                 break
 
-    blocked = sum(1 for h in tool_hops if h.attempted and not h.executed)
+    blocked = sum(1 for h in tool_hops
+                  if h.attempted and not h.executed and h.gate_decision in ("BLOCK", "HITL_DENY"))
+    errored = sum(1 for h in tool_hops
+                  if h.attempted and not h.executed and h.gate_decision not in ("BLOCK", "HITL_DENY"))
     return {
         "meta": {
             "episode_id": episode.episode_id,
@@ -231,6 +250,7 @@ def workflow_document(
             "attempted": sum(1 for h in tool_hops if h.attempted),
             "executed": sum(1 for h in tool_hops if h.executed),
             "blocked": blocked,
+            "errored": errored,
             "latency_ms": episode.total_latency_ms,
             "pending_approval": episode.pending_approval,
         },
@@ -274,8 +294,11 @@ def format_workflow_text(document: dict[str, Any]) -> str:
             for action in turn["actions"]:
                 source = "SCRIPTED ACTION" if meta.get("scripted") else "MODEL TOOL_CALL"
                 lines.append(f"  [{source}] {action['tool']}({_compact(action['args'])})")
-                verdict = "ALLOW → 실행" if action["executed"] else \
-                    f"{action['decision']} → 차단"
+                verdict = {
+                    "executed": "ALLOW → 실행",
+                    "blocked": f"{action['decision']} → 차단",
+                    "error": f"{action['decision']} → 실행 실패(도구 오류)",
+                }.get(action["outcome"], f"{action['decision']} → 판정 없음")
                 rule = f" · rule={action['rule']}" if action["rule"] else ""
                 lines.append(f"  [before_tool] {verdict}{rule}")
                 if action.get("raw_tool_result") is not None:
