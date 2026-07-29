@@ -195,8 +195,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **실행 모니터링** (메트릭·`/v1/metrics`·`scripts.monitor`·`leaks_total`·heartbeat) | ✅ 구현·테스트 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
 | 유닛/통합 테스트 | ✅ **125 통과** (.venv; CI-core 119, presidio 6) |
-| 발표 자산 (슬라이드·그림·PDF/PPTX) | ✅ 전 단계 스크립트화([USAGE §3-6](docs/USAGE.md)) — 수기 캡처 없음 |
-| **편집 가능 발표자료** (PptxGenJS · 네이티브 표/텍스트 + 발표자 노트) | ✅ `report/발표자료_편집본.pptx` ([gen_pptx.mjs](scripts/pptx/gen_pptx.mjs)) |
+| 발표 자산 | ✅ **단일 소스** — [gen_pptx.mjs](scripts/pptx/gen_pptx.mjs) 하나가 `발표자료.pptx`(편집 가능·정본) + `발표자료.md`(스크립트) 를 만들고, `발표자료.pdf` 는 [export_deck_pdf](scripts/export_deck_pdf.py)(Keynote)로 파생. 수기 캡처·수기 수치 없음 ([USAGE §3-6](docs/USAGE.md)) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, Prometheus 노출 형식 + Grafana 대시보드 + 외부 page 경보.
 

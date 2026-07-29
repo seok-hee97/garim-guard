@@ -124,38 +124,48 @@ python -m scripts.fetch_rail                   # 학습 대신 완성 아티팩�
 
 ### 3-6. 발표자료·다이어그램 (키 불요, 결정적)
 
-**전체 재생성은 반드시 이 순서로** — 그림이 `results/` 를, 슬라이드가 그림을 읽으므로 역순이면
-낡은 자산이 렌더된다(회귀 이력: 슬라이드 소스를 고치고 PDF/PPTX 를 재렌더하지 않아 배포본이 한 커밋 뒤처짐).
+**발표 산출물은 소스 하나에서 나온다** — `scripts/pptx/gen_pptx.mjs` 가 슬라이드·발표 스크립트를
+만들고, PDF 는 그 PPTX 에서 파생된다. Marp 계열(별도 마크다운 덱)은 제거했다:
+슬라이드 소스와 스크립트 문서를 따로 관리하다 장수가 어긋나(11장 vs 12장) 발표 중 한 장씩
+밀리는 사고가 있었기 때문이다.
 
-```bash
-python -m eval.ablation                       # ① results/ablation.csv·mcnemar_vs_none.json 갱신 (키 불요)
-python -m scripts.run_demo                    # ② results/demo_traces.jsonl (결정적 — 재실행해도 바이트 동일)
-python -m app.trace_view                      # ③ report/trace_view.html
-python -m scripts.gen_trace_shot              # ④ report/figs/trace_view.png (헤드리스 Chrome 캡처)
-python -m scripts.gen_slide_figs              # ⑤ report/figs/fig_*.png  ★matplotlib 필요★
-python -m scripts.gen_arch_stack              # ⑥ docs/architecture_stack.png (계층×기술스택, 아이콘)
-python -m scripts.gen_model_arch              # ⑦ docs/모델_아키텍처_사진.png (graphviz 제어흐름)
-python docs/architecture_diagram.py           # docs/architecture.png/.svg (스크립트라 -m 아님)
-marp report/발표자료_슬라이드.md --pdf --pptx --allow-local-files   # ⑧ 투사용 PDF/PPTX (marp+Chrome)
-cd scripts/pptx && npm install && npm run build                    # ⑨ 편집용 PPTX (PptxGenJS)
+```
+results/ ──► figs/*.png ─┐
+docs/architecture_*.png ─┼─► scripts/pptx/gen_pptx.mjs ─┬─► report/발표자료.pptx  (편집 가능·정본)
+report/figs/trace_view.png ┘                            └─► report/발표자료.md    (발표 스크립트)
+                                                              │
+                                        scripts/export_deck_pdf.py (Keynote)
+                                                              └─► report/발표자료.pdf (투사용)
 ```
 
-**발표 산출물 3종 — 용도가 다르다**
+**전체 재생성은 반드시 이 순서로** — 그림이 `results/` 를, 슬라이드가 그림을 읽으므로 역순이면
+낡은 자산이 렌더된다(회귀 이력: 슬라이드 소스를 고치고 배포본을 재렌더하지 않아 한 커밋 뒤처짐).
 
-| 파일 | 생성기 | 성격 | 언제 쓰나 |
-|---|---|---|---|
-| `report/발표자료.pdf` | Marp | 슬라이드=이미지, 폰트 고정 | **투사용 정본** — 어느 PC 에서도 깨지지 않음 |
-| `report/발표자료.pptx` | Marp | 슬라이드당 PNG 1장 (**편집 불가**) | PDF 를 못 쓰는 환경의 대체 |
-| `report/발표자료_편집본.pptx` | **PptxGenJS** | 네이티브 텍스트·표 + 발표자 노트 (**편집 가능**) | 현장 수정·제출·공동편집 |
+```bash
+python -m eval.ablation                       # ① results/ablation.csv·mcnemar_vs_none.json
+python -m scripts.run_demo                    # ② results/demo_traces.jsonl (재실행해도 바이트 동일)
+python -m app.trace_view                      # ③ report/trace_view.html
+python -m scripts.gen_trace_shot              # ④ report/figs/trace_view.png (헤드리스 Chrome)
+python -m scripts.gen_slide_figs              # ⑤ report/figs/fig_*.png  ★matplotlib 필요★
+python -m scripts.gen_arch_stack              # ⑥ docs/architecture_stack.png (계층×기술스택)
+python -m scripts.gen_model_arch              # ⑦ docs/모델_아키텍처_사진.png (graphviz 제어흐름)
+cd scripts/pptx && npm install && npm run build && cd ../..   # ⑧ 발표자료.pptx + 발표자료.md
+python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → PDF)
+```
 
-> 편집본의 아키텍처 두 장은 서로 보완적이다 — `architecture_stack.png`(무엇으로 만들었나 · 슬라이드 본문용)와
-> `모델_아키텍처_사진.png`(요청이 어떻게 흐르나 · 밀도 높음). 두 그림 모두 스크립트 산출물이라 수기 편집 금지.
-- ⚠️ `gen_slide_figs` 는 **matplotlib** 이 필요하다. `requirements.core` 에 없으므로 `.venv` 에서는
-  `ModuleNotFoundError` 가 난다 — `pip install matplotlib` 하거나 matplotlib 이 있는 인터프리터로
-  `PYTHONPATH=. python3 -m scripts.gen_slide_figs` 실행.
-- `gen_trace_shot` 은 Chrome/Chromium 을 자동 탐색한다(없으면 안내 후 exit 3). `--sections timeline`
-  전용 HTML 을 임시로 만들어 찍으므로 애블레이션 표가 프레임에 걸리지 않는다.
-- 발표 스크립트는 [../report/발표자료.md](../report/발표자료.md) — 렌더 소스와 **슬라이드 번호가 1:1**이다.
+| 파일 | 역할 | 성격 |
+|---|---|---|
+| `report/발표자료.pptx` | **정본** — 제출·편집·발표 | 네이티브 텍스트/표 + 발표자 노트 14장 |
+| `report/발표자료.pdf` | 투사용 | 위 PPTX 에서 Keynote 로 파생 |
+| `report/발표자료.md` | 발표 스크립트(인쇄용) | **생성물 — 직접 수정 금지** |
+
+- ⚠️ **PPTX 를 PowerPoint 에서 직접 고쳤다면 `npm run build` 를 다시 돌리지 말 것** — 생성기가
+  덮어쓴다. 유지할 수정이면 `gen_pptx.mjs` 에 반영한 뒤 재생성한다.
+- ⚠️ `gen_slide_figs` 는 **matplotlib** 이 필요하다(`requirements.core` 에 없음). `.venv` 에서
+  안 되면 `PYTHONPATH=. python3 -m scripts.gen_slide_figs`.
+- `export_deck_pdf` 는 **Keynote** 를 1순위로 쓴다. LibreOffice 폴백은 한글 문장부호 주변에
+  공백을 삽입하는 조판 결함이 있어 경고를 띄운다(최종본은 Keynote/PowerPoint 로 뽑을 것).
+- `gen_trace_shot`·`gen_arch_stack` 은 Chrome/Chromium 을 자동 탐색한다(없으면 안내 후 종료).
 
 ---
 

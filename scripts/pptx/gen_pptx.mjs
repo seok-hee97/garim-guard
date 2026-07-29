@@ -2,13 +2,16 @@
  * SafeAgent-KR — 편집 가능 발표자료(PPTX) 생성기
  *
  *   cd scripts/pptx && npm install && npm run build
- *   → report/발표자료_편집본.pptx
+ *   → report/발표자료.pptx (정본·편집 가능) + report/발표자료.md (발표 스크립트)
+ *   → PDF 는 scripts/export_deck_pdf.py 가 이 PPTX 에서 파생시킨다(Keynote).
  *
- * ★Marp PPTX 와의 차이★
- *   Marp 산출물은 슬라이드당 PNG 1장(`<a:t>` 텍스트 런 0개)이라 PowerPoint 에서 글자 한 줄도
- *   못 고친다. 이 생성기는 제목/불릿/표를 **네이티브 도형·텍스트·표**로 만들어 현장에서 바로
- *   편집할 수 있게 한다. 그림(차트·아키텍처·트레이스)만 이미지로 삽입한다.
- *   PDF(투사용 정본)는 계속 Marp 가 만든다 — 두 산출물은 같은 내용의 다른 용도다.
+ * ★이 파일이 발표자료의 유일한 소스다★
+ *   이전에는 Marp 마크다운 덱과 별도 스크립트 문서가 공존했는데, 슬라이드 소스(12장)와
+ *   스크립트(11장)가 어긋나 발표 중 한 장씩 밀리는 사고가 있었다. 이제 한 배열(DECK)에서
+ *   PPTX 와 발표 스크립트(md)를 함께 뽑아 구조적으로 어긋날 수 없게 했다.
+ *   또 Marp PPTX 는 슬라이드당 PNG 1장(`<a:t>` 텍스트 런 0개)이라 PowerPoint 에서 글자
+ *   한 줄도 못 고쳤다. 여기서는 제목/불릿/표를 **네이티브 도형·텍스트·표**로 만들고,
+ *   그림(차트·아키텍처·트레이스)만 이미지로 삽입한다.
  *
  * ★수치 하드코딩 금지★ — 표/라벨의 모든 숫자는 results/ 에서 읽는다:
  *   ablation.csv · mcnemar_vs_none.json · channel_gap.json · dlp_leak.json · ablation_table.md
@@ -25,7 +28,8 @@ import PptxGenJS from "pptxgenjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..");
 const R = (...p) => path.join(ROOT, ...p);
-const OUT = R("report", "발표자료_편집본.pptx");
+const OUT = R("report", "발표자료.pptx");
+const OUT_MD = R("report", "발표자료.md");   // 같은 노트에서 발표 스크립트도 함께 뽑는다
 
 // ── 디자인 토큰 ───────────────────────────────────────────────────────────
 const NAVY = "16213E";
@@ -97,6 +101,8 @@ pptx.company = "NIPA-Google 2026";
 pptx.title = "SafeAgent-KR — 도구 채널을 보는 한국어 AI 에이전트 안전 런타임";
 
 let slideNo = 0;
+/** 발표 스크립트(md) 를 같은 소스에서 뽑기 위한 수집기 — 슬라이드 번호·제목·노트. */
+const DECK = [];
 
 /** 본문 슬라이드 골격: 제목 + 초록 밑줄 + 푸터 + 페이지번호. 콘텐츠 시작 y 를 돌려준다. */
 function newSlide(title, notes) {
@@ -116,6 +122,7 @@ function newSlide(title, notes) {
     color: "90A4AE", align: "right",
   });
   if (notes) s.addNotes(notes);
+  DECK.push({ no: slideNo, title, notes: notes || "" });
   return s;
 }
 
@@ -203,6 +210,16 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "이 발표의 결론을 먼저 말해두면 끝까지 따라오기 쉽습니다 — 강제는 결정적 게이트가 하고, " +
     "분류기는 어디서 뚫리는지 재는 계측기로 강등해야 한다는 것입니다.\n\n[20초]"
   );
+  DECK.push({
+    no: slideNo,
+    title: "SafeAgent-KR — 도구 채널을 보는 한국어 AI 에이전트 안전 런타임",
+    notes: s._slideObjects ? "" : "",
+  });
+  DECK[DECK.length - 1].notes =
+    "인사 후 한 문장으로 시작합니다.\n\n" +
+    "\"도구를 쓰는 한국어 에이전트에서, 안전장치를 '어디에' 둬야 하는가를 실측으로 답한 프로젝트입니다.\"\n\n" +
+    "이 발표의 결론을 먼저 말해두면 끝까지 따라오기 쉽습니다 — 강제는 결정적 게이트가 하고, " +
+    "분류기는 어디서 뚫리는지 재는 계측기로 강등해야 한다는 것입니다.\n\n[20초]";
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -640,8 +657,8 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     ["python -m scripts.gen_slide_figs           # ⑤ figs/fig_*.png  (matplotlib 필요)", INK],
     ["python -m scripts.gen_arch_stack           # ⑥ docs/architecture_stack.png", INK],
     ["python -m scripts.gen_model_arch           # ⑦ docs/모델_아키텍처_사진.png", INK],
-    ["marp report/발표자료_슬라이드.md --pdf --pptx --allow-local-files   # ⑧ 투사용 PDF", INK],
-    ["cd scripts/pptx && npm run build           # ⑨ 편집용 PPTX (이 파일)", INK],
+    ["cd scripts/pptx && npm run build           # ⑧ 발표자료.pptx + 발표자료.md", INK],
+    ["python -m scripts.export_deck_pdf          # ⑨ 발표자료.pdf (Keynote 파생)", INK],
   ];
   s.addShape(pptx.ShapeType.roundRect, {
     x: M, y: 1.25, w: CW, h: 5.0, fill: { color: BG_GREY }, rectRadius: 0.05,
@@ -654,6 +671,32 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
 
 // ── 저장 ─────────────────────────────────────────────────────────────────
 await pptx.writeFile({ fileName: OUT });
+
+// ★발표 스크립트(md)도 같은 소스에서 뽑는다★ — 예전엔 슬라이드 소스와 스크립트 문서가
+// 따로 관리돼 장수가 어긋났다(스크립트 11장 vs 렌더 12장 → 발표 중 한 장씩 밀림).
+// 한 배열(DECK)에서 두 산출물을 내면 구조적으로 어긋날 수 없다.
+const md = [
+  "# SafeAgent-KR 발표 스크립트",
+  "",
+  "> ⚠️ **이 파일은 생성물이다 — 직접 고치지 말 것.**",
+  "> 슬라이드와 이 스크립트는 모두 [`scripts/pptx/gen_pptx.mjs`](../scripts/pptx/gen_pptx.mjs) 하나에서 나온다.",
+  "> 내용을 바꾸려면 그 파일의 `addNotes(...)` 를 고치고 `cd scripts/pptx && npm run build` 를 다시 돌린다.",
+  "",
+  "> 슬라이드 번호는 `report/발표자료.pptx` / `report/발표자료.pdf` 와 **1:1로 일치**한다.",
+  "> PDF 재생성: `python -m scripts.export_deck_pdf` (Keynote 네이티브 내보내기).",
+  "",
+  "---",
+  "",
+];
+for (const d of DECK) {
+  md.push(`## S${d.no}. ${d.title}`, "");
+  md.push(d.notes.trim() ? d.notes.trim() : "_(노트 없음)_", "");
+  md.push("---", "");
+}
+fs.writeFileSync(OUT_MD, md.join("\n"), "utf-8");
+
 const kb = Math.round(fs.statSync(OUT).size / 1024);
-console.log(`→ ${path.relative(ROOT, OUT)}  (${slideNo} slides, ${kb}KB)`);
+console.log(`→ ${path.relative(ROOT, OUT)}      (${slideNo} slides, ${kb}KB · 편집 가능)`);
+console.log(`→ ${path.relative(ROOT, OUT_MD)}   (발표 스크립트 — 같은 소스에서 생성)`);
 console.log(`   수치 출처: ablation.csv · mcnemar_vs_none.json · channel_gap.json · dlp_leak.json`);
+console.log(`   PDF: python -m scripts.export_deck_pdf`);
