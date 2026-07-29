@@ -65,24 +65,37 @@ def _load():
     return ta, hops(ta), hops(tad)
 
 
-def _w(text: str, size: float) -> float:
-    """텍스트 폭 근사 — 한글/전각 1.0em, ASCII 0.56em."""
-    return sum(1.0 if ord(c) > 0x2000 else 0.56 for c in text) * size
+def _w(text: str, size: float, mono: bool = False) -> float:
+    """텍스트 렌더 폭 근사(px) — 한글/전각 1.0em, ASCII 0.56em(모노 0.60em)."""
+    adv = 0.60 if mono else 0.56
+    return sum(1.0 if ord(c) > 0x2000 else adv for c in text) * size
 
 
-def _wrap(text: str, width: int) -> list[str]:
-    """한글 폭 기준 단순 줄바꿈(전각 1, 반각 0.5)."""
-    out, cur, w = [], "", 0.0
+def _wrap_px(text: str, size: float, max_px: float, mono: bool = False) -> list[str]:
+    """★픽셀 폭 기준★ 줄바꿈 — 자르는 단위와 그리는 단위를 일치시킨다.
+
+    (회귀 이력: 폭을 '42자'로 잘라 size 16 으로 그렸더니 실제 폭 42×16=672px 가 안쪽 폭
+     470px 카드를 넘어 옆 카드와 글자가 겹쳤다. 글자 수는 폰트 크기를 모른다.)
+    """
+    out, cur = [], ""
     for ch in text:
-        cw = 1.0 if ord(ch) > 0x2000 else 0.5
-        if w + cw > width and ch == " ":
-            out.append(cur); cur, w = "", 0.0; continue
-        cur += ch; w += cw
-        if w >= width:
-            out.append(cur); cur, w = "", 0.0
+        if cur and _w(cur + ch, size, mono) > max_px:
+            out.append(cur)
+            cur = ""
+        cur += ch
     if cur:
         out.append(cur)
     return out
+
+
+def _ellipsize(text: str, size: float, max_px: float, mono: bool = False) -> str:
+    """max_px 안에 들어가도록 뒤를 잘라 '…' 를 붙인다(원문이 들어가면 그대로)."""
+    if _w(text, size, mono) <= max_px:
+        return text
+    cut = text
+    while cut and _w(cut + "…", size, mono) > max_px:
+        cut = cut[:-1]
+    return cut.rstrip() + "…"
 
 
 def step(n: str, x: float, y: float, w: float, h: float, *, title: str, sub: str,
@@ -137,8 +150,13 @@ def build() -> str:
     from src.agent.toolworld import default_world
     poisoned = next(d for d in default_world().search("환불 처리 안내") if not d.get("trusted"))
 
+    # ── 넘침 감사용 기록 ── 카드 사각형과 방출 텍스트를 모아 build 끝에서 대조한다.
+    cards: list[tuple[int, int, int, int]] = []
+    emitted: list[tuple[int, int, str, float, bool]] = []
+
     def card(n: str, x: int, y: int, w: int, h: int, title: str, *,
              accent: str, bg: str, subtitle: str = "") -> str:
+        cards.append((x, y, w, h))
         p = [
             f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="16" fill="{bg}" '
             f'stroke="{accent}" stroke-width="2.2"/>',
@@ -157,6 +175,7 @@ def build() -> str:
             bold: bool = False, mono: bool = False) -> str:
         ff = MONO if mono else FONT
         weight = "700" if bold else "400"
+        emitted.append((x, y, text, size, mono))
         return (f'<text x="{x}" y="{y}" font-family="{ff}" font-size="{size}" '
                 f'font-weight="{weight}" fill="{color}">{_e(text)}</text>')
 
@@ -180,7 +199,8 @@ def build() -> str:
     P.append(card("1", x1, top, cw, ch, "사용자 요청 + 인증", accent=INK, bg="#ffffff",
                   subtitle="서비스 경계에서 principal·고객 스코프를 먼저 고정"))
     P.append(txt(x1 + 25, top + 103, "입력", size=17, color=MUTED, bold=True))
-    P.append(txt(x1 + 96, top + 103, ep["user_input"][:33] + "…", size=17))
+    P.append(txt(x1 + 96, top + 103,
+                 _ellipsize(ep["user_input"], 17, cw - 96 - 25), size=17))
     P.append(txt(x1 + 25, top + 145, "인증", size=17, color=MUTED, bold=True))
     P.append(txt(x1 + 96, top + 145, "X-API-Key → principal(agent)", size=17, mono=True))
     P.append(txt(x1 + 25, top + 187, "바인딩", size=17, color=MUTED, bold=True))
@@ -215,10 +235,16 @@ def build() -> str:
     # ④ 공격 도구 반환값
     P.append(card("4", x1, bottom, cw, ch, "공격 진입: 도구 반환값", accent=RED, bg=RED_BG,
                   subtitle="사용자 발화가 아니라 search_kb 결과 안의 숨은 명령"))
-    lines = _wrap(poisoned["body"], 42)[:3]
+    # 오염 문서 본문은 ★전문을 싣는다★ — 공격자 주소가 잘리면 이 그림의 요점이 사라진다.
+    # 카드 안쪽 폭(470px)에 맞춰 4줄로 접고, 그래도 넘치면 마지막 줄만 '…' 로 절단.
+    _bw = cw - 50
+    lines = _wrap_px(poisoned["body"], 15, _bw)
+    if len(lines) > 4:
+        lines = lines[:4]
+        lines[3] = _ellipsize(lines[3] + "…", 15, _bw)
     P.append(txt(x1 + 25, bottom + 101, "kb_003", size=16, color=MUTED, bold=True))
     for i, text in enumerate(lines):
-        P.append(txt(x1 + 25, bottom + 132 + i * 29, text, size=16))
+        P.append(txt(x1 + 25, bottom + 126 + i * 24, text, size=15))
     P.append(txt(x1 + 25, bottom + 222,
                  f"rail={rail_kb:.3f} < τ 0.5 → 탐지 실패 · LOG-ONLY", size=17,
                  color=RED, bold=True, mono=True))
@@ -251,7 +277,7 @@ def build() -> str:
                  f"{dlp_mail.get('gate_rule')} → executed={dlp_mail.get('executed')}", size=16,
                  color=BLUE, bold=True, mono=True))
     P.append(txt(x3 + 25, bottom + 224, "게이트 arm: attempted=True · executed=False · leak=0",
-                 size=16, color=GREEN, bold=True, mono=True))
+                 size=15.5, color=GREEN, bold=True, mono=True))
 
     # 흐름 화살표
     P.append(arrow(x1 + cw, top + ch / 2, x2 - 10, top + ch / 2))
@@ -262,6 +288,23 @@ def build() -> str:
     P.append(arrow(x2 + cw, bottom + ch / 2, x3 - 10, bottom + ch / 2))
 
     P.append("</svg>")
+
+    # ── 넘침 감사(빌드 게이트) ── 모든 텍스트가 자기 카드 안쪽에 들어가는지 대조한다.
+    # SVG <text> 는 잘리지 않고 그대로 넘쳐 옆 카드 글자와 겹치므로, 렌더 결과를 눈으로
+    # 보기 전에는 결함이 드러나지 않는다. 그림을 만들 때 실패시켜 이 부류를 원천 차단한다.
+    PAD = 10
+    over = []
+    for tx, ty, text, size, mono in emitted:
+        for cx, cy, cwd, chd in cards:
+            if not (cx <= tx < cx + cwd and cy <= ty <= cy + chd):
+                continue
+            spill = (tx + _w(text, size, mono)) - (cx + cwd - PAD)
+            if spill > 0:
+                over.append(f"  +{spill:>5.0f}px  {text[:46]}")
+            break
+    if over:
+        raise SystemExit("❌ 카드를 넘치는 텍스트 %d건 — 폭/줄바꿈을 고쳐야 한다:\n%s"
+                         % (len(over), "\n".join(over)))
     return "".join(P)
 
 

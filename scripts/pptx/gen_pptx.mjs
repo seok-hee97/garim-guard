@@ -838,8 +838,9 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
   ], { x: M, y: 4.6, w: CW, h: 0.95, fontFace: FONT, valign: "top", lineSpacingMultiple: 1.3 });
   banner(s, "탐지에 실패해도 행동이 나가지 않는다 — attempted=True, executed=False",
     { y: 5.62, fill: GREEN, size: 17, h: 0.58 });
-  s.addText("라이브 서비스 관측: curl :8000/v1/metrics · python -m scripts.monitor   |   라이브 모델 유도: --provider openai", {
-    x: M, y: 6.32, w: CW, h: 0.35, fontFace: FONT, fontSize: 11.5, color: GREY,
+  s.addText("트레이스에 원본 주민번호가 보이는 건 ★스크립트 재생기가 만든 모델 출력★ 이다 — 볼트는 모델 입력을 토큰화하고 실행 경계에서 dlp.egress:body 로 막았다(트레이스 저장 마스킹은 미적용, S11 각주)   |   라이브 서비스 관측: curl :8000/v1/metrics · python -m scripts.monitor   |   라이브 모델 유도: --provider openai", {
+    x: M, y: 6.28, w: CW, h: 0.62, fontFace: FONT, fontSize: 10.5, color: GREY,
+    valign: "top", lineSpacingMultiple: 1.15,
   });
 }
 

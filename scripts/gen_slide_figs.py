@@ -166,15 +166,18 @@ def _channel_gap():
     ax.set_ylim(0, 1.42)
     ax.set_title("같은 모델·같은 페이로드 — 배선만 바뀌어도 탐지가 무너진다 (Kanana, n=10)",
                  fontproperties=KFONT, fontsize=13.5, fontweight="bold", pad=12)
-    ax.annotate("배선 하나 차이로 1.0 → 0.0", xy=(1, 0.06), xytext=(0.28, 0.62),
+    # 화살촉은 ★막대 위 값 라벨보다 위★ 에서 멈춘다 — 라벨 높이(≈0.04)를 무시하고 막대
+    # 상단을 겨누면 화살표가 '실행 0.00' 글자를 관통해 읽기 어려워진다.
+    tip = lambda v: v + 0.085
+    ax.annotate("배선 하나 차이로 1.0 → 0.0", xy=(1, tip(b1)), xytext=(0.28, 0.62),
                 fontproperties=KFONT, fontsize=10.5, color=C_LEAK, fontweight="bold",
                 arrowprops=dict(arrowstyle="->", color=C_LEAK))
     # ★우리 런타임이 어느 조건인지 그림 안에 밝힌다★ — 빼면 유리한 것만 고른 게 된다.
     ax.annotate("★우리 런타임은 ③★\n(after_tool 이 문자열 직접 채점)",
-                xy=(2, 1.06), xytext=(2.0, 1.38), fontproperties=KFONT, fontsize=10.5,
+                xy=(2, tip(b2)), xytext=(2.0, 1.38), fontproperties=KFONT, fontsize=10.5,
                 color="#1b5e20", fontweight="bold", ha="center", va="top",
                 arrowprops=dict(arrowstyle="->", color="#1b5e20"))
-    ax.annotate("게이트는 배선과\n무관하게 불변", xy=(3, 0.03), xytext=(3, 0.30),
+    ax.annotate("게이트는 배선과\n무관하게 불변", xy=(3, tip(0.0)), xytext=(3, 0.34),
                 fontproperties=KFONT, fontsize=10.5, color=C_GENUINE, fontweight="bold",
                 ha="center", arrowprops=dict(arrowstyle="->", color=C_GENUINE))
     ax.grid(axis="y", ls=":", alpha=0.5, zorder=0)
