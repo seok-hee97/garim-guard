@@ -1,0 +1,13 @@
+{
+  "name": "safeagent-kr-pptx",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SafeAgent-KR 편집 가능 발표자료(PPTX) 생성기 — Marp 이미지 PPTX 의 대체본",
+  "scripts": {
+    "build": "node gen_pptx.mjs"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}

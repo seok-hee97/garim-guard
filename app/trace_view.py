@@ -44,13 +44,18 @@ td,th{border:1px solid #30363d;padding:.3rem .6rem}
 .epgrid{display:flex;flex-wrap:wrap;gap:1rem;margin:1rem 0}
 .ep{flex:1;min-width:340px;border:1px solid #30363d;border-radius:10px;padding:.8rem 1rem;background:#11161d}
 .ephead{font-weight:700;color:#e6edf3;margin-bottom:.5rem}
+/* ★배지 잘림 방지★ — 홉 행은 [메타 고정폭][인자 가변][배지 고정폭] 3분할이다.
+   badge 는 절대 줄지 않고(flex:0 0 auto) 인자 셀만 줄어들며(min-width:0) 줄바꿈한다.
+   min-width:0 이 없으면 flex 아이템이 콘텐츠 폭 밑으로 못 줄어 배지가 카드 밖으로 밀려 잘린다. */
 .hop{display:flex;align-items:center;gap:.5rem;padding:.35rem .5rem;margin:.3rem 0;
-  border-radius:6px;border-left:4px solid #30363d;background:#0d1117}
+  border-radius:6px;border-left:4px solid #30363d;background:#0d1117;min-width:0}
 .hop.pass{border-left-color:#3fb950} .hop.block{border-left-color:#f85149;background:#2d1214}
-.step{font-family:ui-monospace,monospace;color:#8b949e;font-size:.8rem;min-width:2.4rem}
-.tool{font-weight:600;color:#e6edf3} .args{color:#8b949e;font-size:.82rem}
-.seam{color:#79c0ff;font-size:.72rem}
-.badge{margin-left:auto;font-size:.78rem;padding:.05rem .5rem;border-radius:8px;white-space:nowrap}
+.step{font-family:ui-monospace,monospace;color:#8b949e;font-size:.8rem;flex:0 0 2.4rem}
+.tool{font-weight:600;color:#e6edf3;flex:0 0 auto}
+.args{color:#8b949e;font-size:.82rem;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.seam{color:#79c0ff;font-size:.72rem;flex:0 0 auto}
+.badge{margin-left:auto;font-size:.78rem;padding:.05rem .5rem;border-radius:8px;
+  white-space:nowrap;flex:0 0 auto}
 .b-pass{background:#1a3a22;color:#7ee787} .b-block{background:#7a1620;color:#fff}
 .verdict{margin-top:.5rem;font-weight:600}
 .leak{color:#ff9b9b} .safe{color:#7ee787}
@@ -160,13 +165,19 @@ def main() -> int:
     ap.add_argument("--traces", default=str(DEMO_TRACES), help="에피소드 hop 트레이스 JSONL")
     ap.add_argument("--runs", default=str(RUNS), help="애블레이션 집계 JSONL")
     ap.add_argument("--out", default=str(OUT), help="출력 HTML 경로")
+    ap.add_argument("--sections", choices=("all", "timeline"), default="all",
+                    help="timeline = ① 실행과정만(슬라이드 캡처용 — 표가 프레임에 걸리지 않음)")
     args = ap.parse_args()
 
+    full = args.sections == "all"
     traces = _load(Path(args.traces))
-    rows = _load(Path(args.runs))
-    parts = [f"<style>{_CSS}</style>", "<h1>SafeAgent-KR 트레이스 뷰어</h1>"]
+    rows = _load(Path(args.runs)) if full else []
+    parts = [f"<style>{_CSS}</style>"]
+    if full:
+        parts.append("<h1>SafeAgent-KR 트레이스 뷰어</h1>")
     parts += _episode_timelines(traces)
-    parts += _ablation_summary(rows)
+    if full:                       # timeline 모드는 ②③ 를 통째로 생략(캡처 프레임 보호)
+        parts += _ablation_summary(rows)
     if not traces and not rows:
         parts.append("<p>표시할 트레이스가 없습니다. <code>python -m scripts.run_demo</code> "
                      "또는 <code>python -m eval.run</code> 먼저 실행하세요.</p>")
