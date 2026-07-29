@@ -4,7 +4,7 @@
 > NIPA-Google 프로젝트 · 2026-07 · Python · 개인(솔로)
 >
 > **명명 규약** — `SafeAgent-KR` = 프로젝트/런타임 · `KoTIP-Bench` = 구축 평가셋 · `Ko-AgentGuard` = 학습 레일 모델
-> 상세: [project_plan.md](project_plan.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PRODUCTION.md](docs/PRODUCTION.md) · [results/RESULTS.md](results/RESULTS.md)
+> 상세: [docs/USAGE.md](docs/USAGE.md)(사용 가이드·검증됨) · [project_plan.md](project_plan.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PRODUCTION.md](docs/PRODUCTION.md) · [results/RESULTS.md](results/RESULTS.md)
 
 ---
 
