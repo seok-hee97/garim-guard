@@ -465,7 +465,7 @@ const td = (t, o = {}) => {
   bullets(s, [
     { t: [{ text: "에이전트는 검색 문서·티켓·메모를 읽고 " }, { text: "행동한다", bold: true, color: GREEN_D }] },
     {
-      t: [{ text: "공격자가 통제하는 건 사용자 발화가 아니라 " }, { text: "도구 반환값", bold: true, color: GREEN_D }],
+      t: [{ text: "공격자가 통제하는 건 사용자 발화만이 아니라 " }, { text: "도구 반환값", bold: true, color: GREEN_D }],
       sub: "→ 간접 프롬프트 인젝션 (EchoLeak, CVE-2025-32711 동형)",
     },
     {
@@ -473,7 +473,7 @@ const td = (t, o = {}) => {
       sub: "Kanana = 단일 발화 전용 · Prompt Guard = 한국어 미평가",
     },
   ], { y: 1.35, h: 2.6 });
-  banner(s, "입력단만 지키는 통념적 가드레일은 공격이 지나가는 지점을 아예 보지 못한다",
+  banner(s, "입력단만 검사하는 구성은 공격이 지나가는 이 지점을 놓친다",
     { y: 4.35, fill: BG_GREEN, color: GREEN_D, size: 19, h: 0.72 });
   s.addText(starRuns("사용자 발화  →  [ 가드레일 검사 ]  →  모델  →  도구 호출  →  ★도구 반환값 = 검사 없음★  →  행동"), {
     x: M, y: 5.35, w: CW, h: 0.5, fontFace: MONO, fontSize: 13, color: GREY, align: "center",
@@ -542,7 +542,7 @@ const td = (t, o = {}) => {
 {
   const s = newSlide("구성요소별 기능 — 무엇을 왜 넣었나",
     "표가 길어 낭독보다 참조에 쓰는 장입니다. 구성요소마다 왜 넣었고 무슨 기술을 " +
-    "썼는지 한 표로 정리했습니다. 심사에서 특정 요소를 물으면 이 표로 답하시면 됩니다.");
+    "썼는지 한 표로 정리했습니다. 심사에서 특정 요소를 물으면 이 표로 답하시면 됩니다.\n\n★행별로 물어올 만한 것★\n· 4-seam ReAct 루프 — 검사 지점을 만드는 뼈대라 강제 권한이 '—' 다. AFC off 가 핵심으로, 켜두면 모델이 게이트를 건너뛴다.\n· Tier A — 유일하게 '학습 없음' 이다. 위험티어·allowlist·인자스키마·egress DLP 네 가지 결정적 규칙으로만 판정한다.\n· Tier B — 구현했고 켜면 실제로 차단한다('있음'). A 위에서 추가 감소가 0 이었을 뿐이고, Tier A 가 이미 0 이라 바닥 효과다.\n· Tier C — '미구현' 이다. 설계 명세만 제출했고 S16 한계에도 적었다.\n· PII 볼트 — 런타임 기본은 RegexVault(의존성 0)다. Presidio 는 선택/결함 실험용, R6 NER 은 오프라인이라 런타임 미편입.\n· authN/authZ·HITL — 대화-고객 바인딩이 confused-deputy 를 구조적으로 막고, 비가역 도구는 사람 승인으로 뺀다.\n· 생성 모델 — 강제 권한이 '—' 인 이유는 P-LLM 이 판정 주체가 아니기 때문이다.\n· 안전 레일 4종 — 유일하게 '없음(log-only)' 이다. 정책 스키마가 차단을 표현할 수 없게 봉인돼 있다(config.py:47).");
   const c = (x, o = {}) => td(x, { fontSize: 12.5, ...o });   // 행이 10개라 본문만 한 단계 작게
   s.addTable([
     [{ text: "구성요소", options: TH }, { text: "사용 목적", options: TH },
@@ -605,7 +605,7 @@ const td = (t, o = {}) => {
     "여기서 정의하고, 기획 단계에서 세운 목표와 실측을 나란히 둡니다.\n\n" +
     "핵심은 t-ASR 입니다. 공격을 '시도'했는지가 아니라 '실행'까지 갔는지를 셉니다. " +
     "시도와 실행을 분해했기 때문에 '게이트는 모델의 시도를 바꾸지 않고 실행만 막는다'는 " +
-    "주장을 측정으로 뒷받침할 수 있습니다.");
+    "주장을 측정으로 뒷받침할 수 있습니다.\n\n★행별로 물어올 만한 것★\n· t-ASR — 주 지표. 목표 ≤0.05 에 실측 0.00(무방어 0.17).\n· ASR_attempted — ★목표 ±5pp 는 전체 합계 기준이고 실측 0.0pp 로 충족한다★(none 0.167 → tier_a 0.167). 괄호의 clean 0.30→0.40 은 하위집단 값이라 +10pp 이고, 이것만 보면 미달로 오해할 수 있다. 게이트가 모델의 시도를 바꾸지 않는다는 게 이 행의 요점이다.\n· 난독화 불변 — 게이트 판정 근거가 도구 identity·정책이라 페이로드 표기가 바뀌어도 같다.\n· 탐지기 붕괴 — ★난독화 4종 중 base64 에서만★ 무너진다. 호모글리프 0.97·자모분해 0.994 는 견딘다.\n· 교차언어 전이 — 붕괴의 주된 원인은 난독화가 아니라 이쪽이다(KO 0.0).\n· PII 유출률 — 매핑된 PII 기준이며 라우팅 인자 복원은 집계에서 제외한다.\n· BPR·과차단 — 정상셋이 n=2 라 판별력이 얇다는 것을 그대로 적었다.\n· span F1 / Macro-F1 — 부록 축이며 헤드라인 주장에 포함하지 않는다.");
   s.addTable([
     [{ text: "지표", options: TH }, { text: "무엇을 재나", options: TH },
      { text: "목표", options: TH }, { text: "실측", options: TH }],
@@ -658,7 +658,7 @@ const td = (t, o = {}) => {
     [td("무방어 (기준선)"), td(tasr("none"), { align: "center" }), td("—", { align: "center" }), td("기준선", { color: GREY })],
     [td("+plea (프롬프트 애원)"), td(tasr("plea"), { align: "center" }), td(pLabel("plea"), { align: "center" }), td("theater", { color: GREY })],
     [td("+spotlight (데이터마킹)"), td(tasr("spotlight"), { align: "center" }), td(pLabel("spotlight"), { align: "center" }), td("theater ↑", { color: RED })],
-    [td("+분류기 강제"), td(tasr("classifier_gate"), { align: "center" }), td(pLabel("classifier_gate"), { align: "center" }), td("theater", { color: GREY })],
+    [td("+분류기 강제\n(영어 학습 레일)"), td(tasr("classifier_gate"), { align: "center" }), td(pLabel("classifier_gate"), { align: "center" }), td("theater", { color: GREY })],
     [
       td("+결정적 게이트 (Tier A)", { bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
       td(tasr("tier_a"), { align: "center", bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
@@ -691,7 +691,9 @@ const td = (t, o = {}) => {
 // ═════════════════════════════════════════════════════════════════════════
 {
   const s = newSlide("채널 맹점 — 같은 모델이 배선에 따라 1.0과 0.0을 오간다",
-    "앞 장에서 분류기 강제가 안 통했는데, 왜 그런지를 정확히 짚는 장입니다.\n\n" +
+    "★앞 장의 원인 분석이 아니라 별도 실험입니다★ — 앞 장의 강제 arm 은 영어 학습 레일이고, " +
+    "이 장은 Kanana 의 입력 배선 실험입니다. 같은 모델도 배선에 따라 탐지가 달라진다는 " +
+    "독립적인 증거로 봐 주십시오.\n\n" +
     "같은 공격 페이로드를 세 가지 배선으로 넣어봤습니다(Kanana, n=10).\n" +
     "① 사용자 발화로 주면 recall 1.0 — 전부 잡습니다.\n" +
     "② 전체 대화를 native chat template 에 넣으면 0.0 — 하나도 못 잡습니다.\n" +
@@ -788,7 +790,7 @@ const td = (t, o = {}) => {
 // ═════════════════════════════════════════════════════════════════════════
 {
   const s = newSlide("학습·추론 레일 — 4개 파이프라인 (부록 · 탐지 축)",
-    "탐지 축이라 헤드라인 주장과는 분리해서 봐주십시오. 슬라이드 제목의 '부록'은 주장 범위를 뜻하며, 영상 포함 여부는 문서 앞머리의 녹화 세트를 따릅니다.\n\n" +
+    "탐지 축이라 헤드라인 주장과는 분리해서 봐주십시오. 슬라이드 제목의 '부록'은 주장 범위를 뜻하며, 영상 포함 여부는 문서 앞머리의 녹화 세트를 따릅니다.\n\n★행별로 물어올 만한 것★\n· R6 PII NER — klue/roberta-small, openpii-ko 20k 서브샘플 9개체, lr 3e-5·3ep·bs16, span F1 0.9845. ★행단위 랜덤분할이라 누수 가능 상한★ 이고 템플릿 홀드아웃이 아니다.\n· R7 유해성 — klue/roberta-base, K-MHaS 9클래스 멀티라벨, BCEWithLogits(softmax 쓰면 안 된다), Macro-F1 0.709 · test n=21,939.\n· Ko-AgentGuard — TF-IDF char_wb(3-5)+word(1-2), LR C=4.0 class_weight balanced. ★F1 0.994 는 상한★ 이다 — 양성이 체계적으로 길어(543자 vs 215자) 길이 특징 하나만 쓴 LR 도 0.957 이 나온다.\n· e5 + LR — multilingual-e5-small 인코더 동결, 'query: ' 접두가 필수이고 L2 정규화 384d. EN 0.954 / KO 0.0 으로 교차언어 전이에 실패했다.\n· 런타임 역할 열 — R6·R7 은 오프라인 부록이고, Ko-AgentGuard·e5 는 운영에 붙지만 LOG-ONLY 다. 넷 다 실행 차단에는 쓰지 않는다.\n\n" +
     "학습 파이프라인은 넷이고 방식이 다릅니다. R6·R7 은 KLUE-RoBERTa 전체 파인튜닝, e5 는 인코더를 얼린 채 LR 헤드만 학습, Ko-AgentGuard 는 TF-IDF+LR 입니다. Kanana·ShieldGemma 는 학습하지 않고 추론만 했고, Gemini·gpt-4o-mini 는 외부 생성 모델입니다.\n\n" +
     "★Ko-AgentGuard 의 F1 0.994 를 물으시면 상한이라고 답하십시오★ Nemotron 투영에서 양성은 원문에 " +
     "인젝션 문장을 더한 것이라 체계적으로 깁니다(test 평균 543자 vs 215자). 길이 특징 하나만으로 학습한 " +
