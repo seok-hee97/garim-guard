@@ -20,3 +20,4 @@ results/.progress.json.tmp
 # 임시
 TEMP.md
 *.bak
+~$*
