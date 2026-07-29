@@ -151,8 +151,8 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ```bash
 pytest                              # 125 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
-python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
-python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
+python -m eval.ablation             # → results/ablation.csv · mcnemar_vs_none.json (McNemar p, Wilson CI)
+python -m eval.kanana_compare       # 채널 조건부 격차 2×2 (GPU)
 open report/trace_view.html         # 정적 트레이스 뷰어
 ```
 

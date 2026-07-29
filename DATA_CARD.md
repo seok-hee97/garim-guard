@@ -19,7 +19,9 @@
 
 | 데이터셋 | 용도 | 라이선스 | 파생물 재배포 |
 |---|---|---|---|
-| `nvidia/Nemotron-RL-Agentic-Indirect-Prompt-Injection-v1` (1,272) | 레일 학습+평가 | CC-BY-4.0 | 가능 |
+| `nvidia/Nemotron-RL-Agentic-Indirect-Prompt-Injection-v1` (원본 1,272행) | 레일 학습+평가 | CC-BY-4.0 | 가능 |
+
+> ℹ️ **1,272 는 원본 데이터셋 행수**다. `eval/nemotron_projector.py` 가 에피소드 1건에서 (오염 필드, 정제 필드) 등 여러 (text, label) 예제를 뽑으므로 산출물은 더 많다 — `nemotron_rail.{train,dev,test}` = **1,663 / 560 / 304 (합 2,527)**.
 | `Fujitsu-FRE/MAPS` ASB/Korean (400) | 평가 | CC-BY-4.0 | 가능 |
 | `ai4privacy/pii-masking-openpii-1.5m` (`ko`) | R6 PII NER 학습(오프라인, 20k 서브샘플) | CC-BY-4.0 | 가능 |
 | `jeanlee/kmhas_korean_hate_speech` (109,692) | R7 유해 학습(오프라인) | CC-BY-SA-4.0 | 가능(SA) |

@@ -180,7 +180,7 @@ python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → P
 | `run_demo` · `cli --provider scripted` · `app.trace_view` | 없음 | 실행확인 |
 | `pytest` (전체 125 / CI-core 119) | presidio(전체) / 없음(CI-core) | 실행확인 |
 | `eval.ablation` · `check_contamination` · `expansion_v2 --report-only` | 없음(기존 runs.jsonl) | 실행확인 |
-| `gen_slide_figs` · `gen_model_arch` · `architecture_diagram` | 없음(matplotlib/graphviz) | 실행확인 |
+| `gen_slide_figs` · `gen_arch_stack` · `gen_model_arch` · `gen_trace_shot` | matplotlib(figs) / graphviz(flow) / Chrome(stack·shot) | 실행확인 |
 | `uvicorn ... server` + `GET /healthz` | 없음 | 실행확인 |
 | `check_env` · `cli --provider openai/gemini` · `eval.run` · `eval.dlp_eval` · `smoke_live` | API키 | 키필요 |
 | `fetch_rail` · `detector_eval` · `kanana_compare` | 아티팩트(+kanana는 GPU) | 실행확인/코드 |
@@ -190,7 +190,7 @@ python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → P
 
 ## 5. 함정 (반드시 숙지)
 
-1. **tracked 파일 덮어쓰기** — `run_demo`(results/demo_traces.jsonl), `check_env`(results/env_report.json), `build_dataset`(인자 없으면 동결 데이터), `trace_view`/`gen_*`/`architecture_diagram`(report·docs 산출물)이 git-추적 파일을 덮는다. 실험은 `--out`/`--stats`/`--report-only` 로 임시경로에 쓰거나 실행 후 `git checkout -- <파일>` 로 복원.
+1. **tracked 파일 덮어쓰기** — `run_demo`(results/demo_traces.jsonl), `check_env`(results/env_report.json), `build_dataset`(인자 없으면 동결 데이터), `trace_view`/`gen_*`(report·docs 산출물)이 git-추적 파일을 덮는다. 실험은 `--out`/`--stats`/`--report-only` 로 임시경로에 쓰거나 실행 후 `git checkout -- <파일>` 로 복원.
 2. **`--defenses all` 사용 불가** — `tier_c` 미구현(NotImplementedError). `tier_c` 를 뺀 조합만.
 3. **`cli` exit code 의미** — 무방어 arm 유출 시 `exit 1`은 오류가 아니라 유출감지 신호. 게이트 통과(money smoke)면 `exit 0`.
 4. **HTTP 무키 부팅** — `/healthz`=200이지만 `/readyz`·`/v1/agent/run`=**503**(provider 미초기화). 401/403 인증은 provider 준비 후에만 도달(테스트에서 검증).
