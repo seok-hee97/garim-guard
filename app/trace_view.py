@@ -26,7 +26,11 @@ ABL = ROOT / "results" / "ablation_table.md"
 DEMO_TRACES = ROOT / "results" / "demo_traces.jsonl"
 OUT = ROOT / "report" / "trace_view.html"
 
+_PREVIEW_CHARS = 0        # 0 = 전문. --preview-chars 로 캡처 시 축약한다.
+
 _CSS = """
+.note{color:#9bb0c7;font-size:12.5px;margin:2px 0 10px;line-height:1.6}
+.note code{background:#16233a;padding:1px 5px;border-radius:4px;color:#cfe5ff}
 body{font-family:-apple-system,BlinkMacSystemFont,'Malgun Gothic',sans-serif;margin:2rem;
   background:#0d1117;color:#c9d1d9;line-height:1.5}
 h1,h2,h3{color:#e6edf3}
@@ -90,6 +94,15 @@ def _episode_timelines(traces: list[dict]) -> list[str]:
     parts = ["<h2>① 에피소드 실행 과정 (seam 흐름 · 게이트 차단지점)</h2>",
              "<p class='mono'>같은 공격 에피소드를 arm별로 재생 — before_tool 게이트만 "
              "실행(executed) 결과를 바꾼다. 🛑=차단(gate_rule), ✅=실행.</p>",
+        # ★두 토큰을 반드시 구별시킨다★ — 화면에서 거의 같아 보이지만 뜻이 정반대다.
+        #   <X_MASKED> : 트레이스 파일에 원본을 남기지 않으려고 ★저장 시점에★ 가린 것.
+        #               모델은 원본을 그대로 받았다(볼트가 꺼진 arm).
+        #   <X_1>      : DLP 볼트가 ★모델에게 실제로 준★ 토큰. 모델은 원본을 못 봤다.
+        # 이 구별이 없으면 무방어 arm 도 PII 가 보호된 것처럼 읽힌다.
+        "<p class='note'>after_tool→model 의 토큰 두 종류는 뜻이 다르다 — "
+        "<code>&lt;X_MASKED&gt;</code> 는 <b>트레이스 저장 시 가린 것</b>으로 "
+        "모델은 원본을 받았다(볼트 OFF). "
+        "<code>&lt;X_1&gt;</code> 은 <b>DLP 볼트가 모델에게 실제로 준 토큰</b>이다(볼트 ON).</p>",
              "<div class='epgrid'>"]
     for ep in traces:
         tool_hops = [h for h in ep.get("hops", []) if h.get("tool_name")]
@@ -119,8 +132,13 @@ def _episode_timelines(traces: list[dict]) -> list[str]:
                 f"{badge}</div>")
             detail = []
             if h.get("tool_result_preview") is not None:
-                detail.append("after_tool→model: " + json.dumps(
-                    h.get("tool_result_preview"), ensure_ascii=False, default=str))
+                # ★캡처 모드는 한 줄로 줄인다★ — 전문을 실으면 세로가 늘어나 정작 차단 배지가
+                # 프레임 밖으로 밀린다(슬라이드의 요점이 잘린다). 토큰은 앞부분에 나오므로
+                # 앞 _PREVIEW_CHARS 자만 남겨도 DLP 대비는 그대로 보인다.
+                _pv = json.dumps(h.get("tool_result_preview"), ensure_ascii=False, default=str)
+                if _PREVIEW_CHARS and len(_pv) > _PREVIEW_CHARS:
+                    _pv = _pv[:_PREVIEW_CHARS - 1] + "…"
+                detail.append("after_tool→model: " + _pv)
             if h.get("rail_scores"):
                 detail.append("rail[LOG-ONLY]: " + json.dumps(
                     h.get("rail_scores"), ensure_ascii=False, default=str))
@@ -183,10 +201,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--traces", default=str(DEMO_TRACES), help="에피소드 hop 트레이스 JSONL")
     ap.add_argument("--runs", default=str(RUNS), help="애블레이션 집계 JSONL")
+    ap.add_argument("--preview-chars", type=int, default=0,
+
+                    help="after_tool 미리보기를 N자로 축약(0=전문). 캡처 프레임 보호용")
     ap.add_argument("--out", default=str(OUT), help="출력 HTML 경로")
     ap.add_argument("--sections", choices=("all", "timeline"), default="all",
                     help="timeline = ① 실행과정만(슬라이드 캡처용 — 표가 프레임에 걸리지 않음)")
     args = ap.parse_args()
+    global _PREVIEW_CHARS
+    _PREVIEW_CHARS = args.preview_chars
 
     full = args.sections == "all"
     traces = _load(Path(args.traces))

@@ -51,6 +51,10 @@ def main() -> int:
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--width", type=int, default=2000)
     ap.add_argument("--height", type=int, default=540, help="창 높이 = 크롭 높이")
+    # ★after_tool 전문을 실으면 세로가 늘어 차단 배지가 프레임 밖으로 밀린다★ —
+    # 슬라이드에서 잘리면 안 되는 건 차단 배지이므로 미리보기를 줄여 4홉을 다 담는다.
+    ap.add_argument("--preview-chars", type=int, default=150,
+                    help="after_tool 미리보기 축약 길이(0=전문)")
     args = ap.parse_args()
 
     if not Path(args.traces).exists():
@@ -69,6 +73,7 @@ def main() -> int:
         html = Path(td) / "trace_slide.html"
         rc = subprocess.run(
             [sys.executable, "-m", "app.trace_view", "--sections", "timeline",
+             "--preview-chars", str(args.preview_chars),
              "--traces", args.traces, "--out", str(html)],
             cwd=ROOT, capture_output=True, text=True, timeout=120)
         if not html.exists():
