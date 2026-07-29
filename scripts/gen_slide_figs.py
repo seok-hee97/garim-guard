@@ -158,8 +158,8 @@ def _channel_gap():
     ax.set_xticklabels(labels, fontproperties=KFONT, fontsize=11)
     ax.set_ylabel("탐지 recall / 실행 성공률", fontproperties=KFONT, fontsize=12)
     ax.set_ylim(0, 1.15)
-    ax.set_title("완벽한 탐지기도 '채널'이 바뀌면 눈먼다 — 강제는 게이트로",
-                 fontproperties=KFONT, fontsize=14, fontweight="bold", pad=12)
+    ax.set_title("같은 페이로드도 채널이 바뀌면 탐지가 무너진다 (Kanana, n=10) — 강제는 게이트로",
+                 fontproperties=KFONT, fontsize=13, fontweight="bold", pad=12)
     ax.annotate("같은 페이로드,\n채널만 발화→도구\n= recall 1.0 → 0.0",
                 xy=(1, 0.03), xytext=(0.55, 0.55), fontproperties=KFONT, fontsize=10.5,
                 color=C_THEATER, arrowprops=dict(arrowstyle="->", color=C_THEATER))

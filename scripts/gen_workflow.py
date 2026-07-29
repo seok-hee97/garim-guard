@@ -5,6 +5,10 @@
 발표는 코드 리뷰 없이 슬라이드 + 데모영상만으로 진행된다. 따라서 "요청 하나가 들어오면
 무슨 일이 벌어지는가"를 **실제 데이터 값과 함께** 한 장에 담아 자립적으로 읽히게 한다.
 
+★이 그림이 증명하는 것★ — "모델이 인젝션에 취약하다"가 아니라 **런타임 게이트가 실행을 막는다**.
+데모는 FakeProvider.scripted 로 도구 호출 시퀀스를 고정 재생하므로(run_demo.py 정직성 주석),
+모델의 취약성 자체는 라이브 애블레이션(eval.run --provider openai)에서 측정한다.
+
 ★값을 지어내지 않는다★ — 모든 문자열은 저장소의 실물에서 온다:
   · 사용자 입력 / 홉 순서 / 게이트 판정 / 레일 점수 → results/demo_traces.jsonl (arm=tier_a)
   · 오염 문서 본문                                  → src/agent/toolworld.py (kb_003)
@@ -48,11 +52,17 @@ def _e(s: str) -> str:
 
 
 def _load():
-    """arm=tier_a 에피소드 = '모델은 속았지만 게이트가 막은' 대표 트레이스."""
+    """arm 두 개를 함께 읽는다.
+
+    ★arm 을 섞어 한 실행처럼 그리면 안 된다★ — tier_a 에는 dlp_vault 가 꺼져 있어 DLP
+    토큰화가 일어나지 않는다(run_demo.ARMS). 그래서 ② 단계는 dlp_vault arm 한정으로 명시하고,
+    ⑥ 단계는 두 arm 의 차단 규칙을 나란히 보인다(allowlist 차단 vs 더 이른 DLP 차단).
+    """
     eps = [json.loads(l) for l in TRACES.read_text("utf-8").splitlines() if l.strip()]
-    ep = next(e for e in eps if "arm=tier_a" in e["scenario"] and "dlp" not in e["scenario"])
-    hops = [h for h in ep["hops"] if h.get("tool_name")]
-    return ep, {h["tool_name"]: h for h in hops}
+    ta = next(e for e in eps if "arm=tier_a" in e["scenario"] and "dlp" not in e["scenario"])
+    tad = next(e for e in eps if "dlp_vault" in e["scenario"])
+    hops = lambda e: {h["tool_name"]: h for h in e["hops"] if h.get("tool_name")}
+    return ta, hops(ta), hops(tad)
 
 
 def _w(text: str, size: float) -> float:
