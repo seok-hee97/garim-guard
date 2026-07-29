@@ -48,9 +48,11 @@ open http://127.0.0.1:8501
 
 컷 ③ 은 세 구성을 한 프레임에 나란히 보여주므로 스크롤이 필요 없습니다.
 
-DLP 토큰화를 화면으로 보이려면 컷 ①의 TURN 1 로 스크롤해 `TOOL RAW RESULT`(원본
-주민등록번호)와 바로 아래 `AFTER_TOOL → MODEL`(`<KR_RRN_1>`)을 대비시킵니다. 다만
-스크롤 시간이 들어 5분 예산에서는 S11 슬라이드 표로 대체합니다.
+**DLP 토큰화는 컷 ①·②에서 보이지 않습니다.** 두 컷 모두 볼트를 끈 구성이라
+`AFTER_TOOL → MODEL` 줄에도 원본이 그대로 찍힙니다. 토큰화를 화면으로 보이려면
+`?scenario=poisoned_kb&defense=tier_a%2Bdlp_vault&autorun=1` 로 컷을 하나 더 잡아
+TURN 1 의 `TOOL RAW RESULT`(원본)와 `AFTER_TOOL → MODEL`(`<KR_RRN_1>`)을 대비시켜야
+합니다. 스크롤 시간까지 들어 5분 예산을 넘기므로, 기본안은 S11 슬라이드 표로 대체합니다.
 
 **녹화 전 점검**
 
