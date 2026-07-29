@@ -159,6 +159,10 @@ python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → P
 | `report/발표자료.pdf` | 투사용 | 위 PPTX 에서 Keynote 로 파생 |
 | `report/발표자료.md` | 발표 스크립트(인쇄용) | **생성물 — 직접 수정 금지** |
 
+- ℹ️ `npm run build` 를 다시 돌리면 **git 이 `발표자료.pptx` 를 변경으로 표시**한다. 내용이
+  바뀐 게 아니라 OOXML 메타(`docProps/core.xml` 의 `dcterms:created`)만 달라진 것이다 —
+  슬라이드·발표자 노트 XML 은 바이트 동일하다(확인 방법: 두 pptx 를 풀어 `diff -rq ppt/slides`).
+  실제 내용 변경이 없으면 `git checkout -- report/발표자료.pptx` 로 되돌리면 된다.
 - ⚠️ **PPTX 를 PowerPoint 에서 직접 고쳤다면 `npm run build` 를 다시 돌리지 말 것** — 생성기가
   덮어쓴다. 유지할 수정이면 `gen_pptx.mjs` 에 반영한 뒤 재생성한다.
 - ⚠️ `gen_slide_figs` 는 **matplotlib** 이 필요하다(`requirements.core` 에 없음). `.venv` 에서
