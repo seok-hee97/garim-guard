@@ -14,6 +14,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/cassettes/
+# 런타임 관측 산출물(재생성됨)
+results/.progress.json
+results/.progress.json.tmp
 # 임시
 TEMP.md
 *.bak

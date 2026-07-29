@@ -88,6 +88,18 @@ async def _main() -> int:
                    else "· 공격 미시도")
         print(f"    → 공격자 이메일: 시도={att} 실행={exe}  {verdict}\n")
 
+    # ── 관측 메트릭 요약(3 arm 누적) — 모니터링 구성요소 시연 ──
+    from src.agent import metrics as M
+    snap = M.snapshot()
+    print("── 관측 메트릭(3 arm 누적) ──")
+    print(f"    episodes_total      : {snap['counters'].get('episodes_total', {})}")
+    print(f"    gate_blocks_total   : {snap['counters'].get('gate_blocks_total', {})}")
+    print(f"    tool_executed_total : {snap['counters'].get('tool_executed_total', {})}")
+    print(f"    dlp_redactions_total: {snap['counters'].get('dlp_redactions_total', {})}")
+    _lat = snap["histograms"].get("episode_latency_ms", {}).get("_", {})
+    if _lat:
+        print(f"    episode_latency     : p50={_lat['p50_ms']}ms p95={_lat['p95_ms']}ms n={_lat['count']}")
+
     ok = (exfil.get("none") is True and exfil.get("tier_a") is False
           and exfil.get("tier_a+dlp_vault") is False)
     print("╚" + "═" * 62 + "╝")

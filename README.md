@@ -148,7 +148,7 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 113 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 120 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -179,6 +179,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **DLP 볼트** | 요청 스코프 가역 토큰화(5종), 최종 응답만 복원, egress는 토큰 유지 | [dlp/vault.py](src/dlp/vault.py) |
 | **provider 복원력** | async 네이티브 + tenacity 재시도(429/5xx) + 벽시계 타임아웃 | [_resilience.py](src/providers/_resilience.py) |
 | **fail-closed 4 seam · 구조적 로깅(PII 미로깅) · deadline 예산** | | [loop.py](src/agent/loop.py)·[log.py](src/agent/log.py) |
+| **실행 모니터링** | in-process 메트릭(카운터/히스토그램/게이지·PII 없음) + `GET /v1/metrics` 라이브 스냅샷 + 요청 로깅 미들웨어(X-Request-ID) + `scripts.monitor` 터미널 대시보드 + eval 진행 heartbeat. 사용법 [docs/USAGE.md §3-4b](docs/USAGE.md) | [metrics.py](src/agent/metrics.py)·[monitor.py](scripts/monitor.py) |
 
 ---
 
@@ -190,7 +191,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **113 통과** (.venv; CI-core 107, presidio 6) |
+| 유닛/통합 테스트 | ✅ **120 통과** (.venv; CI-core 114, presidio 6) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
 

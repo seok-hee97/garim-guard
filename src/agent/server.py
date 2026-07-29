@@ -27,11 +27,12 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import ROOT, gen_config, load_policy
 from . import log as alog
+from . import metrics as M
 from . import tools as toolmod
 from .authz import build_registry, Principal, _norm_env
 from .backend import service_world
@@ -180,6 +181,55 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SafeAgent-KR", version="1.0", lifespan=lifespan)
+_STARTED_AT = time.time()
+
+
+@app.middleware("http")
+async def _observe_requests(request: Request, call_next):
+    """모든 HTTP 요청에 상관ID·타이밍·상태 구조적 로그 1줄 + 메트릭. ★PII 금지★ —
+    라우트 템플릿(/v1/approvals/{approval_id})만 라벨로 쓰고 concrete path·query·body 미기록."""
+    rid = (request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12])[:64]
+    alog.bind(request_id=rid)
+    t0 = time.perf_counter()
+    status = 500
+    try:
+        resp = await call_next(request)
+        status = resp.status_code
+        resp.headers["X-Request-ID"] = rid          # 클라이언트 상관용 에코
+        return resp
+    finally:
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        route = request.scope.get("route")
+        tmpl = getattr(route, "path", None) or "unmatched"   # 템플릿만(식별자 유출 방지)
+        alog.event(alog.get_logger(), "info", "http_request",
+                   method=request.method, route=tmpl, status=status,
+                   latency_ms=latency_ms, request_id=rid)
+        M.inc("http_requests_total", method=request.method, route=tmpl, status=status)
+        M.observe("http_request_latency_ms", latency_ms, method=request.method, route=tmpl)
+
+
+@app.get("/v1/metrics")
+async def metrics_endpoint() -> dict:
+    """라이브 관측 스냅샷 — 누적 카운터·게이지·지연 분위수 + in-flight + uptime.
+    ★응답에 PII 없음★(레지스트리가 정수/enum 라벨만 보유). 스크레이퍼/monitor/사람이 읽는다."""
+    snap = M.snapshot()
+    cfg = _state.get("cfg")
+    idem = _state.get("idem")
+    return {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "uptime_s": round(time.time() - _STARTED_AT, 1),
+        "ready": bool(_state.get("ready")),
+        "build": {"provider": getattr(cfg, "provider", ""), "model": getattr(cfg, "model", ""),
+                  "rail": _state.get("rail_name", "")},
+        "in_flight": {
+            "episodes": snap["gauges"].get("episodes_in_flight", {}).get("_", 0),
+            "idem": idem.inflight_count() if idem is not None else 0,
+        },
+        "counters": snap["counters"],
+        "gauges": snap["gauges"],
+        "histograms": snap["histograms"],
+        "series_dropped": snap["series_dropped"],
+    }
 
 
 class RunRequest(BaseModel):

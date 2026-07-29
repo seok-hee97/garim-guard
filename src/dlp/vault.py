@@ -51,6 +51,9 @@ class RegexVault:
         tok = f"<{entity}_{self._counters[entity]}>"
         self._v2t[value] = tok
         self._t2v[tok] = value
+        # 관측: 새 매핑 생성 시에만 카운트 — ★entity(타입)만★, 원본 값은 절대 미기록.
+        from ..agent import metrics as M
+        M.inc("dlp_redactions_total", entity=entity)
         return tok
 
     def redact(self, text: str) -> str:

@@ -22,6 +22,7 @@ from typing import Any
 
 from ..providers.base import GenConfig, Msg, Provider, ToolResult
 from . import log as alog
+from . import metrics as M
 from . import tools as toolmod
 from .hooks import Block, GuardrailHooks, HITLRequired, NoOpHooks, Redacted, Rehydrated, Tainted_
 from .taint import sources_of, unwrap
@@ -36,11 +37,27 @@ from .trace import EpisodeTrace, HopTrace
 
 _log = alog.get_logger()
 
+
+def _rule_family(rule: str) -> str:
+    """게이트 규칙키를 메트릭 라벨용 family 로 정규화 — ':' 뒤 인자명(body/amount 등)을 떼어
+    카디널리티를 유한하게 유지한다(예: dlp.egress:body → dlp.egress). PII 아님(필드명일 뿐)."""
+    return (rule or "unknown").split(":", 1)[0]
+
 # 한 모델 응답에서 처리할 최대 병렬 tool_call 수(무한 도구 폭주 방지).
 MAX_PARALLEL_CALLS = 8
 
 
-async def run_episode(
+async def run_episode(*args: Any, **kwargs: Any) -> EpisodeTrace:
+    """공개 진입점 — in-flight 게이지(episodes_in_flight)를 fail-safe(try/finally)로 관리하고
+    실제 루프는 _run_episode 에 위임한다. 예기치 못한 예외에도 게이지가 새지 않도록 분리."""
+    M.inc_gauge("episodes_in_flight")
+    try:
+        return await _run_episode(*args, **kwargs)
+    finally:
+        M.dec_gauge("episodes_in_flight")
+
+
+async def _run_episode(
     user_input: str,
     provider: Provider,
     cfg: GenConfig,
@@ -109,6 +126,7 @@ async def run_episode(
             ep.add(HopTrace(episode_id=ep.episode_id, hop=ep.total_hops, gate_decision="NA",
                             note=f"provider_error: {type(e).__name__}: {e}"))
             alog.event(_log, "error", "provider_error", err=type(e).__name__)
+            M.inc("errors_total", stage="provider_error")
             break
         latency = int((time.perf_counter() - t0) * 1000)
 
@@ -169,6 +187,7 @@ async def run_episode(
             except Exception as e:  # noqa: BLE001 — 게이트 실패 = fail-closed 차단
                 gate = Block(rule="gate.fail_closed", reason=f"{type(e).__name__}: {e}")
                 alog.event(_log, "error", "gate.fail_closed", tool=call.name, err=type(e).__name__)
+                M.inc("errors_total", stage="gate.fail_closed")
             # ── 논리적 액션 멱등성 키(P0-3): 스코프 + 단조 ordinal. HITL 적재·직접 실행이 같은 키를
             #    쓰게 하여, 같은 논리적 환불이 승인 두 건으로 갈라져 이중 실행되는 것을 막는다.
             #    (Block 도 ordinal 을 소비 — 키 유일성만 필요, 값 자체는 의미 없음.)
@@ -193,6 +212,8 @@ async def run_episode(
                         call_id=call.call_id, name=call.name,
                         content={"hitl_pending": approval_id}, is_error=True))
                     alog.event(_log, "info", "hitl_pending", tool=gate.tool, approval_id=approval_id)
+                    M.inc("gate_decisions_total", decision="HITL_DENY", rule=_rule_family(gate.rule))
+                    M.inc("hitl_pending_total", tool=gate.tool)
                     continue         # 배치의 나머지 HITL 도 마저 적재
                 # 큐 없음(평가) → 기존처럼 HITL_DENY 차단으로 처리
                 gate = Block(rule=gate.rule, reason="HITL 승인 필요", decision="HITL_DENY")
@@ -205,6 +226,8 @@ async def run_episode(
                 ep.add(hop)
                 alog.event(_log, "info", "gate_block", tool=call.name,
                            decision=gate.decision, rule=gate.rule)
+                M.inc("gate_decisions_total", decision=gate.decision, rule=_rule_family(gate.rule))
+                M.inc("gate_blocks_total", rule=_rule_family(gate.rule))
                 tool_results.append(ToolResult(
                     call_id=call.call_id, name=call.name,
                     content={"blocked": True, "rule": gate.rule}, is_error=True))
@@ -212,6 +235,7 @@ async def run_episode(
             if isinstance(gate, Rehydrated):
                 args_for_exec = gate.args
             hop.gate_decision = "ALLOW"
+            M.inc("gate_decisions_total", decision="ALLOW", tool=call.name)
             hop.effective_args = dict(args_for_exec)     # 복원된 실행 인자(DLP 어댑터 경계 계측용)
 
             # ── 도구 실행 ──
@@ -234,11 +258,14 @@ async def run_episode(
                     raw = await asyncio.wait_for(_exec, timeout=_tbudget)
                 hop.executed = True
                 hop.taint_sources = sorted(sources_of(raw))
+                M.inc("tool_executed_total", tool=call.name)
+                M.observe("tool_latency_ms", int((time.perf_counter() - t0) * 1000), tool=call.name)
             except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001 — 도구 오류도 트레이스에
                 hop.executed = False
                 hop.note = f"tool_error: {type(e).__name__}: {e}"
                 ep.add(hop)
                 alog.event(_log, "error", "tool_error", tool=call.name, err=type(e).__name__)
+                M.inc("errors_total", stage="tool_error", tool=call.name)
                 tool_results.append(ToolResult(
                     call_id=call.call_id, name=call.name,
                     content={"error": str(e)}, is_error=True))
@@ -280,6 +307,9 @@ async def run_episode(
         ep.finish_reason = "iteration_cap"
 
     ep.total_latency_ms = int((time.perf_counter() - t_ep) * 1000)
+    # ── 관측: 모든 break 가 여기로 수렴 → finish_reason 분포·지연 히스토그램 단일 계측점 ──
+    M.inc("episodes_total", finish_reason=ep.finish_reason or "unknown")
+    M.observe("episode_latency_ms", ep.total_latency_ms)
     return ep
 
 

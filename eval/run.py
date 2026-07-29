@@ -217,6 +217,8 @@ async def main() -> int:
                     choices=["ko_agentguard", "heuristic", "kanana", "shieldgemma", "e5"],
                     help="ko_agentguard|heuristic|kanana|shieldgemma|e5 (GPU 레일은 RunPod)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--progress-file", default=str(ROOT / "results" / ".progress.json"),
+                    help="진행 heartbeat JSON(scripts.monitor 가 읽음). 빈 문자열이면 비활성")
     args = ap.parse_args()
 
     from dotenv import load_dotenv
@@ -263,33 +265,33 @@ async def main() -> int:
                 run_meta.get("rail_artifact_hash", ""))
 
     total = len(arms) * (len(attacks) + len(utility))
-    n = 0
+    from eval.progress import ProgressMonitor
+    pm = ProgressMonitor(total, "eval", args.progress_file or None)
     with RUNS.open("a", encoding="utf-8") as f, TRACES.open("a", encoding="utf-8") as tf:
         for arm in arms:
             defenses = ARMS[arm]
             for case in attacks:
-                n += 1
                 if _key(arm, case["case_id"]) in done:
-                    continue
+                    pm.tick(f"{arm}/{case['case_id']} (resume-skip)"); continue
                 ep = await _safe_run_case(case, provider, policy, defenses,
                                           rail=rail, customers=CUSTOMERS, arm=arm)
                 tf.write(json.dumps({"arm": arm, **ep.to_dict()}, ensure_ascii=False) + "\n"); tf.flush()
                 row = {"arm": arm, "kind": "attack", **run_meta, **score_attack(case, ep)}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
-                mark = ("⚠️" if row["finish_reason"] == "error" else
-                        "🛑" if (row["attempted"] and not row["executed"]) else
-                        "🔴" if row["executed"] else "·")
-                print(f"[{n}/{total}] {arm:16s} {case['case_id']:44s} {mark} att={row['attempted']} exe={row['executed']}")
+                pm.tick(f"{arm:12s} {case['case_id']}",
+                        executed=int(bool(row["executed"])),
+                        blocked=int(bool(row["attempted"]) and not row["executed"]),
+                        error=int(row["finish_reason"] == "error"))
             for case in utility:
-                n += 1
                 if _key(arm, case["case_id"]) in done:
-                    continue
+                    pm.tick(f"{arm}/{case['case_id']} (resume-skip)"); continue
                 ep = await _safe_run_case(case, provider, policy, defenses,
                                           rail=rail, customers=CUSTOMERS, arm=arm)
                 tf.write(json.dumps({"arm": arm, **ep.to_dict()}, ensure_ascii=False) + "\n"); tf.flush()
                 row = {"arm": arm, "kind": "utility", **run_meta, **score_utility(case, ep)}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
-                print(f"[{n}/{total}] {arm:16s} {case['case_id']:44s} util_done={row['completed']}")
+                pm.tick(f"{arm:12s} {case['case_id']}", util_done=int(bool(row["completed"])))
+    pm.done()
     print(f"\n완료. → {RUNS.relative_to(ROOT)}")
     return 0
 

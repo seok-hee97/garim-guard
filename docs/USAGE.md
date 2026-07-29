@@ -33,7 +33,7 @@ cp .env.example .env                                   # GEMINI/GOOGLE_API_KEY �
 python -c "import src.config, src.providers.base, src.agent, src.dlp, src.rails"   # import 스모크
 python -m scripts.run_demo                              # ★핵심★ 무방어=유출 vs 게이트=차단 3-arm 대비
 python -m app.trace_view --out /tmp/trace_view.html     # 실행 과정 타임라인 HTML(기본 출력은 tracked라 --out 권장)
-python -m pytest --ignore=tests/test_dlp_defenses.py -q # CI-core 107 passed (presidio·키 불요)
+python -m pytest --ignore=tests/test_dlp_defenses.py -q # CI-core 114 passed (presidio·키 불요)
 ```
 
 `scripts.run_demo` 출력(실측):
@@ -97,6 +97,20 @@ python -m eval.dlp_eval --provider openai                     # ★키 필요★
 ```
 > `eval.run` 은 `--rail heuristic` 이어도 **provider 키가 반드시 필요**(항상 LLM 호출). `ko_agentguard` 레일은 아티팩트 없으면 **fail-loud**(폴백 안 함) — 휴리스틱 원하면 명시적 `--rail heuristic`.
 
+### 3-4b. 실행 모니터링 — '지금 무엇이 실행/진행 중인가' (키 불요)
+```bash
+# 1) 서비스 라이브 메트릭(누적 카운터·in-flight·지연 분위수) — HTTP 스냅샷
+curl :8000/v1/metrics | python -m json.tool
+# 2) 터미널 라이브 대시보드(3s 폴링 · leak 경보 · eval 진행바)
+python -m scripts.monitor                          # --once 단발 · --url · --progress-file
+# 3) 데모 실행 후 누적 메트릭 요약(키 불요)
+python -m scripts.run_demo                          # 하단에 episodes/gate_blocks/dlp_redactions/latency 요약
+# 4) 긴 스윕 진행 heartbeat(eval.run 이 rate/ETA 를 results/.progress.json 에 기록)
+python -m eval.run ... --progress-file results/.progress.json   # 다른 터미널서 monitor 가 읽음
+```
+- **메트릭(PII 없음, enum/카운트만):** `episodes_total{finish_reason}` · `gate_decisions_total{decision,rule}` · `gate_blocks_total{rule}` · `dlp_redactions_total{entity}` · `tool_executed_total{tool}` · `errors_total{stage}` · `http_requests_total{method,route,status}` + 지연 히스토그램(p50/p95) + 게이지 `episodes_in_flight`.
+- 모든 HTTP 요청은 `X-Request-ID` 상관 + 구조적 로그 1줄(미들웨어). 로그는 stdout JSON(`src/agent/log.py`), 원본 PII 미기록.
+
 ### 3-5. 학습 (GPU · 오프라인 부록)
 ```bash
 python -m eval.train_rail                     # 레일(기본 tfidf=CPU 가능 / --encoder e5=GPU)
@@ -122,7 +136,7 @@ marp report/발표자료_슬라이드.md --pptx --allow-local-files -o report/�
 | 명령 | 전제 | 검증 |
 |---|---|---|
 | `run_demo` · `cli --provider scripted` · `app.trace_view` | 없음 | 실행확인 |
-| `pytest` (전체 113 / CI-core 107) | presidio(전체) / 없음(CI-core) | 실행확인 |
+| `pytest` (전체 120 / CI-core 114) | presidio(전체) / 없음(CI-core) | 실행확인 |
 | `eval.ablation` · `check_contamination` · `expansion_v2 --report-only` | 없음(기존 runs.jsonl) | 실행확인 |
 | `gen_slide_figs` · `gen_model_arch` · `architecture_diagram` | 없음(matplotlib/graphviz) | 실행확인 |
 | `uvicorn ... server` + `GET /healthz` | 없음 | 실행확인 |
