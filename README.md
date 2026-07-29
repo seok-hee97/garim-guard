@@ -78,6 +78,9 @@ python -m scripts.fetch_rail                    # HF cycloevan/safeagent-kr → 
 
 ---
 
+> **제출·재현 안내는 [SUBMISSION.md](SUBMISSION.md)** — 패키징(무엇을 넣고 빼나),
+> 받는 쪽 재현 절차, 데이터·모델 HF 공개 범위(재배포 제한 포함), 발표자료 재생성 순서.
+
 ## 5. 실행 방법
 
 ### 5-0. 전체 Agent Workflow 브라우저 프로그램
