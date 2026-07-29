@@ -139,30 +139,44 @@ def _ablation():
 
 
 def _channel_gap():
-    """S6 — Kanana 채널 맹점: 발화(a) recall 1.0 → 도구채널 대화(b1) 0.0, 게이트는 불변."""
+    """S10 — 같은 모델·같은 페이로드인데 ★배선★ 에 따라 탐지가 1.0↔0.0 을 오간다.
+
+    ★세 조건을 모두 보인다★ — b1(대화 템플릿)만 보이면 유리한 것만 고른 게 된다.
+    실제 런타임(policy.after_tool)은 도구 반환 '문자열'을 rail.score(text) 로 직접 채점하므로
+    b2 조건에 해당하고, 거기서 Kanana 는 recall 1.0 이다. 그래서 이 그림의 논지는
+    "분류기가 못 본다"가 아니라 "탐지 성패가 어댑터 배선에 좌우된다"이다.
+    """
     d = json.loads((ROOT / "results" / "channel_gap.json").read_text("utf-8"))
-    a = d["recall_a_utterance"]
-    b1 = d["recall_b1_conversation"]
-    labels = ["Kanana\n사용자 발화", "Kanana\n도구채널(대화)", "결정적 게이트\n(t-ASR)"]
-    vals = [a, b1, 0.0]           # 게이트는 실행 성공률 0 = 완전 차단
-    colors = [C_LEAK, C_THEATER, C_GENUINE]
-    fig, ax = plt.subplots(figsize=(8.4, 4.8))
+    a, b1, b2 = d["recall_a_utterance"], d["recall_b1_conversation"], d["recall_b2_toolstring"]
+    labels = ["Kanana\n① 사용자 발화", "Kanana\n② native 대화 템플릿", 
+              "Kanana\n③ 도구 문자열 직접", "결정적 게이트\n(t-ASR)"]
+    vals = [a, b1, b2, 0.0]
+    colors = [C_THEATER, C_LEAK, C_THEATER, C_GENUINE]
+    fig, ax = plt.subplots(figsize=(9.6, 4.8))
     xs = list(range(len(vals)))
-    ax.bar(xs, vals, color=colors, width=0.58, zorder=3)
-    _zero_caps(ax, xs, vals, colors, half=0.29, lw=6.5)
-    notes = [f"탐지 {a:.1f}", f"탐지 {b1:.1f}", "실행 0.00"]
+    ax.bar(xs, vals, color=colors, width=0.56, zorder=3)
+    _zero_caps(ax, xs, vals, colors, half=0.28, lw=6.5)
+    notes = [f"탐지 {a:.1f}", f"탐지 {b1:.1f}", f"탐지 {b2:.1f}", "실행 0.00"]
     for i, (v, n) in enumerate(zip(vals, notes)):
         ax.text(i, v + 0.02, n, ha="center", va="bottom",
                 fontproperties=KFONT, fontsize=12, fontweight="bold")
-    ax.set_xticks(list(xs))
-    ax.set_xticklabels(labels, fontproperties=KFONT, fontsize=11)
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels, fontproperties=KFONT, fontsize=10.5)
     ax.set_ylabel("탐지 recall / 실행 성공률", fontproperties=KFONT, fontsize=12)
-    ax.set_ylim(0, 1.15)
-    ax.set_title("같은 페이로드도 채널이 바뀌면 탐지가 무너진다 (Kanana, n=10) — 강제는 게이트로",
-                 fontproperties=KFONT, fontsize=13, fontweight="bold", pad=12)
-    ax.annotate("같은 페이로드,\n채널만 발화→도구\n= recall 1.0 → 0.0",
-                xy=(0.72, 0.02), xytext=(0.42, 0.55), fontproperties=KFONT, fontsize=10.5,
-                color=C_THEATER, arrowprops=dict(arrowstyle="->", color=C_THEATER))
+    ax.set_ylim(0, 1.42)
+    ax.set_title("같은 모델·같은 페이로드 — 배선만 바뀌어도 탐지가 무너진다 (Kanana, n=10)",
+                 fontproperties=KFONT, fontsize=13.5, fontweight="bold", pad=12)
+    ax.annotate("배선 하나 차이로 1.0 → 0.0", xy=(1, 0.06), xytext=(0.28, 0.62),
+                fontproperties=KFONT, fontsize=10.5, color=C_LEAK, fontweight="bold",
+                arrowprops=dict(arrowstyle="->", color=C_LEAK))
+    # ★우리 런타임이 어느 조건인지 그림 안에 밝힌다★ — 빼면 유리한 것만 고른 게 된다.
+    ax.annotate("★우리 런타임은 ③★\n(after_tool 이 문자열 직접 채점)",
+                xy=(2, 1.06), xytext=(2.0, 1.38), fontproperties=KFONT, fontsize=10.5,
+                color="#1b5e20", fontweight="bold", ha="center", va="top",
+                arrowprops=dict(arrowstyle="->", color="#1b5e20"))
+    ax.annotate("게이트는 배선과\n무관하게 불변", xy=(3, 0.03), xytext=(3, 0.30),
+                fontproperties=KFONT, fontsize=10.5, color=C_GENUINE, fontweight="bold",
+                ha="center", arrowprops=dict(arrowstyle="->", color=C_GENUINE))
     ax.grid(axis="y", ls=":", alpha=0.5, zorder=0)
     _kf(ax)
     fig.tight_layout()
