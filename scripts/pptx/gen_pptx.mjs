@@ -59,7 +59,7 @@ function loadAblation() {
   for (const line of rows.slice(1)) {
     const c = line.split(",");
     const r = Object.fromEntries(head.map((h, i) => [h, c[i]]));
-    if (r.condition === "all") out[r.arm] = Number(r.asr_executed);
+    if (r.condition === "all") out[r.arm] = { tasr: Number(r.asr_executed), bpr: r.bpr, ob: r.over_block };
   }
   return out;
 }
@@ -82,6 +82,7 @@ const GAP = readJSON("channel_gap.json");
 const DLP = readJSON("dlp_leak.json");
 
 const f2 = (x) => Number(x).toFixed(2);
+const tasr = (a) => f2(ABL[a].tasr);
 /** 유출률 — 0 은 자릿수를 맞춰 0.00, 그 외는 원래 정밀도 유지(0.125 를 0.13 으로 반올림하지 않는다). */
 const rate = (x) => (Number(x) === 0 ? "0.00" : String(Number(x)));
 /** p 값 라벨 — 유의하면 유효숫자 1자리, 아니면 n.s.(p=…) 로 기준을 명시. */
@@ -263,14 +264,15 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "섞여 있습니다. 모델이 어디서 도는가(위치)와, 그 판정으로 무엇을 하는가(역할)입니다.\n\n" +
     "제 주장은 위치는 무관하다는 것입니다. 온디바이스든 API든 상관없습니다. 쟁점은 역할입니다 — " +
     "분류기가 '탐지'만 하는지, '강제'까지 하는지.\n\n" +
-    "사전등록한 가설은 이렇습니다. 분류기가 신뢰 경계가 되는 순간 그건 theater다. 왜냐하면 " +
+    "사전에 문서로 명시한 가설은 이렇습니다. 분류기가 신뢰 경계가 되는 순간 그건 theater다. 왜냐하면 " +
     "분류기는 문자열을 읽고 판단하는데, 문자열은 공격자가 자유롭게 바꿀 수 있기 때문입니다.\n\n" +
     "그래서 이 발표는 '우리 분류기가 더 좋다'가 아니라 '분류기는 이 자리에 쓰면 안 된다'는 " +
     "불가능성 논증입니다.\n\n[50초]");
   bullets(s, [
     { t: [{ text: "통념: ", bold: true }, { text: "가드레일 = 온디바이스 안전 분류기(ShieldGemma·Kanana)가 " }, { text: "차단", bold: true, color: RED }] },
     { t: [{ text: "축 분리: ", bold: true }, { text: "위치(API vs 온디바이스)는 무관 — " }, { text: "역할(탐지 vs 강제)이 쟁점", bold: true, color: GREEN_D }] },
-    { t: [{ text: "가설(사전등록): ", bold: true }, { text: "분류기가 신뢰 경계가 되면 theater · " }, { text: "결정적 게이트만 견고", bold: true, color: GREEN_D }] },
+    { t: [{ text: "가설(사전 명시): ", bold: true }, { text: "분류기가 신뢰 경계가 되면 theater · " }, { text: "결정적 게이트만 견고", bold: true, color: GREEN_D }],
+      sub: "가설·분석 프로토콜을 결과와 분리해 문서화(report/PREREGISTRATION.md). 외부 타임스탬프가 없어 형식적 preregistration 으로는 주장하지 않는다." },
   ], { y: 1.35, h: 2.3 });
   s.addShape(pptx.ShapeType.roundRect, {
     x: M, y: 3.95, w: CW, h: 1.55, fill: { color: BG_GREY }, rectRadius: 0.06,
@@ -345,16 +347,22 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "유의 임계에 못 미칩니다. 시나리오를 12개로 늘린 post-hoc v0.2에서는 p=0.031이지만 " +
     "다중비교 보정하면 역시 미유의입니다.\n\n" +
     "그래서 제가 방어할 수 있는 주장은 '통계적으로 유의하게 증명했다'가 아니라 " +
-    "'구조적으로 모든 성공 케이스를 차단했고 방향이 일관된다'입니다.\n\n[90초]");
+    "'구조적으로 모든 성공 케이스를 차단했고 방향이 일관된다'입니다.\n\n" +
+    "★예상 질문 — '그럼 정상 업무도 막는 것 아니냐'★\n" +
+    "표에 BPR(정상 완수율)과 과차단을 같이 넣어뒀습니다. Tier A 에서 정상 과제 2건 중 1건이 " +
+    "미완료로 잡히는데, 그건 차단이 아니라 그 과제가 환불이라 requires_hitl 로 승인 대기에 " +
+    "들어간 것입니다. 평가 하네스에는 승인자가 없어서 자동완료가 안 될 뿐이고, 실제 서비스에서는 " +
+    "approver 가 승인하면 완료됩니다. 이메일·조회 계열 정상 과제는 Tier A 에서도 그대로 완주합니다. " +
+    "다만 v0.1 정상셋이 2건뿐이라 유틸리티 판별력 자체가 얇다는 건 인정합니다.\n\n[90초]");
   s.addTable([
     [{ text: "arm", options: TH }, { text: "t-ASR", options: TH }, { text: "McNemar p (vs 무방어)", options: TH }, { text: "판정", options: TH }],
-    [td("무방어 (기준선)"), td(f2(ABL.none), { align: "center" }), td("—", { align: "center" }), td("기준선", { color: GREY })],
-    [td("+plea (프롬프트 애원)"), td(f2(ABL.plea), { align: "center" }), td(pLabel("plea"), { align: "center" }), td("theater", { color: GREY })],
-    [td("+spotlight (데이터마킹)"), td(f2(ABL.spotlight), { align: "center" }), td(pLabel("spotlight"), { align: "center" }), td("theater ↑", { color: RED })],
-    [td("+분류기 강제"), td(f2(ABL.classifier_gate), { align: "center" }), td(pLabel("classifier_gate"), { align: "center" }), td("theater", { color: GREY })],
+    [td("무방어 (기준선)"), td(tasr("none"), { align: "center" }), td("—", { align: "center" }), td("기준선", { color: GREY })],
+    [td("+plea (프롬프트 애원)"), td(tasr("plea"), { align: "center" }), td(pLabel("plea"), { align: "center" }), td("theater", { color: GREY })],
+    [td("+spotlight (데이터마킹)"), td(tasr("spotlight"), { align: "center" }), td(pLabel("spotlight"), { align: "center" }), td("theater ↑", { color: RED })],
+    [td("+분류기 강제"), td(tasr("classifier_gate"), { align: "center" }), td(pLabel("classifier_gate"), { align: "center" }), td("theater", { color: GREY })],
     [
       td("+결정적 게이트 (Tier A)", { bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
-      td(f2(ABL.tier_a), { align: "center", bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
+      td(tasr("tier_a"), { align: "center", bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
       td(pLabel("tier_a"), { align: "center", bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
       td("genuine", { bold: true, color: GREEN_D, fill: { color: BG_GREEN } }),
     ],
@@ -369,9 +377,14 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "→ 따라서 '보정 후에도 통계적으로 유의하다'고 주장하지 않는다. 방어 가능한 주장은 아래 한 줄이다.", { y: 4.45 });
   banner(s, "구조적 차단 — 무방어가 성공한 모든 케이스를 게이트가 막았고 방향이 일관된다",
     { y: 5.25, fill: GREEN, size: 16, h: 0.55 });
-  s.addText("분류기 arm은 한국어를 0.022로 채점하는 영어학습 CPU 레일(교차언어 눈멂) · spotlight는 before_model 지시문만 주입한 부분 구현", {
-    x: M, y: 5.92, w: CW, h: 0.4, fontFace: FONT, fontSize: 11, color: GREY,
-  });
+  s.addText([
+    { text: "정상 업무 비용: ", options: { bold: true, color: NAVY } },
+    { text: "비-환불 정상 과제는 Tier A 에서도 완주. 환불 benign 은 ", options: {} },
+    { text: "requires_hitl", options: { fontFace: MONO, fontSize: 10.5 } },
+    { text: " 이라 승인자 없는 평가 하네스에서 미완료된 것 — 차단이 아니라 설계된 사람 확인(v0.1 정상셋 2건이라 BPR 판별력은 얇다).",
+      options: { breakLine: true } },
+    { text: "분류기 arm은 한국어를 0.022로 채점하는 영어학습 CPU 레일(교차언어 눈멂) · spotlight는 before_model 지시문만 주입한 부분 구현", options: {} },
+  ], { x: M, y: 5.86, w: CW, h: 0.7, fontFace: FONT, fontSize: 11, color: GREY, valign: "top" });
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -387,7 +400,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "즉 분류기가 그 텍스트를 '보지 못합니다'. 성능 문제가 아니라 구조 문제라는 게 핵심입니다.\n\n" +
     "반대로 게이트는 원본이든 난독화든 t-ASR이 0.00으로 같습니다. 공격 문장의 의미를 판정 근거로 " +
     "쓰지 않기 때문입니다.\n\n" +
-    "정직하게 정정할 것도 있습니다. 사전등록 때 난독화하면 Kanana가 0.25 이상 무너질 거라고 " +
+    "정직하게 정정할 것도 있습니다. 사전에 명시한 예측 중 하나가, 난독화하면 Kanana가 0.25 이상 무너질 거라고 " +
     "예측했는데 실제로는 0.1이었습니다. 예측이 틀렸고 그대로 보고합니다. " +
     "논지를 지탱하는 건 그 예측이 아니라 채널 맹점 쪽입니다.\n\n[75초]");
   s.addImage({ path: R("report", "figs", "fig_channel_gap.png"), x: M, y: 1.25, w: 6.6, h: 3.77 });
@@ -410,7 +423,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
       sub: "자모분해·초성·유니코드태그·이모지 스머글링·간격 = 학습에 안 쓴 계열",
     },
   ], { x: 7.4, y: 1.35, w: 5.3, h: 3.6, fontSize: 15 });
-  warn(s, `정직 정정: 사전등록 P1b(난독화 붕괴 ≥0.25)는 반증됨(실측 ${GAP.p1b_worst_collapse}). 논지는 채널 맹점(P1a=${GAP.p1a_gap_a_minus_b1.toFixed(1)})이 지탱한다.`,
+  warn(s, `정직 정정: 사전 명시한 예측 P1b(난독화 붕괴 ≥0.25)는 반증됨(실측 ${GAP.p1b_worst_collapse}). 논지는 채널 맹점(P1a=${GAP.p1a_gap_a_minus_b1.toFixed(1)})이 지탱한다.`,
     { y: 5.35, size: 13 });
 }
 
@@ -566,7 +579,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
 {
   const s = newSlide("한계 & 결론 (정직성)",
     "마무리하겠습니다. 한계부터 말씀드리는 게 맞다고 생각합니다.\n\n" +
-    "첫째, 사전등록한 예측 하나가 반증됐습니다. 난독화하면 Kanana가 크게 무너질 거라 했는데 " +
+    "첫째, 사전에 명시한 예측 하나가 반증됐습니다. 난독화하면 Kanana가 크게 무너질 거라 했는데 " +
     "아니었습니다. 숨기지 않고 그대로 보고합니다.\n\n" +
     "둘째, 분류기 강제 arm은 한국어를 거의 못 보는 영어 CPU 레일로만 측정했습니다. " +
     "한국어가 되는 분류기로 강제했을 때는 미측정입니다.\n\n" +
@@ -577,7 +590,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "결론은 한 문장입니다. 강제는 분류기가 아니라 결정적 게이트에 두어야 하고, " +
     "분류기는 어디서 뚫리는지를 재는 계측기로 쓰는 게 맞습니다.\n\n감사합니다.\n\n[60초]");
   bullets(s, [
-    { t: [{ text: "사전등록 예측 P1b 미달", bold: true, color: RED }, { text: " — 난독화 붕괴 ≥0.25 예측이 반증(0.1). 그대로 보고." }] },
+    { t: [{ text: "사전 명시 예측 P1b 미달", bold: true, color: RED }, { text: " — 난독화 붕괴 ≥0.25 예측이 반증(0.1). 그대로 보고." }] },
     { t: [{ text: "classifier_gate arm은 교차언어로 눈먼 영어 CPU 레일로만 측정" }] },
     { t: [{ text: "Tier B taint 세탁 → Tier C 필요(설계 명세만 제출) · 단일 모델 gpt-4o-mini · 소규모 코퍼스" }] },
     {
@@ -605,14 +618,17 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "discordant가 4:0으로 방향은 완전히 일관됩니다.");
   const arms = ["none", "plea", "spotlight", "classifier_gate", "tier_a", "tier_a_b", "cg_plus_tier_a"];
   s.addTable([
-    [{ text: "arm", options: TH }, { text: "t-ASR (all, n=60)", options: TH }, { text: "p vs 무방어", options: TH }],
+    [{ text: "arm", options: TH }, { text: "t-ASR", options: TH }, { text: "p vs 무방어", options: TH },
+     { text: "BPR", options: TH }, { text: "과차단", options: TH }],
     ...arms.map((a) => [
       td(a, { bold: a.includes("tier_a") }),
-      td(f2(ABL[a]), { align: "center", bold: a.includes("tier_a"), color: ABL[a] === 0 ? GREEN_D : INK }),
+      td(tasr(a), { align: "center", bold: a.includes("tier_a"), color: ABL[a].tasr === 0 ? GREEN_D : INK }),
       td(a === "none" ? "—" : pLabel(a), { align: "center" }),
+      td(ABL[a].bpr, { align: "center" }),
+      td(ABL[a].ob, { align: "center" }),
     ]),
   ], {
-    x: M, y: 1.3, w: 6.0, colW: [2.6, 1.9, 1.5], rowH: 0.4,
+    x: M, y: 1.3, w: 6.6, colW: [2.0, 1.0, 1.5, 1.0, 1.1], rowH: 0.4,
     fontFace: FONT, border: { type: "solid", color: LINE, pt: 1 }, valign: "middle",
   });
   s.addTable([
@@ -624,7 +640,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
       td(CLUST[a].p, { align: "center", bold: a.includes("tier_a") }),
     ]),
   ], {
-    x: 6.9, y: 1.3, w: 5.8, colW: [2.1, 1.3, 1.3, 1.1], rowH: 0.4,
+    x: 7.45, y: 1.3, w: 5.25, colW: [1.85, 1.2, 1.2, 1.0], rowH: 0.4,
     fontFace: FONT, border: { type: "solid", color: LINE, pt: 1 }, valign: "middle",
   });
   s.addText("군집 = 시나리오 × 스타일(10개). 같은 기본공격의 난독화 6변형을 1표로 접어 상관을 제거한 보수적 분석.", {
