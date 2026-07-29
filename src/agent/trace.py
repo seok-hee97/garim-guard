@@ -38,6 +38,11 @@ class HopTrace:
 
     rail_scores: dict[str, float] = field(default_factory=dict)   # LOG-ONLY
     dlp_spans: list[dict[str, Any]] = field(default_factory=list)
+    # 데모/디버그 관측용. raw 는 실행 중 메모리에만 존재하고 디스크에는 절대 쓰지 않는다.
+    # preview 는 after_tool(DLP/taint 처리 뒤) 모델에 전달된 값이며, 직렬화 시 한 번 더
+    # 안전 마스킹한다. 보안 판정이나 평가 집계에는 사용하지 않는다.
+    tool_result_raw: Any = field(default=None, repr=False)
+    tool_result_preview: Any = None
     latency_ms: int = 0
     note: str = ""
 
@@ -95,6 +100,8 @@ class EpisodeTrace:
         #   DLP 계측(eval/dlp_eval)은 in-memory ep 객체에서만 읽으므로 직렬화 불필요.
         for h in d.get("hops", []):
             h.pop("effective_args", None)
+            h.pop("tool_result_raw", None)
+            h["tool_result_preview"] = _mask_preview(h.get("tool_result_preview"))
         return d
 
 
@@ -121,3 +128,28 @@ class TraceWriter:
                 except (json.JSONDecodeError, KeyError):
                     pass
         return ids
+
+
+def _mask_preview(value: Any) -> Any:
+    """트레이스에 추가되는 도구 결과 미리보기의 원본 PII 를 방어적으로 마스킹한다.
+
+    기존 채점 필드(user_input/tool_args)는 frozen 평가 호환성 때문에 건드리지 않는다.
+    새 미리보기 필드는 UI 관측용이므로 원본을 저장할 이유가 없다. DLP 토큰
+    (`<KR_RRN_1>`)은 인식기 정규식에 걸리지 않아 그대로 남고, 무방어 arm 의 원본값만
+    `<KR_RRN_MASKED>` 형태가 된다.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        from ..dlp.recognizers_ko import KO_RECOGNIZERS
+        out = value
+        for entity, pattern in KO_RECOGNIZERS:
+            out = pattern.sub(f"<{entity}_MASKED>", out)
+        return out
+    if isinstance(value, dict):
+        return {str(k): _mask_preview(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_mask_preview(v) for v in value]
+    if isinstance(value, (int, float, bool)):
+        return value
+    return str(value)

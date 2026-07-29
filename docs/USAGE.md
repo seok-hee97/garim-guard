@@ -33,7 +33,7 @@ cp .env.example .env                                   # GEMINI/GOOGLE_API_KEY �
 python -c "import src.config, src.providers.base, src.agent, src.dlp, src.rails"   # import 스모크
 python -m scripts.run_demo                              # ★핵심★ 무방어=유출 vs 게이트=차단 3-arm 대비
 python -m app.trace_view --out /tmp/trace_view.html     # 실행 과정 타임라인 HTML(기본 출력은 tracked라 --out 권장)
-python -m pytest --ignore=tests/test_dlp_defenses.py -q # CI-core 119 passed (presidio·키 불요)
+python -m pytest --ignore=tests/test_dlp_defenses.py -q # CI-core 123 passed (presidio·키 불요)
 ```
 
 `scripts.run_demo` 출력(실측):
@@ -69,7 +69,26 @@ python -m scripts.check_env                              # Gemini 도구호출 1
 python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider openai   # 모델이 실제로 오염문서를 따르는지
 ```
 
-### 3-3. HTTP 서비스 (FastAPI/uvicorn · 6 엔드포인트)
+### 3-3. 전체 Agent Workflow 브라우저 UI
+
+```bash
+./.venv/bin/python -m uvicorn app.ui:app --host 127.0.0.1 --port 8501
+# http://127.0.0.1:8501
+```
+
+Scripted 키 불요 실행과 Gemini/OpenAI live 실행을 구분하며, 턴별 모델 입력·도구 호출,
+도구 원본 결과(합성 scripted만), DLP 처리 후 모델 전달값, 레일 점수, 게이트 규칙,
+실행 여부와 백엔드 감사 상태를 렌더한다. `3개 Arm 비교`는 비용·비결정성을 피하기 위해
+항상 scripted 재생으로 수행한다.
+
+CLI에서 같은 내용을 보려면:
+
+```bash
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb \
+  --defenses tier_a,dlp_vault --provider scripted --verbose
+```
+
+### 3-4. HTTP 서비스 (FastAPI/uvicorn · 6 엔드포인트)
 ```bash
 APP_ENV=test PYTHONPATH=. python -m pytest tests/test_server.py tests/test_service_integration.py -q  # 21 passed(FakeProvider·키 불요)
 APP_ENV=dev  PYTHONPATH=. uvicorn src.agent.server:app --port 8000                                    # 기동
@@ -178,7 +197,7 @@ python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → P
 | 명령 | 전제 | 검증 |
 |---|---|---|
 | `run_demo` · `cli --provider scripted` · `app.trace_view` | 없음 | 실행확인 |
-| `pytest` (전체 125 / CI-core 119) | presidio(전체) / 없음(CI-core) | 실행확인 |
+| `pytest` (전체 129 / CI-core 123) | presidio(전체) / 없음(CI-core) | 실행확인 |
 | `eval.ablation` · `check_contamination` · `expansion_v2 --report-only` | 없음(기존 runs.jsonl) | 실행확인 |
 | `gen_slide_figs` · `gen_arch_stack` · `gen_model_arch` · `gen_trace_shot` | matplotlib(figs) / graphviz(flow) / Chrome(stack·shot) | 실행확인 |
 | `uvicorn ... server` + `GET /healthz` | 없음 | 실행확인 |

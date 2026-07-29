@@ -608,8 +608,9 @@ python eval/kanana_compare.py                      # 채널 조건부 3-arm(a/b1
 python eval/presidio_defects.py                    # 결함 1·2 → 그림 1
 python eval/detector_eval.py                       # 홀드아웃 계열 붕괴폭
 
-# 5. 데모
-streamlit run app/ui.py
+# 5. 전체 Agent Workflow 데모 (FastAPI + 순수 HTML/JS, 별도 Node/Streamlit 불요)
+./.venv/bin/python -m uvicorn app.ui:app --host 127.0.0.1 --port 8501
+# → http://127.0.0.1:8501
 ```
 
 ---

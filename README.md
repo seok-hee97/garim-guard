@@ -12,7 +12,7 @@
 
 도구를 호출하는 한국어 AI 에이전트(ReAct 루프 + 5개 도구)를 `before_model / after_model / before_tool / after_tool` **4개 seam**으로 감싼 안전 런타임이다. 두 가지를 **측정으로 증명**하고, 그 논지를 **실제 구동 가능한 HTTP 서비스**로 구현했다.
 
-- **① 채널 조건부 탐지 격차** — 같은 인젝션을 (a) 사용자 발화 vs (b) 도구 반환값으로 주면, 한국어 가드 모델은 (a)에서 동작하고 (b)에서 실패한다. 성능이 아니라 **단일 발화 채점 모델이 도구 경계 너머를 못 본다는 설계 귀결**. (Kanana 실측: 발화 recall 1.0 → 도구 채널 0.0)
+- **① 채널 조건부 탐지 격차** — 같은 인젝션을 (a) 사용자 발화로 직접 채점하면 recall 1.0, (b1) `tool` 턴이 포함된 native 대화 템플릿으로 채점하면 0.0, (b2) 도구 반환 문자열을 `after_tool`에서 직접 채점하면 다시 1.0이었다(Kanana, n=10). 즉 **모델 자체보다 어댑터 배선에 따라 탐지 성패가 달라진다.** 실제 런타임은 (b2) 배선이다.
 - **② 강제는 분류기가 아니라 게이트에** — 난독화(base64)로 CPU 레일은 F1 0.99→0.0 붕괴하지만, **결정적 정책 게이트(Tier A)의 t-ASR은 불변**이다. 게이트는 **공격 텍스트의 의미를 분류하지 않는다** — 도구 identity·구조화 인자·정책 테이블로만 판정하기 때문.
 
 > **결론:** **분류기 단독으로는 이 채널에서 하드 보장을 제공할 수 없으므로**(온디바이스든 아니든) log-only 텔레메트리로 두고, **강제의 최종 권한은 도구별 결정적 게이트**가 가진다. 여기에 요청 스코프 가역 PII 볼트를 결합한다. *(단 강한 한국어 모델 Kanana는 올바른 문자열 채널에서 recall 1.0·난독화에도 ≥0.9 — "분류기 전부 무효"로 일반화하지 않는다. 분류기 강제 실험은 한국어를 못 보는 영어 CPU 레일만 측정됨.)*
@@ -26,7 +26,7 @@
 | | 연구/평가 하네스 | 실행 서비스 (HTTP) |
 |---|---|---|
 | 목적 | 논지를 애블레이션으로 측정 | 논지를 실제 에이전트로 구동 |
-| 진입점 | `python -m eval.run` · `src.agent.cli` | `uvicorn src.agent.server:app` |
+| 진입점 | `./.venv/bin/python -m eval.run` · `./.venv/bin/python -m src.agent.cli` | `./.venv/bin/python -m uvicorn src.agent.server:app` |
 | 세계 | mock `ToolWorld`(부작용 없음, 결정적) | `ServiceWorld`(환불 원장·이메일 outbox·idempotency) |
 | 방어 | 애블레이션 축(none/tier_a/…) | 고정 `tier_a+dlp_vault+strict_schema` + authz |
 | 인가 | 없음(중립 baseline) | `X-API-Key`→principal, HITL 승인 큐 |
@@ -74,26 +74,65 @@ python -m scripts.fetch_rail                    # HF cycloevan/safeagent-kr → 
 #   (없이 실행하려면 명시적으로 --rail heuristic — 결과 actual_rail 에 heuristic 으로 기록됨)
 ```
 
-> 요구: Python 3.11+. 키 없이도 **`pytest`는 전부 동작**한다(FakeProvider). CLI·HTTP 서비스는 실 LLM 호출이므로 `GEMINI_API_KEY`/`OPENAI_API_KEY`가 필요하다.
+> 요구: Python 3.11+. 키 없이도 **전체 테스트, 브라우저 UI의 scripted 모드, `run_demo`, CLI의 scripted 모드**는 동작한다. Gemini/OpenAI live 모드와 기본 HTTP 서비스는 해당 API 키가 필요하다.
 
 ---
 
 ## 5. 실행 방법
 
+### 5-0. 전체 Agent Workflow 브라우저 프로그램
+
+입력부터 모델 턴, 도구 원본 결과(합성 scripted 한정), DLP 처리 후 모델 전달값,
+LOG-ONLY 레일 점수, `before_tool` 게이트 판정, 실행/차단, 최종 답변과 서비스
+백엔드 감사 상태를 한 화면에서 확인한다.
+
+```bash
+./.venv/bin/python -m uvicorn app.ui:app --host 127.0.0.1 --port 8501
+# 브라우저: http://127.0.0.1:8501
+# 녹화용 자동 실행: http://127.0.0.1:8501/?autorun=1
+```
+
+실행한 터미널을 유지한 상태에서 브라우저로 접속한다. 정상 종료는 서버 터미널에서
+`Ctrl+C`를 한 번 누른다.
+
+```bash
+# 포트가 이미 사용 중이거나 서버 터미널을 잃어버린 경우 PID 확인
+lsof -nP -iTCP:8501 -sTCP:LISTEN
+
+# 위 명령에서 확인한 PID만 정상 종료 요청
+kill <PID>
+
+# 종료 확인 — 출력이 없으면 종료 완료
+lsof -nP -iTCP:8501 -sTCP:LISTEN
+```
+
+`kill -9`는 정상 종료가 반복해서 실패할 때만 마지막 수단으로 사용한다. 프로젝트의
+`./.venv/bin/uvicorn` 실행 파일은 다른 경로에서 만들어진 오래된 shebang일 수 있으므로,
+문서처럼 반드시 `./.venv/bin/python -m uvicorn ...` 형태로 실행한다.
+
+- `scripted`: API 키 없이 고정된 도구 호출을 실제 런타임에 재생한다. **모델 추론 증거가 아니다.**
+- `gemini` / `openai`: `.env` 키를 사용해 실제 모델의 도구 선택을 관측한다.
+- `3개 Arm 비교`: 같은 scripted 호출을 `none / tier_a / tier_a+dlp_vault`에 재생한다.
+- 학습 레일이 `heuristic`으로 폴백하면 화면에 경고한다. 발표 실행은 프로젝트
+  `./.venv/bin/python`을 사용한다.
+
 ### 5-1. 핵심 증명 — money smoke
 
 **★키 불요 데모(권장)★** — 같은 공격을 arm 3종에 결정적 재생 + 실행 과정 타임라인:
 ```bash
-python -m scripts.run_demo          # none=🔴유출 / tier_a=🛑차단 / tier_a+dlp_vault=🛑차단(body)
-python -m app.trace_view            # → report/trace_view.html (seam 흐름·차단지점)
+./.venv/bin/python -m scripts.run_demo          # none=🔴유출 / tier_a=🛑차단 / tier_a+dlp_vault=🛑차단(body)
+./.venv/bin/python -m app.trace_view            # → report/trace_view.html (seam 흐름·차단지점)
+./.venv/bin/python -m scripts.run_demo --verbose  # 턴별 모델입력·도구결과·DLP·레일·게이트 전체 출력
 ```
 
 **CLI 단건**(scripted=키 불요 재생 · openai/gemini=라이브 유도):
 ```bash
-python -m src.agent.cli --scenario poisoned_kb --defenses none  --provider scripted  # 🔴 유출
-python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider scripted  # 🛑 차단
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb --defenses none  --provider scripted  # 🔴 유출
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider scripted  # 🛑 차단
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb --defenses tier_a,dlp_vault \
+  --provider scripted --verbose  # 전체 Agent Workflow
 #   기대(tier_a): gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
-python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider openai     # 실 모델 유도
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider openai     # 실 모델 유도
 ```
 
 > 키 없이 **assert 로 고정**된 증명: `pytest tests/test_gate.py -k money_smoke` · `pytest tests/test_demo.py`
@@ -102,8 +141,12 @@ python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider open
 ### 5-2. 실제 구동 서비스 (HTTP 런타임)
 
 ```bash
-uvicorn src.agent.server:app --port 8000
+./.venv/bin/python -m uvicorn src.agent.server:app --host 127.0.0.1 --port 8000
 ```
+
+정상 종료는 서버 터미널에서 `Ctrl+C`를 한 번 누른다. 서버 터미널을 잃어버렸다면
+`lsof -nP -iTCP:8000 -sTCP:LISTEN`으로 PID를 확인한 뒤 `kill <PID>`로 종료한다.
+종료 확인은 같은 `lsof` 명령을 다시 실행해 출력이 없는지 확인한다.
 
 | 엔드포인트 | 설명 |
 |---|---|
@@ -149,10 +192,10 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 125 통과 (.venv, pytest-asyncio+presidio)
-python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
-python -m eval.ablation             # → results/ablation.csv · mcnemar_vs_none.json (McNemar p, Wilson CI)
-python -m eval.kanana_compare       # 채널 조건부 격차 2×2 (GPU)
+./.venv/bin/python -m pytest -q                         # 129 통과
+./.venv/bin/python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
+./.venv/bin/python -m eval.ablation                    # → results/ablation.csv · mcnemar_vs_none.json
+./.venv/bin/python -m eval.kanana_compare              # 채널 조건부 격차 2×2 (GPU)
 open report/trace_view.html         # 정적 트레이스 뷰어
 ```
 
@@ -177,7 +220,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **HITL 승인 큐** | 비가역 도구는 `hitl_pending` → 사람 승인 후 실행. **트랜잭션적**(백엔드 실패 시 재시도) | [hitl.py](src/agent/hitl.py) |
 | **상태 백엔드 + idempotency** | 환불 원장·이메일 outbox·이중실행 방지 | [backend.py](src/agent/backend.py) |
 | **authN/authZ** | `X-API-Key`→principal, 수신자/계좌는 등록 고객값이어야(미등록 주소 차단). `customer_id` 바인딩 시 **한 고객으로 스코프 한정 → 타-고객 confused-deputy 구조적 차단** | [authz.py](src/agent/authz.py) |
-| **DLP 볼트** | 요청 스코프 가역 토큰화(5종), 최종 응답만 복원, egress는 토큰 유지 | [dlp/vault.py](src/dlp/vault.py) |
+| **DLP 볼트** | 요청 스코프 가역 토큰화(5종), 모델·비인가 콘텐츠 필드에는 토큰만 노출. 승인된 라우팅 인자(`to`/`account`)는 실행 경계에서 복원 | [dlp/vault.py](src/dlp/vault.py) |
 | **provider 복원력** | async 네이티브 + tenacity 재시도(429/5xx) + 벽시계 타임아웃 | [_resilience.py](src/providers/_resilience.py) |
 | **fail-closed 4 seam · 구조적 로깅(PII 미로깅) · deadline 예산** | | [loop.py](src/agent/loop.py)·[log.py](src/agent/log.py) |
 | **실행 모니터링** | in-process 메트릭(카운터/히스토그램/게이지·PII 없음) + `GET /v1/metrics` 라이브 스냅샷 + 요청 로깅 미들웨어(X-Request-ID) + `scripts.monitor` 터미널 대시보드 + eval 진행 heartbeat. 사용법 [docs/USAGE.md §3-4b](docs/USAGE.md) | [metrics.py](src/agent/metrics.py)·[monitor.py](scripts/monitor.py) |
@@ -194,7 +237,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
 | **실행 모니터링** (메트릭·`/v1/metrics`·`scripts.monitor`·`leaks_total`·heartbeat) | ✅ 구현·테스트 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **125 통과** (.venv; CI-core 119, presidio 6) |
+| 유닛/통합 테스트 | ✅ **129 통과** (.venv; CI-core 123, presidio 6) |
 | 발표 자산 | ✅ **단일 소스** — [gen_pptx.mjs](scripts/pptx/gen_pptx.mjs) 하나가 `발표자료.pptx`(편집 가능·정본) + `발표자료.md`(스크립트) 를 만들고, `발표자료.pdf` 는 [export_deck_pdf](scripts/export_deck_pdf.py)(Keynote)로 파생. 수기 캡처·수기 수치 없음 ([USAGE §3-6](docs/USAGE.md)) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, Prometheus 노출 형식 + Grafana 대시보드 + 외부 page 경보.

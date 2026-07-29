@@ -4,8 +4,8 @@
     python -m app.trace_view --traces results/demo_traces.jsonl --out /tmp/v.html
 
 두 종류를 한 페이지에 렌더한다:
- 1. ★에피소드 실행 과정 타임라인★ — hop 단위(도구호출 순서 · before_tool 게이트 결정·
-    차단규칙 · attempted/executed). demo_traces.jsonl(= `python -m scripts.run_demo`)이
+ 1. ★에피소드 실행 과정 타임라인★ — hop 단위(입력 · 도구호출 순서 · before_tool 게이트 결정·
+    차단규칙 · attempted/executed · after_tool 모델 전달값 · 레일 점수). demo_traces.jsonl이
     있으면, 무방어→유출 / 게이트→차단을 seam 흐름으로 나란히 보인다(발표/녹화용).
  2. 애블레이션 집계 — arm별 t-ASR 표 + 케이스별 차단/실행 스코어카드(runs.jsonl).
 
@@ -59,6 +59,10 @@ td,th{border:1px solid #30363d;padding:.3rem .6rem}
 .b-pass{background:#1a3a22;color:#7ee787} .b-block{background:#7a1620;color:#fff}
 .verdict{margin-top:.5rem;font-weight:600}
 .leak{color:#ff9b9b} .safe{color:#7ee787}
+.inputbox,.detail{font-family:ui-monospace,monospace;font-size:.76rem;color:#a9bed3;
+  background:#0a1320;border:1px solid #24364a;border-radius:6px;padding:.4rem .55rem;margin:.3rem 0;
+  overflow-wrap:anywhere}
+.detail{margin:.1rem 0 .45rem 2.9rem;border-left:3px solid #79c0ff}
 """
 
 
@@ -94,6 +98,9 @@ def _episode_timelines(traces: list[dict]) -> list[str]:
         parts.append(f"<div class='ephead'>{html.escape(str(ep.get('scenario','episode')))}"
                      f" · finish={html.escape(str(ep.get('finish_reason','')))}"
                      f" · {len(tool_hops)} hops</div>")
+        if ep.get("user_input"):
+            parts.append("<div class='inputbox'>INPUT → "
+                         + html.escape(str(ep.get("user_input"))) + "</div>")
         for h in tool_hops:
             passed = h.get("executed")
             cls = "pass" if passed else "block"
@@ -110,6 +117,18 @@ def _episode_timelines(traces: list[dict]) -> list[str]:
                 f"<span class='tool'>{html.escape(str(h.get('tool_name')))}</span>"
                 f"<span class='args'>({html.escape(_args_str(h.get('tool_args', {})))})</span>"
                 f"{badge}</div>")
+            detail = []
+            if h.get("tool_result_preview") is not None:
+                detail.append("after_tool→model: " + json.dumps(
+                    h.get("tool_result_preview"), ensure_ascii=False, default=str))
+            if h.get("rail_scores"):
+                detail.append("rail[LOG-ONLY]: " + json.dumps(
+                    h.get("rail_scores"), ensure_ascii=False, default=str))
+            if h.get("note"):
+                detail.append("note: " + str(h.get("note")))
+            if detail:
+                parts.append("<div class='detail'>" + "<br>".join(
+                    html.escape(x) for x in detail) + "</div>")
         # 유출 판정
         leaked = any(h.get("tool_name") == "send_email" and h.get("executed")
                      for h in tool_hops)

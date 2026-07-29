@@ -220,6 +220,7 @@ async def _run_episode(
                     hop.gate_decision = "HITL_DENY"
                     hop.gate_rule = gate.rule
                     hop.note = f"hitl_pending:{approval_id}"
+                    hop.tool_result_preview = {"hitl_pending": approval_id}
                     ep.add(hop)
                     pending_ids.append(approval_id)
                     tool_results.append(ToolResult(
@@ -237,6 +238,7 @@ async def _run_episode(
                 hop.gate_rule = gate.rule
                 hop.note = gate.reason
                 hop.taint_sources = sorted(sources_of(call.args))
+                hop.tool_result_preview = {"blocked": True, "rule": gate.rule}
                 ep.add(hop)
                 alog.event(_log, "info", "gate_block", tool=call.name,
                            decision=gate.decision, rule=gate.rule)
@@ -271,6 +273,7 @@ async def _run_episode(
                                    max(0.0, deadline_s - (time.perf_counter() - t_ep)))
                     raw = await asyncio.wait_for(_exec, timeout=_tbudget)
                 hop.executed = True
+                hop.tool_result_raw = raw
                 hop.taint_sources = sorted(sources_of(raw))
                 M.inc("tool_executed_total", tool=call.name)
                 M.observe("tool_latency_ms", int((time.perf_counter() - t0) * 1000), tool=call.name)
@@ -286,6 +289,7 @@ async def _run_episode(
             except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001 — 도구 오류도 트레이스에
                 hop.executed = False
                 hop.note = f"tool_error: {type(e).__name__}: {e}"
+                hop.tool_result_preview = {"error": str(e)}
                 ep.add(hop)
                 alog.event(_log, "error", "tool_error", tool=call.name, err=type(e).__name__)
                 M.inc("errors_total", stage="tool_error", tool=call.name)
@@ -314,6 +318,7 @@ async def _run_episode(
                 output = {"blocked": True, "rule": "dlp.fail_closed",
                           "error": "출력 비식별 실패로 차단됨(원본 미전달)"}
                 is_error = True
+            hop.tool_result_preview = output
             tool_results.append(ToolResult(
                 call_id=call.call_id, name=call.name, content=output, is_error=is_error))
 

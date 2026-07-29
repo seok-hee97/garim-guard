@@ -8,8 +8,8 @@
 ## 0. 한 명령 데모 (권장 · 키 불요) — 무방어 vs 게이트 대비 + 트레이스
 
 ```bash
-python -m scripts.run_demo                 # poisoned_kb 를 arm 3종에 재생
-python -m app.trace_view                   # → report/trace_view.html (실행 과정 타임라인)
+./.venv/bin/python -m scripts.run_demo                 # poisoned_kb 를 arm 3종에 재생
+./.venv/bin/python -m app.trace_view                   # → report/trace_view.html (실행 과정 타임라인)
 open report/trace_view.html
 ```
 **보여줄 것:** 같은 공격 에피소드(lookup_customer → search_kb(오염문서) → send_email(공격자) → escalate)를
@@ -17,7 +17,31 @@ open report/trace_view.html
 - `tier_a` : 같은 send_email **🛑 차단(egress.email_domains)**, escalate 로 폴백
 - `tier_a+dlp_vault` : body 의 주민번호를 **🛑 차단(dlp.egress:body)** — 층 다변화
 
-> 내레이션: "같은 공격, 같은 모델 행동입니다. 게이트만 켜면 — 시도는 그대로 True인데 — 실행만 차단됩니다. 게이트는 공격 문장의 의미를 판정 근거로 쓰지 않고 수신자 도메인·PII 정책만 봅니다."
+> 내레이션: "같은 공격, 같은 scripted action입니다. 게이트만 켜면 — 시도는 그대로 True인데 — 실행만 차단됩니다. 게이트는 공격 문장의 의미를 판정 근거로 쓰지 않고 수신자 도메인·PII 정책만 봅니다."
+
+> 정확한 표현: scripted 는 **모델 행동을 관측한 것이 아니라 고정된 도구 호출을 재생한 것**이다.
+> 영상에서는 "같은 scripted action"이라고 말하고, 실제 모델 판단은 Gemini/OpenAI live 장면과
+> 구분한다.
+
+## 0-1. 전체 Agent Workflow 프로그램 (최종 영상 권장)
+
+```bash
+./.venv/bin/python -m uvicorn app.ui:app --host 127.0.0.1 --port 8501
+open http://127.0.0.1:8501
+# 바로 실행된 화면으로 녹화 시작: open 'http://127.0.0.1:8501/?autorun=1'
+```
+
+화면에서 다음 순서로 촬영한다.
+
+1. `normal / scripted / tier_a` — 정상 고객 조회가 차단 없이 완료됨.
+2. `poisoned_kb / scripted / none` — 오염 KB와 공격자 이메일 실행, outbox 1건.
+3. `poisoned_kb / scripted / tier_a` — 같은 호출이 `egress.email_domains`에서 차단.
+4. `poisoned_kb / scripted / tier_a+dlp_vault` — 고객 조회 원본과
+   `<KR_RRN_1>`, `<KR_PHONE_1>`, `<KR_ACCOUNT_1>`, `<EMAIL_1>` 변환을 함께 표시.
+5. `3개 Arm 비교` — attempted는 유지되고 executed만 달라지는 결과를 한 화면에 정리.
+
+각 턴에는 `MODEL INPUT → MODEL/SCRIPTED ACTION → before_tool → TOOL →
+after_tool(DLP·rail) → 다음 MODEL INPUT`이 순서대로 표시된다.
 
 ---
 

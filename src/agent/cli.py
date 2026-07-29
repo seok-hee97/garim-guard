@@ -107,6 +107,8 @@ async def _main() -> int:
                     choices=["gemini", "openai", "fake", "scripted"],
                     help="gemini|openai|fake|scripted (기본: policy.active). scripted=키 불요 재생")
     ap.add_argument("--trace-out", default="", help="에피소드 트레이스를 JSONL 로 append(뷰어용)")
+    ap.add_argument("--verbose", action="store_true",
+                    help="입력→모델→게이트→도구→DLP/레일 전체 워크플로 출력")
     args = ap.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -120,13 +122,26 @@ async def _main() -> int:
 
     user_input, desc = SCENARIOS[args.scenario]
     prov_label = "scripted(결정적 재생·키 불요)" if args.provider == "scripted" else cfg.provider
-    print(f"[{args.scenario}] provider={prov_label} model={cfg.model} "
+    base_provider = (_build_provider("scripted", args.scenario) if args.provider == "scripted"
+                     else _build_provider(policy["provider"]["active"]))
+    recorder = None
+    provider = base_provider
+    if args.verbose:
+        from .workflow import WorkflowRecorderProvider
+        mode = "scripted" if args.provider == "scripted" else policy["provider"]["active"]
+        recorder = WorkflowRecorderProvider(base_provider, mode=mode, label=prov_label)
+        provider = recorder
+    rail = _build_rail()
+    rail_name = getattr(rail, "name", type(rail).__name__)
+    display_model = ("없음(고정 도구 호출 시퀀스)"
+                     if args.provider == "scripted" else cfg.model)
+    print(f"[{args.scenario}] provider={prov_label} model={display_model} rail={rail_name} "
           f"defenses={sorted(k for k,v in defenses.items() if v) or ['none']}")
+    if rail_name == "heuristic":
+        print("  ⚠️ ko_agentguard 로드 실패 → heuristic 폴백. 발표 실행은 ./.venv/bin/python 사용 권장.")
     print(f"  {desc}\n  입력: {user_input}\n")
 
-    provider = (_build_provider("scripted", args.scenario) if args.provider == "scripted"
-                else _build_provider(policy["provider"]["active"]))
-    hooks = DefenseHooks(policy, defenses, rail=_build_rail())
+    hooks = DefenseHooks(policy, defenses, rail=rail)
     ep = await run_episode(user_input, provider, cfg,
                            hooks=hooks, world=default_world(), defenses=defenses,
                            scenario=args.scenario)
@@ -142,6 +157,20 @@ async def _main() -> int:
         mark = "✅실행" if h.executed else f"🛑차단({h.gate_rule})"
         print(f"  {mark}  {h.tool_name}({_short(h.tool_args)})")
     print(f"\n최종: {ep.final_text[:200]}")
+
+    if recorder is not None:
+        from .workflow import format_workflow_text, workflow_document
+        document = workflow_document(
+            ep,
+            recorder,
+            rail_name=rail_name,
+            defenses=defenses,
+            provider_label=prov_label,
+            model=("없음 — 고정 도구 호출 시퀀스"
+                   if args.provider == "scripted" else cfg.model),
+            include_raw=(args.provider == "scripted"),
+        )
+        print(format_workflow_text(document))
 
     # money smoke 판정
     exfil_attempted = ep.any_attempted("send_email", to=ATTACKER_EMAIL)

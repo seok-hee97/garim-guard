@@ -22,6 +22,10 @@ _episode_id: contextvars.ContextVar[str] = contextvars.ContextVar("episode_id", 
 _request_id: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
 _LOGGER_NAME = "safeagent"
+# CLI/라이브러리 호출자가 configure()를 부르지 않은 경우 Python의 lastResort 핸들러가
+# ERROR 메시지 본문만("leak_detected") 터미널에 흘리는 것을 막는다. 서비스는 configure()
+# 호출 시 아래 NullHandler를 실제 JSON 핸들러로 교체한다.
+logging.getLogger(_LOGGER_NAME).addHandler(logging.NullHandler())
 
 
 def bind(episode_id: str | None = None, request_id: str | None = None) -> None:
@@ -53,7 +57,9 @@ class _JsonFormatter(logging.Formatter):
 def configure(level: str = "INFO") -> logging.Logger:
     """앱 기동 시 1회 호출. stdout JSON 핸들러를 붙인다(멱등)."""
     logger = logging.getLogger(_LOGGER_NAME)
-    if not logger.handlers:
+    real_handlers = [h for h in logger.handlers if not isinstance(h, logging.NullHandler)]
+    if not real_handlers:
+        logger.handlers = [h for h in logger.handlers if not isinstance(h, logging.NullHandler)]
         h = logging.StreamHandler(sys.stdout)
         h.setFormatter(_JsonFormatter())
         logger.addHandler(h)

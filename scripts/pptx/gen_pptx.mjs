@@ -137,7 +137,7 @@ const VIDEO = {
        11, "볼트를 켜면 매핑된 PII 기준 원본 노출이 0 퍼센트고, 비식별 실패 시에는 차단합니다."],
   12: [20, "학습·추론 파이프라인은 넷입니다. R6·R7 은 GPU 파인튜닝, e5 는 인코더를 동결하고 헤드만, Ko-AgentGuard 는 CPU 학습입니다. 중요한 건 e5 교차언어가 한국어에서 0.0 이라는 점입니다 — 인코더를 다국어로 바꿔도 이 문제는 안 풀립니다.",
        23, "파이프라인은 넷입니다. R6·R7 은 KLUE-RoBERTa GPU 파인튜닝, e5 는 헤드만, Ko-AgentGuard 는 CPU 학습입니다. 핵심은 e5 가 한국어에서 0.0 이라는 점입니다."],
-  13: [16, "남는 기여는 평가셋 KoTIP-Bench, Presidio 한국어 인식기 결함 2건, 그리고 125개 테스트와 계보 해시로 받친 재현성입니다.",
+  13: [16, "남는 기여는 평가셋 KoTIP-Bench, Presidio 한국어 인식기 결함 2건, 그리고 129개 테스트와 계보 해시로 받친 재현성입니다.",
        7, "기여는 평가셋, Presidio 결함 2건, 재현성입니다."],
   14: [20, "데모는 API 키 없이 재현됩니다. 같은 공격을 세 구성으로 재생하면 무방어에서만 유출이 실행됩니다. 유출 카운터가 무방어 1, 게이트 0 인 게 핵심 불변식입니다.",
        12, "데모는 키 없이 재현됩니다. 무방어에서만 유출이 실행되고 유출 카운터가 무방어 1 게이트 0 입니다."],
@@ -388,11 +388,13 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "2주 남짓 개인 프로젝트입니다.\n\n[22초]");
   bullets(s, [
     { t: [{ text: "배경: ", bold: true }, { text: "도구를 쓰는 한국어 에이전트의 " }, { text: "도구 채널", bold: true, color: RED }, { text: "을 평가·방어할 공개 수단을 조사 범위에서 확인하지 못했다" }],
-      sub: "해당 가이드에 재현 가능한 한국어 테스트 코퍼스가 제공되지 않으며, 조사 범위에서 한국어 도구채널 평가 벤치를 확인하지 못했다 · Kanana=단일 발화 전용 · Prompt Guard=한국어 미평가" },
+      // Kanana/Prompt Guard 근거는 ★S3 에서 그림과 함께★ 말한다 — 여기 또 적으면 같은 문장이
+      // 두 장에 그대로 반복된다(자료만 읽는 심사자에게 분량만 늘고 정보는 안 는다).
+      sub: "KISA·과기정통부 「AI 보안 레드티밍 가이드」(2026-07-07)는 인젝션·에이전트 하이재킹을 위협으로 지목하나 재현 가능한 한국어 테스트 코퍼스는 미제공" },
     { t: [{ text: "목표: ", bold: true }, { text: "① 4-seam 안전 런타임  ② KoTIP-Bench 평가셋  ③ 게이트 vs 분류기 애블레이션 실증  ④ PII 유출 억제" }] },
     { t: [{ text: "산출물: ", bold: true }, { text: "구동 HTTP 서비스 + 평가 하네스 + 공개 목표 데이터셋 + 7-arm 결과" }],
       sub: "적용 분야: 한국어 고객지원·업무비서 등 도구 사용 LLM 에이전트 (도메인 재스킨 가능)" },
-    { t: [{ text: "기간·규모: ", bold: true }, { text: "2026-07-13 ~ 07-31 · 개인(솔로) · Python 3.11 · 코드 8,800줄(테스트 1,800줄 별도) · 테스트 125" }] },
+    { t: [{ text: "기간·규모: ", bold: true }, { text: "2026-07-13 ~ 07-31 · 개인(솔로) · Python 3.11 · 코드 9,700줄(테스트 1,900줄 별도) · 테스트 129" }] },
   ], { y: 1.32, h: 3.6, fontSize: 16 });
   banner(s, "한 줄 논지 — 강제(enforcement)는 결정적 게이트가, 탐지(detection)는 분류기가. 둘을 섞으면 안전이 탐지 성능에 인질로 잡힌다",
     { y: 5.28, fill: NAVY, size: 15.5, h: 0.7 });
@@ -656,7 +658,11 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "안전을 걸 수는 없습니다. 게이트는 판정 근거가 도구 identity 와 정책이라 배선이 바뀌어도 " +
     "t-ASR 0.00 으로 불변입니다.\n\n" +
     "정직 정정도 하나 있습니다. 사전에 명시한 예측 P1b(난독화하면 크게 무너진다)는 실측 0.1 로 " +
-    "반증됐습니다. 숨기지 않고 그대로 보고합니다.\n\n[30초]");
+    "반증됐습니다. 숨기지 않고 그대로 보고합니다.\n\n" +
+    "★슬라이드 네 번째 불릿을 짚어주십시오★ 여기까지 들으면 '그럼 Kanana 로 강제하면 되지 않나' 라는 " +
+    "반문이 자연스럽게 나옵니다. 미리 답해두면, 앞 장에서 강제 권한을 준 arm 은 Kanana 가 아니라 " +
+    "한국어를 0.022 로 채점하는 영어 학습 CPU 레일이었습니다. 한국어를 제대로 보는 분류기로 강제했을 때 " +
+    "어떻게 되는지는 이번 실험에서 측정하지 않았고, S15 단기 과제에 넣어뒀습니다.\n\n[30초]");
     s.addImage(fit(R("report", "figs", "fig_channel_gap.png"), M, 1.22, 6.15, 3.55));
   bullets(s, [
     {
@@ -701,7 +707,10 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "한 가지 정직하게 밝힐 부분 — 수신자 주소나 계좌처럼 라우팅에 필요한 인자는 게이트 검사 " +
     "직전에 원본으로 복원합니다. 토큰인 채로 allowlist를 검사하면 정당한 고객 주소까지 " +
     "다 막히기 때문입니다. 이건 설계상 정상이고 유출 집계에서 제외합니다. " +
-    "대신 복원된 원본 PII는 디스크 트레이스에 절대 직렬화하지 않습니다.\n\n[60초]");
+    "복원된 그 실행 인자(effective_args)는 디스크 트레이스에 직렬화하지 않습니다.\n\n" +
+    "여기서 한 가지 더 정확히 해두겠습니다. '트레이스에 PII 가 전혀 없다'는 뜻은 아닙니다. " +
+    "user_input·tool_args·final_text 는 그대로 저장되기 때문에, 뒤 데모 화면(S14)에서 주민번호가 " +
+    "보이는 게 그 이유입니다. 트레이스 전체 마스킹은 아직 안 했고 남은 과제로 자료에 적어뒀습니다.\n\n[60초]");
   s.addImage(fit(R("report", "figs", "fig_dlp.png"), M, 1.25, 6.5, 3.75));
   const mv = (k, s2) => rate(DLP[s2].model_view.leak_rate[k]);
   const us = (k, s2) => rate(DLP[s2].unauthorized_sink.leak_rate[k]);
@@ -732,6 +741,10 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
   const s = newSlide("학습·추론 레일 — 4개 파이프라인 (부록 · 탐지 축)",
     "여기부터는 부록입니다. 헤드라인 주장과는 분리해서 봐주십시오.\n\n" +
     "학습 파이프라인은 넷이고 환경이 다릅니다. R6·R7 은 RunPod RTX 4090 GPU 파인튜닝, e5 는 GPU 임베딩 위에 LR 헤드만 학습, Ko-AgentGuard 는 CPU 로 TF-IDF+LR 을 학습했습니다. Kanana·ShieldGemma 는 학습하지 않고 추론만 했고, Gemini·gpt-4o-mini 는 외부 생성 모델입니다.\n\n" +
+    "★Ko-AgentGuard 의 F1 0.994 를 물으시면 상한이라고 답하십시오★ Nemotron 투영에서 양성은 원문에 " +
+    "인젝션 문장을 더한 것이라 체계적으로 깁니다(test 평균 543자 vs 215자). 길이 특징 하나만으로 학습한 " +
+    "LR 도 F1 0.957 이 나옵니다. 그래서 이 표의 논지는 '우리가 좋은 탐지기를 만들었다'가 아니라 " +
+    "'길이 shortcut 까지 얻은 최상의 CPU 탐지기조차 base64 에서 0.0 으로 무너지고 한국어에 눈먼다' 입니다.\n\n" +
     "R6은 한국어 비정형 PII를 잡는 NER입니다. span F1 0.9845가 나왔는데, 이건 openpii 템플릿 " +
     "분포 안의 홀드아웃이고 행 단위 랜덤 분할이라 누수 가능한 상한입니다. 실제 상담 대화로의 " +
     "일반화는 별개 문제입니다.\n\n" +
@@ -763,7 +776,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
   });
   banner(s, "e5 는 한국어 전이에 실패(KO 0.0) · Ko-AgentGuard 는 base64 에서 붕괴(0.0) → 탐지 모델과 실행 강제의 경계를 분리한다",
     { y: 4.42, fill: BG_GREEN, color: GREEN_D, size: 15, h: 0.6 });
-  warn(s, "⚠️ R6은 행단위 랜덤분할(=누수 가능 상한, 템플릿 홀드아웃 아님) → 부록 예비수치 · klue 파생 가중치는 CC-BY-SA 상속 → 수치 보고만, 공개 재배포 지양", { y: 5.12, size: 12.5 });
+  warn(s, "⚠️ R6은 행단위 랜덤분할(=누수 가능 상한, 템플릿 홀드아웃 아님) → 부록 예비수치 · klue 파생 가중치는 CC-BY-SA 상속 → 수치 보고만, 공개 재배포 지양 · ★Ko-AgentGuard F1 0.994 도 상한★ — 양성이 체계적으로 길어 길이 특징 하나만 쓴 LR 도 0.957(543자 vs 215자)", { y: 5.12, size: 12.5 });
   s.addText("운영 구성에서는 네 모델 모두 LOG-ONLY — 실행 차단에 쓰지 않는다. classifier_gate 만 '분류기에 강제를 맡기면 어떻게 되는가'를 재는 애블레이션 전용 예외다.", {
     x: M, y: 5.66, w: CW, h: 0.4, fontFace: FONT, fontSize: 13.5, color: GREY, italic: true,
   });
@@ -776,13 +789,16 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
   const s = newSlide("데이터셋 · 재현성 기여",
     "코드 말고 남는 것들입니다.\n\n" +
     "첫째, KoTIP-Bench입니다. 한국어 도구채널 인젝션 평가셋을 직접 만들었습니다. " +
-    "라이선스가 clean해서 Train/Dev/Test 분할째로 공개할 수 있습니다. 제가 아는 한 " +
+    "라이선스가 clean(CC-BY-4.0)해서 dev 30 / test 60 분할째로 공개할 수 있습니다. " +
+    "★분할을 정확히 말씀드리면★ 제가 직접 만든 공격 벤치는 dev 30 · test 60 이고 train 은 없습니다. " +
+    "슬라이드에 같이 적힌 train 1,663 은 레일 학습용 Nemotron 파생 데이터라 자체 구축분이 아닙니다. " +
+    "제가 아는 한 " +
     "한국어로 이 채널을 재는 공개 벤치는 없었습니다.\n\n" +
     "둘째, Presidio 한국어 인식기 결함 2건을 정량적으로 확인했습니다. 하나는 여권 인식기가 " +
     "supported_language를 kr로 잘못 등록해 ko 파이프라인에 아예 로드되지 않는 것이고, " +
     "다른 하나는 주민번호 인식기의 컨텍스트 단어에 한글이 하나도 없는 것입니다. " +
     "둘 다 upstream에 올릴 만한 내용입니다.\n\n" +
-    "셋째, 재현성입니다. 테스트 125개가 통과하고, run_id에 데이터셋·정책·레일 아티팩트 해시를 " +
+    "셋째, 재현성입니다. 테스트 129개가 통과하고, run_id에 데이터셋·정책·레일 아티팩트 해시를 " +
     "박아둡니다. 그래서 셋 중 하나라도 바뀌면 옛 결과가 자동으로 격리됩니다. " +
     "오래된 수치가 새 결과인 척 섞이는 사고를 구조적으로 막습니다.\n\n[40초]");
   bullets(s, [
@@ -795,7 +811,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
       sub: "여권 인식기 언어코드 오등록(kr≠ko) · RRN 한글 컨텍스트 부재 — upstream 이슈 대상",
     },
     {
-      t: [{ text: "125 테스트", bold: true }, { text: " 통과 (.venv; CI-core 119 · presidio 6) · temp=0 근사 재현" }],
+      t: [{ text: "129 테스트", bold: true }, { text: " 통과 (.venv; CI-core 123 · presidio 6) · temp=0 근사 재현" }],
     },
     {
       t: [{ text: "계보 각인", bold: true }, { text: ": run_id = dataset + policy + rail 아티팩트 해시" }],
@@ -821,7 +837,13 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "오른쪽은 볼트까지 켠 구성인데 본문의 주민번호 때문에 dlp.egress에서 먼저 걸립니다.\n\n" +
     "그리고 실행 관측입니다. 데모가 끝나면 메트릭 요약이 같이 찍히는데, leaks_total이 " +
     "무방어에서만 1이고 게이트 arm에서는 0입니다. 이게 이 시스템의 핵심 불변식이고, " +
-    "서비스로 띄우면 monitor가 같은 값을 실시간으로 빨강/초록으로 보여줍니다.\n\n[60초]");
+    "서비스로 띄우면 monitor가 같은 값을 실시간으로 빨강/초록으로 보여줍니다.\n\n" +
+    "★질문이 나오기 쉬운 지점 — '오른쪽 볼트 arm 인데 주민번호가 그대로 보이는데요?'★ " +
+    "화면에 보이는 그 원본은 스크립트 재생기가 만든 고정 모델 출력입니다. 이 데모는 키 없이 " +
+    "돌리려고 FakeProvider 로 tool_call 을 고정 재생하기 때문에, 볼트가 모델 입력을 토큰화한 것과 " +
+    "무관하게 대본에 적힌 인자가 그대로 나옵니다. 볼트가 한 일은 그 호출을 실행 경계에서 " +
+    "dlp.egress:body 로 막은 것이고, 화면 오른쪽 빨간 배지가 그 판정입니다. 덧붙여 트레이스 파일 " +
+    "자체의 마스킹은 아직 안 돼 있습니다 — S11 각주에 남은 과제로 적어뒀습니다.\n\n[60초]");
   s.addImage(fit(R("report", "figs", "trace_view.png"), M, 1.18, CW, 3.30));
   s.addText([
     { text: "python -m scripts.run_demo", options: { fontFace: MONO, fontSize: 14, color: RED, bold: true } },
@@ -973,6 +995,26 @@ await pptx.writeFile({ fileName: OUT });
 const totalSec = DECK.reduce((a, d) => a + (d.sec || 0), 0);
 const shortSec = DECK.reduce((a, d) => a + (d.short ?? d.sec ?? 0), 0);
 const flexible = DECK.filter((d) => d.short).map((d) => `S${d.no}`).join(" · ");
+
+// ── 녹화 시간은 ★선언값이 아니라 대본 글자수★ 에서 유도한다 ──────────────────
+// (회귀 이력: 헤더가 "S17·S18 은 영상에서 제외"라고 써놓고 합계는 부록까지 더한
+//  shortSec 을 썼다. 39초가 실제보다 부풀어 여유가 14초로 보고됐다.)
+// 선언 초는 사람이 손으로 적은 값이라 대본을 고치면 조용히 어긋난다. 글자수는 안 어긋난다.
+const CPS = 4.7;                                   // 한국어 낭독 속도(자/초) — 이 프로젝트 채택값
+const VIDEO_SET = DECK.filter((d) => d.no <= 16);  // 부록 S17·S18 은 영상에서 제외
+const scriptOf = (d) => (d.no === 1 ? VIDEO[d.no][1] : (VIDEO[d.no][3] || VIDEO[d.no][1]));
+const needSec = (t) => (t || "").length / CPS;
+const videoNeed = Math.ceil(VIDEO_SET.reduce((a, d) => a + needSec(scriptOf(d)), 0));
+const videoDecl = VIDEO_SET.reduce((a, d) => a + (d.short ?? d.sec ?? 0), 0);
+// 낭독 불가 구간(자/초 > 5.2) 은 빌드에서 알린다 — 녹화 당일에 발견하면 늦다.
+const tooFast = VIDEO_SET
+  .map((d) => ({ no: d.no, cps: (scriptOf(d) || "").length / (d.short ?? d.sec ?? 1) }))
+  .filter((x) => x.cps > 5.2);
+if (tooFast.length) {
+  console.warn(`⚠️ 선언 초가 빠듯한 슬라이드(자/초>5.2): ` +
+    tooFast.map((x) => `S${x.no} ${x.cps.toFixed(1)}`).join(" · ") +
+    `  → 실측 필요 ${videoNeed}초로 계산했으니 녹화엔 지장 없음`);
+}
 const md = [
   "# SafeAgent-KR 발표 스크립트",
   "",
@@ -989,7 +1031,9 @@ const md = [
   `> - **S1**: 표준 대본 (${DECK[0].sec}초)`,
   "> - **S2~S16**: 전부 ⏩ **압축 대본** — 슬라이드마다 노트 두 번째 문단",
   "> - **S17·S18(부록)**: 영상에서 제외, 질문 시에만 띄운다",
-  `> - 합계 **발화 ${shortSec}초** + 화면 전환·호흡 여유 **${300 - shortSec}초** = 300초`,
+  `> - 실제 낭독 분량 **${videoNeed}초** (S1~S16 대본 글자수 ÷ ${CPS}자/초로 산출) ` +
+    `+ 화면 전환·호흡 여유 **${300 - videoNeed}초** = 300초`,
+  `> - 선언 초 합계는 ${videoDecl}초지만 ★기준은 글자수★ 다 — 손으로 적은 초는 대본을 고치면 어긋난다.`,
   "> ",
   "> 표준 대본은 시간 제약이 없는 자리(리허설·대면 발표·Q&A)용이다.",
   "",

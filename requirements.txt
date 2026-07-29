@@ -29,11 +29,13 @@ sentence-transformers>=3.0.0  # intfloat/multilingual-e5-small
 # ── 평가 / 통계 ────────────────────────────────────────────────────────
 scikit-learn>=1.4.0
 numpy>=1.26.0
-scipy>=1.13.0
-statsmodels>=0.14.0           # McNemar exact — 층별 한계 기여 검정 (대응 표본)
+scipy>=1.13.0                 # scikit-learn 이 요구하는 전이 의존 — 직접 import 하지 않는다
+# statsmodels 제거 — McNemar exact 는 math.comb 로 자체 구현했다(eval/stats.py:34).
+# 선언만 해두면 "이 라이브러리로 검정했다"는 오해를 남기므로 목록에서 뺀다.
 
 # ── 데모 ───────────────────────────────────────────────────────────────
-streamlit>=1.36.0
+# app/ui.py 는 requirements.core.txt 의 FastAPI + 순수 HTML/JS 로 동작한다.
+# 별도 Streamlit/Node 런타임 불요.
 
 # ── 명시적 미채택 (기획서 3장 근거) ────────────────────────────────────
 # google/shieldgemma-2b        : 모델카드가 영어 전용 자인 + manual gated + 비-OSI
