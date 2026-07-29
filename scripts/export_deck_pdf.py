@@ -1,6 +1,6 @@
 """발표자료 PDF 내보내기 — PPTX 하나에서 PDF 를 파생시킨다(단일 소스 규율).
 
-    cd scripts/pptx && npm run build      # ① report/발표자료.pptx + 발표자료.md
+    cd scripts/pptx && npm run build      # ① report/발표자료.pptx + 발표자료_대본.md
     python -m scripts.export_deck_pdf     # ② report/발표자료.pdf  ← 이 스크립트
 
 ★왜 Keynote 인가★

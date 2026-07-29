@@ -90,16 +90,16 @@ def test_deck_has_no_star_markers_and_keeps_bold():
 
 
 def test_pptx_notes_match_script_markdown():
-    """★PPT 발표자 노트 == 발표자료.md 대본★ — 두 산출물이 갈리면 발표 중 다른 걸 읽게 된다.
+    """★PPT 발표자 노트 == 발표자료_대본.md 대본★ — 두 산출물이 갈리면 발표 중 다른 걸 읽게 된다.
 
     회귀 이력: S1 만 newSlide() 를 거치지 않고 손으로 만들어져, 노트를 addNotes(PPT용)와
     DECK.notes(대본용)에 따로 적었다. 그 결과 PPT 노트에는 상세 노트만 들어가고 표준 대본·
     용어 블록은 .md 에만 있었다. 한 소스에서 두 산출물을 낸다는 이 파일의 전제가 S1 에서만
     깨져 있었던 것이다.
     """
-    md_path = ROOT / "report" / "발표자료.md"
+    md_path = ROOT / "report" / "발표자료_대본.md"
     if not md_path.exists():
-        pytest.skip("발표자료.md 미생성")
+        pytest.skip("발표자료_대본.md 미생성")
     md = md_path.read_text("utf-8")
     sections = re.split(r"^## S(\d+)\. ", md, flags=re.M)
     script = {int(sections[i]): sections[i + 1] for i in range(1, len(sections), 2)}

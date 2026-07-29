@@ -452,7 +452,7 @@ tests/
   test_gate.py test_rail_cannot_override_gate.py test_vault_scope.py
   test_obfuscator_props.py test_loop_parts.py test_safety_settings.py
 report/
-  PREREGISTRATION.md  기획서.md  결과보고서.md  발표자료.md
+  PREREGISTRATION.md  기획서.md  결과보고서.md  발표자료_대본.md
 results/  ablation.csv detector_eval.csv pii_leak.csv presidio_delta.csv
 ```
 

@@ -2,7 +2,7 @@
  * SafeAgent-KR — 편집 가능 발표자료(PPTX) 생성기
  *
  *   cd scripts/pptx && npm install && npm run build
- *   → report/발표자료.pptx (정본·편집 가능) + report/발표자료.md (발표 스크립트)
+ *   → report/발표자료.pptx (정본·편집 가능) + report/발표자료_대본.md (발표 스크립트)
  *   → PDF 는 scripts/export_deck_pdf.py 가 이 PPTX 에서 파생시킨다(Keynote).
  *
  * ★이 파일이 발표자료의 유일한 소스다★
@@ -29,7 +29,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..");
 const R = (...p) => path.join(ROOT, ...p);
 const OUT = R("report", "발표자료.pptx");
-const OUT_MD = R("report", "발표자료.md");   // 같은 노트에서 발표 스크립트도 함께 뽑는다
+const OUT_MD = R("report", "발표자료_대본.md");   // 같은 노트에서 발표 스크립트도 함께 뽑는다
 
 // ── 디자인 토큰 ───────────────────────────────────────────────────────────
 const NAVY = "16213E";
@@ -891,7 +891,7 @@ const td = (t, o = {}) => {
     "돌리려고 FakeProvider 로 tool_call 을 고정 재생하기 때문에, 볼트가 모델 입력을 토큰화한 것과 " +
     "무관하게 대본에 적힌 인자가 그대로 나옵니다. 볼트가 한 일은 그 호출을 실행 경계에서 " +
     "dlp.egress:body 로 막은 것이고, 화면 오른쪽 빨간 배지가 그 판정입니다. 덧붙여 트레이스 파일 " +
-    "자체의 마스킹은 아직 안 돼 있습니다 — S11 각주에 남은 과제로 적어뒀습니다.\n\n[60초]");
+    "자체의 마스킹은 아직 안 돼 있습니다 — S11 각주에 남은 과제로 적어뒀습니다.\n\n★영상에서 화면 녹화를 트는 구간의 내레이션★ — 이 슬라이드를 띄운 뒤 화면 녹화로 넘어갑니다. 아래 세 컷은 report/demo.md 의 URL 세 개와 1:1 대응하며, 읽는 동안 화면에 그 값이 실제로 떠 있습니다. 이 구간에서는 위의 압축 대본 대신 아래를 읽습니다(약 40초).\n\n컷① 무방어 — 「방어를 끈 구성입니다. 화면 위 카드를 보시면 시도 4, 실행 4, 차단 0입니다. 공격자 주소로 나가는 메일까지 그대로 실행되었습니다.」\n\n컷② Tier A — 「입력과 시나리오는 그대로 두고 방어만 Tier A 로 바꿨습니다. 같은 자리 카드가 시도 4, 실행 3, 차단 1로 바뀝니다. 차단 규칙은 egress.email_domains 입니다.」\n\n컷③ 3-arm 비교 — 「세 구성을 나란히 놓았습니다. 같은 호출인데 무방어는 실행되고, Tier A 는 allowlist 에서, 볼트 구성은 본문 PII 때문에 dlp.egress:body 에서 차단합니다.」\n\n화면에 대해 질문이 나올 수 있는 두 곳을 미리 짚어둡니다. 상단 노란 배너의 「Scripted 고정 재생」은 모델 추론이 아니라 고정 도구 호출 재생이라는 표시이고, TURN 1 의 「TOOL RAW RESULT」에 보이는 주민등록번호는 합성 로컬 데이터입니다. 바로 아래 「AFTER_TOOL → MODEL」 줄에서 같은 값이 <KR_RRN_1> 토큰으로 바뀌어 모델에 전달됩니다.\n\n[60초]");
   s.addImage(fit(R("report", "figs", "trace_view.png"), M, 1.18, CW, 3.30));
   s.addText([
     { text: "python -m scripts.run_demo", options: { fontFace: MONO, fontSize: 14, color: RED, bold: true } },

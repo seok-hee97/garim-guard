@@ -151,7 +151,7 @@ python -m scripts.fetch_rail                   # 학습 대신 완성 아티팩�
 ```
 results/ ──► figs/*.png ─┐
 docs/architecture_*.png ─┼─► scripts/pptx/gen_pptx.mjs ─┬─► report/발표자료.pptx  (편집 가능·정본)
-report/figs/trace_view.png ┘                            └─► report/발표자료.md    (발표 스크립트)
+report/figs/trace_view.png ┘                            └─► report/발표자료_대본.md    (발표 스크립트)
                                                               │
                                         scripts/export_deck_pdf.py (Keynote)
                                                               └─► report/발표자료.pdf (투사용)
@@ -168,7 +168,7 @@ python -m scripts.gen_trace_shot              # ④ report/figs/trace_view.png (
 python -m scripts.gen_slide_figs              # ⑤ report/figs/fig_*.png  ★matplotlib 필요★
 python -m scripts.gen_arch_stack              # ⑥ docs/architecture_stack.png (계층×기술스택)
 python -m scripts.gen_model_arch              # ⑦ docs/모델_아키텍처_사진.png (graphviz 제어흐름)
-cd scripts/pptx && npm install && npm run build && cd ../..   # ⑧ 발표자료.pptx + 발표자료.md
+cd scripts/pptx && npm install && npm run build && cd ../..   # ⑧ 발표자료.pptx + 발표자료_대본.md
 python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → PDF)
 ```
 
@@ -176,7 +176,7 @@ python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → P
 |---|---|---|
 | `report/발표자료.pptx` | **정본** — 제출·편집·발표 | 네이티브 텍스트/표 + 발표자 노트 14장 |
 | `report/발표자료.pdf` | 투사용 | 위 PPTX 에서 Keynote 로 파생 |
-| `report/발표자료.md` | 발표 스크립트(인쇄용) | **생성물 — 직접 수정 금지** |
+| `report/발표자료_대본.md` | 발표 스크립트(인쇄용) | **생성물 — 직접 수정 금지** |
 
 - ℹ️ `npm run build` 를 다시 돌리면 **git 이 `발표자료.pptx` 를 변경으로 표시**한다. 내용이
   바뀐 게 아니라 OOXML 메타(`docProps/core.xml` 의 `dcterms:created`)만 달라진 것이다 —
