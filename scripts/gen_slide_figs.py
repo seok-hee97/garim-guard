@@ -73,8 +73,8 @@ def _ablation():
         ("none", "무방어\n(기준선)", 0.17, C_BASE),
         ("plea", "+plea\n(프롬프트 애원)", 0.18, C_THEATER),
         ("spotlight", "+spotlight\n(데이터마킹)", 0.25, C_THEATER),
-        ("classifier_gate", "+분류기 강제\n(영어 CPU레일)", 0.17, C_THEATER),
-        ("tier_a", "★결정적 게이트★\n(Tier A)", 0.00, C_GENUINE),
+        ("classifier_gate", "+분류기 강제\n(영어 학습 레일)", 0.17, C_THEATER),
+        ("tier_a", "결정적 게이트\n(Tier A)", 0.00, C_GENUINE),
     ]
     # 실측 t-ASR: ablation.csv 의 arm + condition=all (n=60 집계)
     csv_path = ROOT / "results" / "ablation.csv"
@@ -116,6 +116,11 @@ def _ablation():
                 fontproperties=KFONT, fontsize=10, color="#555")
     ax.set_xticks(xs)
     ax.set_xticklabels([b[1] for b in bars], fontproperties=KFONT, fontsize=10.5)
+    # 강조는 기호(★)가 아니라 서식으로 — genuine arm 라벨만 볼드 처리한다.
+    for tick, (a, *_rest) in zip(ax.get_xticklabels(), bars):
+        if a == "tier_a":
+            tick.set_fontweight("bold")
+            tick.set_color(C_GENUINE)
     ax.set_ylabel("t-ASR (실행 성공률, ↓ 좋음)", fontproperties=KFONT, fontsize=12)
     ax.set_ylim(0, 0.40)                    # theater 캡션이 막대·n.s. 라벨과 겹치지 않을 여유
     ax.set_title("한국어 도구채널 인젝션 60건 — 방어별 실행 성공률(t-ASR)",
@@ -173,7 +178,7 @@ def _channel_gap():
                 fontproperties=KFONT, fontsize=10.5, color=C_LEAK, fontweight="bold",
                 arrowprops=dict(arrowstyle="->", color=C_LEAK))
     # ★우리 런타임이 어느 조건인지 그림 안에 밝힌다★ — 빼면 유리한 것만 고른 게 된다.
-    ax.annotate("★우리 런타임은 ③★\n(after_tool 이 문자열 직접 채점)",
+    ax.annotate("우리 런타임은 ③\n(after_tool 이 문자열 직접 채점)",
                 xy=(2, tip(b2)), xytext=(2.0, 1.38), fontproperties=KFONT, fontsize=10.5,
                 color="#1b5e20", fontweight="bold", ha="center", va="top",
                 arrowprops=dict(arrowstyle="->", color="#1b5e20"))

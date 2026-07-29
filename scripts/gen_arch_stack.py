@@ -123,7 +123,7 @@ def band_title(x: float, y: float, num: str, title: str, sub: str, color: str) -
 def seam_flow(x: float, y: float) -> str:
     """4-seam 흐름 한 줄 — before_tool 만 강조(강제 지점)."""
     seams = [("before_model", False), ("모델(P-LLM)", False), ("after_model", False),
-             ("★ before_tool 게이트", True), ("도구 실행", False), ("after_tool", False)]
+             ("before_tool 게이트", True), ("도구 실행", False), ("after_tool", False)]
     out, cx = [], x
     for label, hot in seams:
         fg, bg, bd = (("#ffffff", GREEN, GREEN) if hot else (INK, "#ffffff", LINE))
@@ -205,7 +205,7 @@ def build() -> str:
     P.append(line(588, 219, "FakeProvider scripted", size=19, bold=True))
     P.append(line(588, 243, "발표영상용 결정적 재생 · API 키 불요", size=15, color=MUTED))
 
-    P.append(card(boxes[3][0], y, boxes[3][1], h, "④ ★ before_tool 게이트",
+    P.append(card(boxes[3][0], y, boxes[3][1], h, "④ before_tool 게이트",
                   bg=GREEN_BG,
                   border=GREEN, color=GREEN))
     P.append(line(948, 88, "학습 모델 없음 — 결정적 정책", size=18, bold=True))

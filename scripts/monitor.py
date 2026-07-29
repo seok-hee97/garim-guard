@@ -53,7 +53,7 @@ def _render(metrics: dict | None, progress: dict | None, url: str) -> str:
     out.append(f"{_B}SafeAgent-KR 라이브 모니터{_X}  {_DIM}{url}  {time.strftime('%H:%M:%S')}{_X}")
     out.append("─" * 68)
     if metrics is None:
-        out.append(f"{_Y}● server down / 연결 실패{_X} — uvicorn src.agent.server:app 확인")
+        out.append(f"{_Y}● server down / 연결 실패{_X} — ./.venv/bin/python -m uvicorn src.agent.server:app 확인")
     else:
         b = metrics.get("build", {})
         inf = metrics.get("in_flight", {})

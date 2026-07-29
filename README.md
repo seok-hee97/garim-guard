@@ -223,7 +223,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **DLP 볼트** | 요청 스코프 가역 토큰화(5종), 모델·비인가 콘텐츠 필드에는 토큰만 노출. 승인된 라우팅 인자(`to`/`account`)는 실행 경계에서 복원 | [dlp/vault.py](src/dlp/vault.py) |
 | **provider 복원력** | async 네이티브 + tenacity 재시도(429/5xx) + 벽시계 타임아웃 | [_resilience.py](src/providers/_resilience.py) |
 | **fail-closed 4 seam · 구조적 로깅(PII 미로깅) · deadline 예산** | | [loop.py](src/agent/loop.py)·[log.py](src/agent/log.py) |
-| **실행 모니터링** | in-process 메트릭(카운터/히스토그램/게이지·PII 없음) + `GET /v1/metrics` 라이브 스냅샷 + 요청 로깅 미들웨어(X-Request-ID) + `scripts.monitor` 터미널 대시보드 + eval 진행 heartbeat. 사용법 [docs/USAGE.md §3-4b](docs/USAGE.md) | [metrics.py](src/agent/metrics.py)·[monitor.py](scripts/monitor.py) |
+| **실행 모니터링** | in-process 메트릭(카운터/히스토그램/게이지·PII 없음) + `GET /v1/metrics` 라이브 스냅샷 + 요청 로깅 미들웨어(X-Request-ID) + `scripts.monitor` 터미널 대시보드 + eval 진행 heartbeat. 사용법 [docs/USAGE.md §3-6](docs/USAGE.md) | [metrics.py](src/agent/metrics.py)·[monitor.py](scripts/monitor.py) |
 | **★유출 불변식 계측(`leaks_total`)★** | 게이트가 *막은 것*(`gate_blocks_total`)과 별개로, **실제로 allowlist 밖으로 나간 실행**을 사후 판정해 센다. 무방어 arm 에서만 오르는 게 정상이고 Tier A 가 켜진 채 오르면 게이트 회귀 → 모니터가 빨강 경보 | [loop.py](src/agent/loop.py)·[policy.py](src/agent/policy.py) |
 
 ---
@@ -238,7 +238,7 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **실행 모니터링** (메트릭·`/v1/metrics`·`scripts.monitor`·`leaks_total`·heartbeat) | ✅ 구현·테스트 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
 | 유닛/통합 테스트 | ✅ **129 통과** (.venv; CI-core 123, presidio 6) |
-| 발표 자산 | ✅ **단일 소스** — [gen_pptx.mjs](scripts/pptx/gen_pptx.mjs) 하나가 `발표자료.pptx`(편집 가능·정본) + `발표자료.md`(스크립트) 를 만들고, `발표자료.pdf` 는 [export_deck_pdf](scripts/export_deck_pdf.py)(Keynote)로 파생. 수기 캡처·수기 수치 없음 ([USAGE §3-6](docs/USAGE.md)) |
+| 발표 자산 | ✅ **단일 소스** — [gen_pptx.mjs](scripts/pptx/gen_pptx.mjs) 하나가 `발표자료.pptx`(편집 가능·정본) + `발표자료.md`(스크립트) 를 만들고, `발표자료.pdf` 는 [export_deck_pdf](scripts/export_deck_pdf.py)(Keynote)로 파생. 수기 캡처·수기 수치 없음 ([USAGE §3-8](docs/USAGE.md)) |
 
 **남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, Prometheus 노출 형식 + Grafana 대시보드 + 외부 page 경보.
 

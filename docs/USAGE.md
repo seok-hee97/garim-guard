@@ -106,7 +106,7 @@ curl :8000/readyz      # 키 없으면 503(provider 미초기화 = not ready). �
 
 > **인증 계약 주의:** 키 없이 서버를 띄우면 `/v1/agent/run` 은 **503(not ready)** 이다(provider 미초기화가 인증보다 먼저 fail-closed). **401/403 역할 인증**은 provider 가 준비된 상태에서만 도달하며, `tests/test_server.py`(FakeProvider 주입)에서 검증한다 — 데모 키 `demo-agent-key`/`demo-approver-key`/`demo-auditor-key`(비-prod 전용), 자기승인 403, 재승인 409. `APP_ENV=prod` 는 `SAFEAGENT_API_KEYS` 주입 필수(데모키 거부, fail-closed boot).
 
-### 3-4. 평가 재현 (eval/)
+### 3-5. 평가 재현 (eval/)
 ```bash
 python -m eval.ablation                                        # runs.jsonl 재집계 → ablation.csv/table.md (키 불요)
 python -m eval.check_contamination                            # train/test 오염 감사 → GREEN (키 불요)
@@ -117,7 +117,7 @@ python -m eval.dlp_eval --provider openai                     # ★키 필요★
 ```
 > `eval.run` 은 `--rail heuristic` 이어도 **provider 키가 반드시 필요**(항상 LLM 호출). `ko_agentguard` 레일은 아티팩트 없으면 **fail-loud**(폴백 안 함) — 휴리스틱 원하면 명시적 `--rail heuristic`.
 
-### 3-4b. 실행 모니터링 — '지금 무엇이 실행/진행 중인가' (키 불요)
+### 3-6. 실행 모니터링 — '지금 무엇이 실행/진행 중인가' (키 불요)
 ```bash
 # 1) 서비스 라이브 메트릭(누적 카운터·in-flight·지연 분위수) — HTTP 스냅샷
 curl :8000/v1/metrics | python -m json.tool
@@ -131,7 +131,7 @@ python -m eval.run ... --progress-file results/.progress.json   # 다른 터미�
 - **메트릭(PII 없음, enum/카운트만):** `episodes_total{finish_reason}` · `gate_decisions_total{decision,rule}` · `gate_blocks_total{rule}` · **`leaks_total{tool,rule}`(★0 이어야 정상★ — allowlist 밖으로 실제 나간 실행)** · `dlp_redactions_total{entity}` · `tool_executed_total{tool}` · `errors_total{stage}` · `http_requests_total{method,route,status}` + 지연 히스토그램(p50/p95) + 게이지 `episodes_in_flight`.
 - 모든 HTTP 요청은 `X-Request-ID` 상관 + 구조적 로그 1줄(미들웨어). 로그는 stdout JSON(`src/agent/log.py`), 원본 PII 미기록.
 
-### 3-5. 학습 (GPU · 오프라인 부록)
+### 3-7. 학습 (오프라인 부록 · GPU 필요)
 ```bash
 python -m eval.train_rail                     # 레일(기본 tfidf=CPU 가능 / --encoder e5=GPU)
 python -m eval.train_pii_ner                  # R6 klue/roberta, openpii-ko, span F1 0.9845 (GPU)
@@ -141,7 +141,7 @@ python -m scripts.fetch_rail                   # 학습 대신 완성 아티팩�
 ```
 > klue 파생 가중치는 CC-BY-SA 상속 → **수치 보고만, 공개 재배포 금지**. `ko_agentguard`/`e5` 는 자체학습(CC-BY-4.0)이라 공개 HF 배포됨 → `fetch_rail` 로 취득.
 
-### 3-6. 발표자료·다이어그램 (키 불요, 결정적)
+### 3-8. 발표자료·다이어그램 (키 불요, 결정적)
 
 **발표 산출물은 소스 하나에서 나온다** — `scripts/pptx/gen_pptx.mjs` 가 슬라이드·발표 스크립트를
 만들고, PDF 는 그 PPTX 에서 파생된다. Marp 계열(별도 마크다운 덱)은 제거했다:

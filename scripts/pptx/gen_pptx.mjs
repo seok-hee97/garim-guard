@@ -135,8 +135,8 @@ const VIDEO = {
        20, "같은 페이로드를 세 배선으로 넣으면 발화 1.0, 대화 템플릿 0.0, 도구 문자열 직접 1.0 입니다. 우리 런타임은 세 번째라 잘 잡습니다. 탐지 성패가 배선에 좌우된다는 뜻입니다."],
   11: [22, "혹시 나가더라도 뭐가 나가느냐가 DLP 입니다. 볼트를 켜면 매핑된 PII 기준 원본 노출이 0 퍼센트고, 비식별에 실패하면 원본을 넘기지 않고 차단합니다.",
        11, "볼트를 켜면 매핑된 PII 기준 원본 노출이 0 퍼센트고, 비식별 실패 시에는 차단합니다."],
-  12: [20, "학습·추론 파이프라인은 넷입니다. R6·R7 은 GPU 파인튜닝, e5 는 인코더를 동결하고 헤드만, Ko-AgentGuard 는 CPU 학습입니다. 중요한 건 e5 교차언어가 한국어에서 0.0 이라는 점입니다 — 인코더를 다국어로 바꿔도 이 문제는 안 풀립니다.",
-       23, "파이프라인은 넷입니다. R6·R7 은 KLUE-RoBERTa GPU 파인튜닝, e5 는 헤드만, Ko-AgentGuard 는 CPU 학습입니다. 핵심은 e5 가 한국어에서 0.0 이라는 점입니다."],
+  12: [20, "학습·추론 파이프라인은 넷입니다. R6·R7 은 전체 파인튜닝, e5 는 인코더를 동결하고 헤드만, Ko-AgentGuard 는 TF-IDF+LR 학습입니다. 중요한 건 e5 교차언어가 한국어에서 0.0 이라는 점입니다 — 인코더를 다국어로 바꿔도 이 문제는 안 풀립니다.",
+       23, "파이프라인은 넷입니다. R6·R7 은 KLUE-RoBERTa 파인튜닝, e5 는 헤드만, Ko-AgentGuard 는 TF-IDF+LR 입니다. 핵심은 e5 가 한국어에서 0.0 이라는 점입니다."],
   13: [16, "남는 기여는 평가셋 KoTIP-Bench, Presidio 한국어 인식기 결함 2건, 그리고 129개 테스트와 계보 해시로 받친 재현성입니다.",
        7, "기여는 평가셋, Presidio 결함 2건, 재현성입니다."],
   14: [20, "데모는 API 키 없이 재현됩니다. 같은 공격을 세 구성으로 재생하면 무방어에서만 유출이 실행됩니다. 유출 카운터가 무방어 1, 게이트 0 인 게 핵심 불변식입니다.",
@@ -200,7 +200,7 @@ const GLOSS = {
        ["model_view", "모델이 '본' 값이 아니라 ★모델이 생성한 도구 인자★ 에 원본 PII 가 들어갔는지를 재는 지표."],
        ["라우팅 필드", "to·account 처럼 값 자체가 목적지인 인자. 정책 검사 전에 원본으로 복원해야 해서 유출 집계에서 제외."]],
   12: [["파인튜닝 vs 헤드만 학습", "전자는 모델 전체 가중치를 갱신, 후자는 인코더를 얼리고(freeze) 위에 얹은 분류기만 학습."],
-       ["TF-IDF + LR", "단어·문자 빈도 특징 + 로지스틱 회귀. 딥러닝 없이 CPU 로 도는 고전 분류기."],
+       ["TF-IDF + LR", "단어·문자 빈도 특징 + 로지스틱 회귀. 딥러닝 없이 도는 가벼운 고전 분류기."],
        ["BCEWithLogits", "멀티라벨용 손실. 한 문장에 여러 라벨이 동시에 붙을 수 있어 softmax 를 쓰면 안 된다."],
        ["KLUE-RoBERTa", "한국어 벤치마크 KLUE 로 사전학습된 RoBERTa 계열 모델."]],
   13: [["계보(provenance) / run_id", "결과 한 줄마다 어떤 데이터·정책·레일로 나왔는지 해시를 각인. 하나라도 바뀌면 옛 결과가 자동 격리된다."],
@@ -220,11 +220,15 @@ let slideNo = 0;
 const DECK = [];
 
 /** 본문 슬라이드 골격: 제목 + 초록 밑줄 + 푸터 + 페이지번호. 콘텐츠 시작 y 를 돌려준다. */
+// 대본·발표자 노트의 ★강조★ 는 마크다운 볼드로 바꾼다 — 슬라이드와 같은 규칙(기호 대신 서식).
+// 짝이 안 맞는 홀별표는 제거해 원문에 기호가 남지 않게 한다.
+const starMd = (t) => String(t).replace(/★([^★\n]+)★/g, "**$1**").replace(/★/g, "");
+
 function newSlide(title, notes) {
   slideNo += 1;
   const s = pptx.addSlide();
   s.background = { color: "FFFFFF" };
-  s.addText(title, {
+  s.addText(String(title).replace(/★/g, ""), {
     x: M, y: 0.30, w: CW, h: 0.62, fontFace: FONT, fontSize: 27, bold: true, color: NAVY,
     valign: "middle",
   });
@@ -253,8 +257,9 @@ function newSlide(title, notes) {
   const full = head || gloss
     ? `${head}${gloss}${"─".repeat(40)}\n[상세 노트 · Q&A/리허설용]\n\n${notes || ""}`
     : (notes || "");
-  if (full) s.addNotes(full);
-  DECK.push({ no: slideNo, title, notes: full, sec: v ? v[0] : null, short: v && v[2] ? v[2] : null });
+  const fullMd = starMd(full);
+  if (fullMd) s.addNotes(fullMd);
+  DECK.push({ no: slideNo, title, notes: fullMd, sec: v ? v[0] : null, short: v && v[2] ? v[2] : null });
   return s;
 }
 
@@ -272,16 +277,17 @@ function bullets(s, items, opt = {}) {
     const parts = Array.isArray(it.t) ? it.t : [{ text: it.t }];
     parts.forEach((p, j) => {
       const last = j === parts.length - 1;
-      runs.push({
-        text: (j === 0 ? "•  " : "") + p.text,
-        options: { bold: !!p.bold, color: p.color || INK, breakLine: last, fontSize: size },
+      const expanded = starRuns(p.text, {
+        bold: !!p.bold, color: p.color || INK, fontSize: size, breakLine: last,
       });
+      if (j === 0) expanded[0] = { ...expanded[0], text: "•  " + expanded[0].text };
+      runs.push(...expanded);
     });
     if (it.sub) {
-      runs.push({
-        text: "     " + it.sub,          // 리터럴 들여쓰기(indentLevel 은 문단을 갈라 줄바꿈을 유발)
-        options: { color: GREY, fontSize: size - 3, breakLine: true },
-      });
+      // 리터럴 들여쓰기(indentLevel 은 문단을 갈라 줄바꿈을 유발)
+      const sub = starRuns(it.sub, { color: GREY, fontSize: size - 3, breakLine: true });
+      sub[0] = { ...sub[0], text: "     " + sub[0].text };
+      runs.push(...sub);
     }
     if (i < items.length - 1) runs.push({ text: "", options: { breakLine: true, fontSize: 7 } });
   });
@@ -291,13 +297,49 @@ function bullets(s, items, opt = {}) {
   });
 }
 
+/** `★강조★` 마커를 ★볼드 run★ 으로 전개한다(기호 자체는 지운다).
+ *
+ * 별표는 소스에서 "여기가 핵심"을 표시하던 저자 표기인데 그대로 렌더돼 슬라이드에 ★ 기호가
+ * 찍혔다. 기호 대신 서식으로 강조하는 게 맞다. ★한 곳(헬퍼)에서 전개해야★ 70곳을 손으로
+ * 고치다 빠뜨리는 일이 없다. 짝이 안 맞는 홀별표는 (선두면 문장 전체 볼드, 아니면) 제거한다.
+ * 줄바꿈(\n)은 run 배열에서 무시되므로 breakLine run 으로 명시 변환한다.
+ */
+function starRuns(text, base = {}) {
+  const s = String(text);
+  const segs = [];
+  const re = /★([^★]+)★/g;
+  let last = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) segs.push([s.slice(last, m.index), false]);
+    segs.push([m[1], true]);
+    last = re.lastIndex;
+  }
+  if (last < s.length) segs.push([s.slice(last), false]);
+  if (!segs.length) segs.push([s, s.startsWith("★")]);
+
+  const out = [];
+  segs.forEach(([raw, strong]) => {
+    const clean = raw.replace(/★/g, "");
+    clean.split("\n").forEach((line, i, arr) => {
+      if (line === "" && arr.length === 1) return;
+      out.push({
+        text: line,
+        options: { ...base, bold: strong || !!base.bold, breakLine: i < arr.length - 1 },
+      });
+    });
+  });
+  if (out.length) out[out.length - 1].options.breakLine = !!base.breakLine;
+  return out.length ? out : [{ text: "", options: { ...base } }];
+}
+
 /** 강조 배너(결론·경고) */
 function banner(s, text, { y, fill = NAVY, color = "FFFFFF", size = 17, x = M, w = CW, h = 0.62 }) {
   s.addShape(pptx.ShapeType.roundRect, {
     x, y, w, h, fill: { color: fill }, rectRadius: 0.06,
     line: { color: fill, width: 0 },
   });
-  s.addText(text, {
+  // 배너는 이미 전체 볼드라 ★ 는 서식 차이를 못 만든다 — 기호만 제거한다.
+  s.addText(String(text).replace(/★/g, ""), {
     x: x + 0.18, y, w: w - 0.36, h, fontFace: FONT, fontSize: size, bold: true,
     color, valign: "middle",
   });
@@ -305,7 +347,7 @@ function banner(s, text, { y, fill = NAVY, color = "FFFFFF", size = 17, x = M, w
 
 /** 작은 주의 문구(빨강) */
 function warn(s, text, { y, x = M, w = CW, size = 11.5 }) {
-  s.addText(text, {
+  s.addText(starRuns(text, { fontSize: size, color: RED }), {
     x, y, w, h: 0.7, fontFace: FONT, fontSize: size, color: RED, valign: "top",
   });
 }
@@ -327,7 +369,14 @@ function fit(file, bx, by, bw, bh) {
 }
 
 const TH = { fill: { color: NAVY }, color: "FFFFFF", bold: true, fontSize: 14 };
-const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o } });
+const td = (t, o = {}) => {
+  const opts = { fontSize: 14, color: INK, ...o };
+  if (typeof t === "string" && t.includes("★")) {
+    return { text: starRuns(t, { fontSize: opts.fontSize, color: opts.color, bold: !!opts.bold }),
+             options: opts };
+  }
+  return { text: t, options: opts };
+};
 
 // ═════════════════════════════════════════════════════════════════════════
 // S1 — 표지
@@ -426,7 +475,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
   ], { y: 1.35, h: 2.6 });
   banner(s, "입력단만 지키는 통념적 가드레일은 공격이 지나가는 지점을 아예 보지 못한다",
     { y: 4.35, fill: BG_GREEN, color: GREEN_D, size: 19, h: 0.72 });
-  s.addText("사용자 발화  →  [ 가드레일 검사 ]  →  모델  →  도구 호출  →  ★도구 반환값 = 검사 없음★  →  행동", {
+  s.addText(starRuns("사용자 발화  →  [ 가드레일 검사 ]  →  모델  →  도구 호출  →  ★도구 반환값 = 검사 없음★  →  행동"), {
     x: M, y: 5.35, w: CW, h: 0.5, fontFace: MONO, fontSize: 13, color: GREY, align: "center",
   });
 }
@@ -633,7 +682,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     { text: "requires_hitl", options: { fontFace: MONO, fontSize: 10.5 } },
     { text: " 이라 승인자 없는 평가 하네스에서 미완료된 것 — 차단이 아니라 설계된 사람 확인(v0.1 정상셋 2건이라 BPR 판별력은 얇다).",
       options: { breakLine: true } },
-    { text: "★분류기 arm에 쓴 건 Kanana 가 아니라 한국어를 0.022로 채점하는 영어학습 CPU 레일이다 — 한국어를 보는 분류기로 강제했을 때는 미측정 · spotlight는 지시문 주입 + 비신뢰 도구 출력 구분자 래핑까지 수행(완전 구현)", options: {} },
+    ...starRuns("★분류기 arm에 쓴 건 Kanana 가 아니라 한국어를 0.022로 채점하는 영어학습 레일이다★ — 한국어를 보는 분류기로 강제했을 때는 미측정 · spotlight는 지시문 주입 + 비신뢰 도구 출력 구분자 래핑까지 수행(완전 구현)", {}),
   ], { x: M, y: 5.86, w: CW, h: 0.7, fontFace: FONT, fontSize: 11, color: GREY, valign: "top" });
 }
 
@@ -661,7 +710,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "반증됐습니다. 숨기지 않고 그대로 보고합니다.\n\n" +
     "★슬라이드 네 번째 불릿을 짚어주십시오★ 여기까지 들으면 '그럼 Kanana 로 강제하면 되지 않나' 라는 " +
     "반문이 자연스럽게 나옵니다. 미리 답해두면, 앞 장에서 강제 권한을 준 arm 은 Kanana 가 아니라 " +
-    "한국어를 0.022 로 채점하는 영어 학습 CPU 레일이었습니다. 한국어를 제대로 보는 분류기로 강제했을 때 " +
+    "한국어를 0.022 로 채점하는 영어 학습 레일이었습니다. 한국어를 제대로 보는 분류기로 강제했을 때 " +
     "어떻게 되는지는 이번 실험에서 측정하지 않았고, S15 단기 과제에 넣어뒀습니다.\n\n[30초]");
     s.addImage(fit(R("report", "figs", "fig_channel_gap.png"), M, 1.22, 6.15, 3.55));
   bullets(s, [
@@ -681,7 +730,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     },
     {
       t: [{ text: "그럼 Kanana 로 강제하면? — ", bold: true }, { text: "이번 실험에서는 미측정", color: RED }],
-      sub: "S9 의 분류기 강제 arm 은 Kanana 가 아니라 한국어를 0.022로 채점하는 영어 CPU 레일이었다",
+      sub: "S9 의 분류기 강제 arm 은 Kanana 가 아니라 한국어를 0.022로 채점하는 영어 학습 레일이었다",
     },
     {
       t: [{ text: "게이트 t-ASR: 배선·난독화와 무관하게 ", }, { text: "0.00", bold: true, color: GREEN_D }],
@@ -740,11 +789,11 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
 {
   const s = newSlide("학습·추론 레일 — 4개 파이프라인 (부록 · 탐지 축)",
     "여기부터는 부록입니다. 헤드라인 주장과는 분리해서 봐주십시오.\n\n" +
-    "학습 파이프라인은 넷이고 환경이 다릅니다. R6·R7 은 RunPod RTX 4090 GPU 파인튜닝, e5 는 GPU 임베딩 위에 LR 헤드만 학습, Ko-AgentGuard 는 CPU 로 TF-IDF+LR 을 학습했습니다. Kanana·ShieldGemma 는 학습하지 않고 추론만 했고, Gemini·gpt-4o-mini 는 외부 생성 모델입니다.\n\n" +
+    "학습 파이프라인은 넷이고 방식이 다릅니다. R6·R7 은 KLUE-RoBERTa 전체 파인튜닝, e5 는 인코더를 얼린 채 LR 헤드만 학습, Ko-AgentGuard 는 TF-IDF+LR 입니다. Kanana·ShieldGemma 는 학습하지 않고 추론만 했고, Gemini·gpt-4o-mini 는 외부 생성 모델입니다.\n\n" +
     "★Ko-AgentGuard 의 F1 0.994 를 물으시면 상한이라고 답하십시오★ Nemotron 투영에서 양성은 원문에 " +
     "인젝션 문장을 더한 것이라 체계적으로 깁니다(test 평균 543자 vs 215자). 길이 특징 하나만으로 학습한 " +
     "LR 도 F1 0.957 이 나옵니다. 그래서 이 표의 논지는 '우리가 좋은 탐지기를 만들었다'가 아니라 " +
-    "'길이 shortcut 까지 얻은 최상의 CPU 탐지기조차 base64 에서 0.0 으로 무너지고 한국어에 눈먼다' 입니다.\n\n" +
+    "'길이 shortcut 까지 얻은 최상의 경량 탐지기조차 base64 에서 0.0 으로 무너지고 한국어에 눈먼다' 입니다.\n\n" +
     "R6은 한국어 비정형 PII를 잡는 NER입니다. span F1 0.9845가 나왔는데, 이건 openpii 템플릿 " +
     "분포 안의 홀드아웃이고 행 단위 랜덤 분할이라 누수 가능한 상한입니다. 실제 상담 대화로의 " +
     "일반화는 별개 문제입니다.\n\n" +
@@ -759,16 +808,16 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     [{ text: "실험", options: TH }, { text: "베이스 모델", options: TH }, { text: "학습 데이터", options: TH },
      { text: "학습 설정", options: TH }, { text: "실측", options: TH }, { text: "런타임 역할", options: TH }],
     [td("R6 PII NER\n(토큰분류)"), td("klue/roberta-small"), td("openpii-ko\n20k 서브샘플 · 9개체"),
-     td("GPU · lr 3e-5 · 3ep · bs16\nmax_len 256 · seed 42"), td("span F1 0.9845", { bold: true }),
+     td("lr 3e-5 · 3ep · bs16\nmax_len 256 · seed 42"), td("span F1 0.9845", { bold: true }),
      td("오프라인 부록", { color: GREY })],
     [td("R7 유해성\n(멀티라벨)"), td("klue/roberta-base"), td("K-MHaS\n20k · 9클래스"),
-     td("GPU · lr 2e-5 · 3ep · bs16\nBCEWithLogits(softmax 금지)"), td("Macro-F1 0.709\n(test n=21,939)", { bold: true }),
+     td("lr 2e-5 · 3ep · bs16\nBCEWithLogits(softmax 금지)"), td("Macro-F1 0.709\n(test n=21,939)", { bold: true }),
      td("오프라인 부록", { color: GREY })],
-    [td("Ko-AgentGuard\n(인젝션 레일)"), td("TF-IDF + LR (CPU)"), td("Nemotron 파생\ntrain 1,663"),
-     td("★CPU★ · char_wb(3-5) 40k + word(1-2) 20k\nLR C=4.0 · class_weight balanced"),
+    [td("Ko-AgentGuard\n(인젝션 레일)"), td("TF-IDF + LR"), td("Nemotron 파생\ntrain 1,663"),
+     td("char_wb(3-5) 40k + word(1-2) 20k\nLR C=4.0 · class_weight balanced"),
      td("F1 0.994 → base64 0.0", { bold: true, color: RED }), td("LOG-ONLY 레일", { color: GREY })],
     [td("e5 + LR\n(교차언어)"), td("multilingual-e5-small\n★인코더 동결★"), td("Nemotron 영어\n1,663"),
-     td("GPU 임베딩(동결) + LR 헤드만 학습\n'query: ' 접두 필수 → L2(384d)"),
+     td("임베딩 동결 + LR 헤드만 학습\n'query: ' 접두 필수 → L2(384d)"),
      td("EN 0.954 / KO 0.0", { bold: true, color: RED }), td("LOG-ONLY 레일", { color: GREY })],
   ], {
     x: M, y: 1.22, w: CW, colW: [1.75, 2.0, 1.9, 3.05, 1.75, 1.65], rowH: 0.6,
@@ -860,7 +909,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
   ], { x: M, y: 4.6, w: CW, h: 0.95, fontFace: FONT, valign: "top", lineSpacingMultiple: 1.3 });
   banner(s, "탐지에 실패해도 행동이 나가지 않는다 — attempted=True, executed=False",
     { y: 5.62, fill: GREEN, size: 17, h: 0.58 });
-  s.addText("트레이스에 원본 주민번호가 보이는 건 ★스크립트 재생기가 만든 모델 출력★ 이다 — 볼트는 모델 입력을 토큰화하고 실행 경계에서 dlp.egress:body 로 막았다(트레이스 저장 마스킹은 미적용, S11 각주)   |   라이브 서비스 관측: curl :8000/v1/metrics · python -m scripts.monitor   |   라이브 모델 유도: --provider openai", {
+  s.addText(starRuns("트레이스에 원본 주민번호가 보이는 건 ★스크립트 재생기가 만든 모델 출력★ 이다 — 볼트는 모델 입력을 토큰화하고 실행 경계에서 dlp.egress:body 로 막았다(트레이스 저장 마스킹은 미적용, S11 각주)   |   라이브 서비스 관측: curl :8000/v1/metrics · python -m scripts.monitor   |   라이브 모델 유도: --provider openai"), {
     x: M, y: 6.28, w: CW, h: 0.62, fontFace: FONT, fontSize: 10.5, color: GREY,
     valign: "top", lineSpacingMultiple: 1.15,
   });
@@ -902,7 +951,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "마무리하겠습니다. 한계부터 말씀드리는 게 맞다고 생각합니다.\n\n" +
     "첫째, 사전에 명시한 예측 하나가 반증됐습니다. 난독화하면 Kanana가 크게 무너질 거라 했는데 " +
     "아니었습니다. 숨기지 않고 그대로 보고합니다.\n\n" +
-    "둘째, 분류기 강제 arm은 한국어를 거의 못 보는 영어 CPU 레일로만 측정했습니다. " +
+    "둘째, 분류기 강제 arm은 한국어를 거의 못 보는 영어 학습 레일로만 측정했습니다. " +
     "한국어가 되는 분류기로 강제했을 때는 미측정입니다.\n\n" +
     "셋째, Tier B의 taint는 모델을 한 번 거치면 세탁됩니다. 그래서 Tier C가 필요한데 " +
     "설계 명세만 제출하고 구현은 못 했습니다. 단일 모델·소규모 코퍼스인 것도 한계입니다.\n\n" +
@@ -912,7 +961,7 @@ const td = (t, o = {}) => ({ text: t, options: { fontSize: 14, color: INK, ...o 
     "분류기는 어디서 뚫리는지를 재는 계측기로 쓰는 게 맞습니다.\n\n감사합니다.\n\n[60초]");
   bullets(s, [
     { t: [{ text: "사전 명시 예측 P1b 미달", bold: true, color: RED }, { text: " — 난독화 붕괴 ≥0.25 예측이 반증(0.1). 그대로 보고." }] },
-    { t: [{ text: "classifier_gate arm은 교차언어로 눈먼 영어 CPU 레일로만 측정" }] },
+    { t: [{ text: "classifier_gate arm은 교차언어로 눈먼 영어 학습 레일로만 측정" }] },
     { t: [{ text: "Tier B taint 세탁 → Tier C 필요(설계 명세만 제출) · 단일 모델 gpt-4o-mini · 소규모 코퍼스" }] },
     {
       t: [{ text: "헤드라인 범위: ", bold: true }, { text: "Tier A 게이트 · Kanana 채널갭 · PII 볼트 DLP", bold: true, color: GREEN_D }, { text: " 3가지만 주장" }],
@@ -1033,7 +1082,7 @@ const md = [
   "> - **S17·S18(부록)**: 영상에서 제외, 질문 시에만 띄운다",
   `> - 실제 낭독 분량 **${videoNeed}초** (S1~S16 대본 글자수 ÷ ${CPS}자/초로 산출) ` +
     `+ 화면 전환·호흡 여유 **${300 - videoNeed}초** = 300초`,
-  `> - 선언 초 합계는 ${videoDecl}초지만 ★기준은 글자수★ 다 — 손으로 적은 초는 대본을 고치면 어긋난다.`,
+  `> - 선언 초 합계는 ${videoDecl}초지만 **기준은 글자수**다 — 손으로 적은 초는 대본을 고치면 어긋난다.`,
   "> ",
   "> 표준 대본은 시간 제약이 없는 자리(리허설·대면 발표·Q&A)용이다.",
   "",
@@ -1058,8 +1107,8 @@ const md = [
   "",
 ];
 for (const d of DECK) {
-  md.push(`## S${d.no}. ${d.title}`, "");
-  md.push(d.notes.trim() ? d.notes.trim() : "_(노트 없음)_", "");
+  md.push(`## S${d.no}. ${starMd(d.title)}`, "");
+  md.push(d.notes.trim() ? starMd(d.notes.trim()) : "_(노트 없음)_", "");
   md.push("---", "");
 }
 fs.writeFileSync(OUT_MD, md.join("\n"), "utf-8");
