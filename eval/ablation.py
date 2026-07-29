@@ -20,6 +20,7 @@ from eval.run import ARMS
 RUNS = ROOT / "results" / "runs.jsonl"
 OUT = ROOT / "results" / "ablation.csv"
 OUT_MD = ROOT / "results" / "ablation_table.md"
+OUT_VSNONE = ROOT / "results" / "mcnemar_vs_none.json"
 
 # 표에 세울 arm 순서 (무방어 → theater → genuine). McNemar 는 직전 행 대비.
 ORDER = ["none", "plea", "spotlight", "classifier_gate", "tier_a", "tier_a_b", "cg_plus_tier_a"]
@@ -140,11 +141,51 @@ def main() -> int:
     #   시나리오×스타일 군집(하나라도 executed 면 군집 성공)으로 묶어 보수적 p 를 함께 보고한다.
     md += _cluster_block(rows, arms_present)
 
+    vs_none = _vs_none_block(atk, arms_present)
+
     OUT.write_text("\n".join(lines_csv) + "\n", encoding="utf-8")
     OUT_MD.write_text("\n".join(md) + "\n", encoding="utf-8")
+    OUT_VSNONE.write_text(json.dumps(vs_none, ensure_ascii=False, indent=2) + "\n",
+                          encoding="utf-8")
     print("\n".join(md))
-    print(f"\n→ {OUT.relative_to(ROOT)} · {OUT_MD.relative_to(ROOT)}")
+    print(f"\n→ {OUT.relative_to(ROOT)} · {OUT_MD.relative_to(ROOT)} · {OUT_VSNONE.relative_to(ROOT)}")
     return 0
+
+
+def _vs_none_block(atk: dict, arms_present: list[str]) -> dict:
+    """★슬라이드 그림 p 라벨의 진실원천★ — 각 arm vs **무방어**(행 단위, case_id 대응).
+
+    표의 `mcnemar_p_vs_prev` 는 '직전 arm 대비'라 기준선이 arm 마다 다르다. 반면 헤드라인
+    그림(fig_ablation)은 전부 '무방어 대비'로 표기하므로 두 값이 섞이면 안 된다. 지금까지는
+    이 vs-무방어 값이 RESULTS.md 산문에만 있어 그림이 손계산 상수를 박아 썼다 —
+    이 파일이 그 구멍을 메운다(그림은 이제 여기서 읽는다).
+
+    ⚠️ 행 단위이므로 난독화 변형 상관이 보정되지 않은 **탐색적** 값이다. 보수적 값은
+    ablation_table.md 의 군집 단위 블록(cluster_mcnemar)을 봐야 한다.
+    """
+    if "none" not in atk:
+        return {}
+    base = atk["none"]
+    arms: dict[str, dict] = {}
+    for a in arms_present:
+        if a == "none":
+            continue
+        common = sorted(cid for cid in atk[a] if cid in base)
+        if not common:
+            continue
+        m = mcnemar_exact([base[cid]["executed"] for cid in common],
+                          [atk[a][cid]["executed"] for cid in common])
+        m["n_pairs"] = len(common)
+        arms[a] = m
+    return {
+        "basis": "vs_none",
+        "level": "row(case_id)",
+        "condition": "all",
+        "exploratory": True,
+        "note": ("행 단위(난독화 변형 상관 미보정) 탐색적 p. 보수적 판단은 "
+                 "ablation_table.md 의 군집 단위 McNemar 를 쓸 것."),
+        "arms": arms,
+    }
 
 
 CLUSTER_KEYS = ("scenario", "attack_style")   # 군집 = 같은 기본공격의 난독화 변형 묶음

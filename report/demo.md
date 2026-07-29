@@ -17,7 +17,7 @@ open report/trace_view.html
 - `tier_a` : 같은 send_email **🛑 차단(egress.email_domains)**, escalate 로 폴백
 - `tier_a+dlp_vault` : body 의 주민번호를 **🛑 차단(dlp.egress:body)** — 층 다변화
 
-> 내레이션: "같은 공격, 같은 모델 행동입니다. 게이트만 켜면 — 시도는 그대로 True인데 — 실행만 차단됩니다. 게이트는 문자열을 읽지 않고 수신자 도메인·PII 정책만 봅니다."
+> 내레이션: "같은 공격, 같은 모델 행동입니다. 게이트만 켜면 — 시도는 그대로 True인데 — 실행만 차단됩니다. 게이트는 공격 문장의 의미를 판정 근거로 쓰지 않고 수신자 도메인·PII 정책만 봅니다."
 
 ---
 

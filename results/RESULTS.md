@@ -20,9 +20,9 @@
 | +Tier A + Tier B (오염추적) | **0.00** | [0.00,0.06] | 1.0 (vs Tier A) | A 대비 한계이득 0 |
 | +classifier_gate + Tier A | **0.00** | [0.00,0.06] | 1.0 (vs A+B) | 분류기 위 게이트 = A와 동일 |
 
-> **누적 arm(A+B, 분류기+A) 해석:** 둘 다 t-ASR **0.00 = Tier A 단독과 동일**(McNemar p=1.0, 한계이득 없음). ① Tier B(오염추적)는 A 위에서 공격을 **더** 줄이지 못하면서 정상 유틸만 비용화(과차단) → **로그전용 강등 근거**. ② 분류기를 A 위에 얹어도 결과 불변 → **강제는 게이트, 분류기는 텔레메트리**라는 논지의 직접 확증. 세 genuine arm(A, A+B, 분류기+A) 모두 군집 discordant 4:0 · cluster p=0.125(방향 일관).
+> **누적 arm(A+B, 분류기+A) 해석:** 둘 다 t-ASR **0.00 = Tier A 단독과 동일**(McNemar p=1.0, 한계이득 없음). ① Tier B(오염추적)는 A 위에서 공격을 **더** 줄이지 못한다(t-ASR 0.00 동일, McNemar p=1.0) → **로그전용 강등 근거**. ⚠️ 정정: 과차단 증가는 **관측되지 않았다**(tier_a 과차단 1/2 vs tier_a_b 0/2, n=2 로 판별력 없음). 방어 가능한 주장은 '추가 공격 감소 없음'까지이며 '정상 업무를 과차단한다'가 아니다. ② 분류기를 A 위에 얹어도 결과 불변 → **강제는 게이트, 분류기는 텔레메트리**라는 논지의 직접 확증. 세 genuine arm(A, A+B, 분류기+A) 모두 군집 discordant 4:0 · cluster p=0.125(방향 일관).
 
-> **McNemar p 기준선:** 표의 p는 **vs 직전 arm**(ablation.csv `mcnemar_p_vs_prev`). classifier_gate 0.18은 vs spotlight. 별도로 **vs 무방어**(case_id 페어링, runs.jsonl 재계산): plea **p=1.0**(불일치 11쌍, 6:5) · spotlight **p=0.18**(불일치 9쌍, 2:7) · classifier_gate **p=1.0**(불일치 2쌍, 1:1) · Tier A **p=0.002**(불일치 10쌍, 0:10). 어느 기준이든 theater 3종은 유의성 없음(n.s.), Tier A만 유의. *(주의: "불일치쌍 0" 아님 — 개별 케이스는 arm마다 flip되나 합계·유의성 결론은 동일.)*
+> **McNemar p 기준선:** 표의 p는 **vs 직전 arm**(ablation.csv `mcnemar_p_vs_prev`). classifier_gate 0.18은 vs spotlight. 별도로 **vs 무방어**(case_id 페어링) 는 `eval.ablation` 이 **`results/mcnemar_vs_none.json` 으로 산출**한다(슬라이드 그림의 p 라벨이 이 파일을 읽는다 — 수기 상수 없음): plea **p=1.0**(불일치 11쌍, 6:5) · spotlight **p=0.18**(불일치 9쌍, 2:7) · classifier_gate **p=1.0**(불일치 2쌍, 1:1) · Tier A **p=0.002**(불일치 10쌍, 0:10). 어느 기준이든 theater 3종은 유의성 없음(n.s.), Tier A만 유의. *(주의: "불일치쌍 0" 아님 — 개별 케이스는 arm마다 flip되나 합계·유의성 결론은 동일.)*
 
 조건 분해(Tier A): 원본 clean 0.40→**0.00**, 난독화 obf 0.12→**0.00**(McNemar p=0.016). 게이트는 원본=난독화=0.00(P4).
 
@@ -174,6 +174,6 @@ domain-grouped split 확인: train/test 도메인 겹침 **없음**, 최대 (tes
 
 ## 7. 테스트 / 재현성
 
-- 유닛/통합 테스트 **120 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**·**군집McNemar 교집합·DLP경계분리·트레이스 PII 미직렬화**·**키불요 scripted 데모(무방어 유출/게이트 차단·뷰어 타임라인)**. (CI core 는 `--ignore=test_dlp_defenses` 로 **114 통과**; presidio 없으면 그 6건이 빠진다.)
+- 유닛/통합 테스트 **125 통과** (`.venv`, pytest-asyncio+presidio 포함) — 게이트·봉인·vault수명·병렬part·ASR분해·레일무력화·plea/spotlight·PresidioVault·**DLP fail-closed**·관측레일예외삼킴·**서버 스모크(HTTP money smoke·정상완주·DLP×TierA 정당발송·입력검증)**·**seam fail-closed·deadline·strict schema·confused-deputy**·**군집McNemar 교집합·DLP경계분리·트레이스 PII 미직렬화**·**키불요 scripted 데모(무방어 유출/게이트 차단·뷰어 타임라인)**. (CI core 는 `--ignore=test_dlp_defenses` 로 **119 통과**; presidio 없으면 그 6건이 빠진다.)
 - 재현 범위: **헤드라인 애블레이션은 라이브 OpenAI 호출**(temp=0 근사 재현 — gpt-4o-mini는 bit-exact 보장 안 함). 카세트 record/replay는 FakeProvider 경로 전용. DLP·channel_gap·R6/R7·e5·shieldgemma는 RunPod GPU 스크립트 산출로 단일 명령에 미포함.
 - GPU 실측 **완료**(§6c): Kanana P1a 격차 1.0 · ShieldGemma EN-KO 0.268 · R6 span 0.985 · R7 Macro 0.709 · e5 교차언어. (⚠️ P1b 난독화 붕괴는 사전등록 미달 0.1 — 정직 보고)

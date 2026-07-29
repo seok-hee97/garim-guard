@@ -34,7 +34,7 @@ curl -s -XPOST localhost:8000/v1/agent/run -H 'content-type: application/json' \
 | **구조적 로깅** | JSON 로그 + `episode_id` 상관(contextvar), ★PII 미로깅★ | [log.py](../src/agent/log.py) |
 | **DLP 배선** | `vault.restore`(최종 응답만)·egress DLP scan(외부싱크 잔여 원본 PII 차단)·after_tool fail-closed | loop.py·policy.py |
 | **Tier A 엄격 스키마** | 미선언 인자 거부 + 정수 암묵 형변환 거부 (gated: 서비스 on / 평가 off → 재현성 보존) | policy.py |
-| **테스트** | 120 통과(CI-core 114·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
+| **테스트** | 125 통과(CI-core 119·presidio 6) — 서버 스모크 + **HITL 승인→환불 실행·idempotency·거부·confused-deputy authz 차단** + seam fail-closed + deadline + strict schema + **군집McNemar·DLP경계·트레이스 PII** | [tests/](../tests/) |
 
 **라이브 검증(2026-07):** 실 gpt-4o-mini 로 `POST /v1/agent/run` → `lookup_customer(phone=<KR_PHONE_1>)`
 (DLP 가 모델이 보기 전 전화번호 토큰화), 게이트 통과, `finish=done`. Gemini 는 당시 503
@@ -124,7 +124,7 @@ OBS 는 **구조적 로그·트레이스·in-process 메트릭(카운터/히스�
 5. **실 IdP/멀티테넌트 배정 DB** — 현재 주입 자격증명(`SAFEAGENT_API_KEYS`) 인터페이스 → 실 OAuth/IdP + 고객-상담원 배정 DB.
 
 ### hardened (규모·규제 발생 시)
-- **관측 심화** — in-process 메트릭(`/v1/metrics`)·요청 미들웨어·`scripts.monitor`·eval heartbeat 는 **구현됨**. 남은 것: prometheus_client `/metrics`(Prometheus 노출 형식) + Grafana 대시보드 + 경보 4종(`leaks_total>0` 즉시 page · 차단율 밴드 · rail 드리프트 · 429율).
+- **관측 심화** — in-process 메트릭(`/v1/metrics`)·요청 미들웨어·`scripts.monitor`·eval heartbeat 는 **구현됨**. `leaks_total`(allowlist 밖 실행 = critical 불변식) 도 **구현**되어 `scripts.monitor` 가 0=초록/≥1=빨강으로 표시한다. 남은 것: prometheus_client `/metrics`(Prometheus 노출 형식) + Grafana 대시보드 + **외부 page 연동**(`leaks_total>0` 즉시 호출 · 차단율 밴드 · rail 드리프트 · 429율).
 - 레일 서빙: R6 PII NER·R7 유해를 추론 사이드카(GPU)로 분리, `after_tool` rail.score 를 `to_thread`. `RemoteRail`(RailScorer 계약 유지, fail-open).
 - PII 커버리지: RegexVault 5종 → Presidio 볼트 스왑(여권/면허/사업자 + NER 인라인). **이름(김민준) 등 비정형 PII 는 현재 미커버.**
 - 정책 거버넌스·핫리로드(SIGHUP+재검증), 감사로그 해시체인, 병렬 도구 saga 롤백, Tier C 격리, 동시성 세마포어/토큰버킷.

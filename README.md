@@ -13,7 +13,7 @@
 도구를 호출하는 한국어 AI 에이전트(ReAct 루프 + 5개 도구)를 `before_model / after_model / before_tool / after_tool` **4개 seam**으로 감싼 안전 런타임이다. 두 가지를 **측정으로 증명**하고, 그 논지를 **실제 구동 가능한 HTTP 서비스**로 구현했다.
 
 - **① 채널 조건부 탐지 격차** — 같은 인젝션을 (a) 사용자 발화 vs (b) 도구 반환값으로 주면, 한국어 가드 모델은 (a)에서 동작하고 (b)에서 실패한다. 성능이 아니라 **단일 발화 채점 모델이 도구 경계 너머를 못 본다는 설계 귀결**. (Kanana 실측: 발화 recall 1.0 → 도구 채널 0.0)
-- **② 강제는 분류기가 아니라 게이트에** — 난독화(base64)로 CPU 레일은 F1 0.99→0.0 붕괴하지만, **결정적 정책 게이트(Tier A)의 t-ASR은 불변**이다. 게이트는 문자열을 읽지 않고 도구 identity·정책 테이블만 보기 때문.
+- **② 강제는 분류기가 아니라 게이트에** — 난독화(base64)로 CPU 레일은 F1 0.99→0.0 붕괴하지만, **결정적 정책 게이트(Tier A)의 t-ASR은 불변**이다. 게이트는 **공격 텍스트의 의미를 분류하지 않는다** — 도구 identity·구조화 인자·정책 테이블로만 판정하기 때문.
 
 > **결론:** **분류기 단독으로는 이 채널에서 하드 보장을 제공할 수 없으므로**(온디바이스든 아니든) log-only 텔레메트리로 두고, **강제의 최종 권한은 도구별 결정적 게이트**가 가진다. 여기에 요청 스코프 가역 PII 볼트를 결합한다. *(단 강한 한국어 모델 Kanana는 올바른 문자열 채널에서 recall 1.0·난독화에도 ≥0.9 — "분류기 전부 무효"로 일반화하지 않는다. 분류기 강제 실험은 한국어를 못 보는 영어 CPU 레일만 측정됨.)*
 
@@ -50,7 +50,7 @@
   → 반복 → 최종 응답 + 트레이스(attempted/executed/gate_rule)
 ```
 
-**설계 규율:** 게이트는 **문자열 내용을 읽지 않는다** — 페이로드가 한국어든 이모지든 base64든 판정이 같다(난독화 불변). 4 seam은 전부 **fail-closed**(예외 시 통과가 아니라 안전한 차단).
+**설계 규율:** 게이트는 **공격 텍스트의 의미를 분류하지 않는다** — 도구 identity·구조화 인자·정책 allowlist 로만 판정한다(형식 검증·도메인 대조·egress DLP 스캔에서 문자열을 보긴 하지만, '이 문장이 공격인가'를 판단하지 않는다). 그래서 페이로드가 한국어든 이모지든 base64든 판정이 같다(난독화 불변). 4 seam은 전부 **fail-closed**(예외 시 통과가 아니라 안전한 차단).
 
 상세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 프로덕션 전환: [docs/PRODUCTION.md](docs/PRODUCTION.md)
 
@@ -109,6 +109,7 @@ uvicorn src.agent.server:app --port 8000
 |---|---|
 | `GET /healthz` | liveness (의존성 무관 200) |
 | `GET /readyz` | readiness (provider·rail 준비 여부) |
+| `GET /v1/metrics` | 관측 스냅샷 — 누적 카운터·in-flight·지연 분위수. **의도적 무인증**(스크레이퍼/모니터용, 응답에 PII 없음: 정수 + enum/정책키 라벨만) |
 | `POST /v1/agent/run` | 에이전트 실행 (**agent 역할 키 필수**, 없으면 401·역할 불일치 403) |
 | `GET /v1/approvals` | 대기 중 HITL 승인 목록 (PII 마스킹) — **approver/auditor** |
 | `POST /v1/approvals/{id}` | 승인/거부 → 백엔드 실행(idempotent) — **approver, 요청자≠승인자** |
@@ -148,7 +149,7 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 ### 5-3. 평가·재현
 
 ```bash
-pytest                              # 120 통과 (.venv, pytest-asyncio+presidio)
+pytest                              # 125 통과 (.venv, pytest-asyncio+presidio)
 python -m eval.run --split test --provider openai   # 애블레이션 스윕 → results/runs.jsonl
 python eval/ablation.py             # → results/ablation.csv (McNemar p, Wilson CI)
 python eval/kanana_compare.py       # 채널 조건부 격차 2×2 (GPU)
@@ -180,20 +181,24 @@ docker run -p 8000:8000 -e GEMINI_API_KEY=... -e APP_ENV=prod \
 | **provider 복원력** | async 네이티브 + tenacity 재시도(429/5xx) + 벽시계 타임아웃 | [_resilience.py](src/providers/_resilience.py) |
 | **fail-closed 4 seam · 구조적 로깅(PII 미로깅) · deadline 예산** | | [loop.py](src/agent/loop.py)·[log.py](src/agent/log.py) |
 | **실행 모니터링** | in-process 메트릭(카운터/히스토그램/게이지·PII 없음) + `GET /v1/metrics` 라이브 스냅샷 + 요청 로깅 미들웨어(X-Request-ID) + `scripts.monitor` 터미널 대시보드 + eval 진행 heartbeat. 사용법 [docs/USAGE.md §3-4b](docs/USAGE.md) | [metrics.py](src/agent/metrics.py)·[monitor.py](scripts/monitor.py) |
+| **★유출 불변식 계측(`leaks_total`)★** | 게이트가 *막은 것*(`gate_blocks_total`)과 별개로, **실제로 allowlist 밖으로 나간 실행**을 사후 판정해 센다. 무방어 arm 에서만 오르는 게 정상이고 Tier A 가 켜진 채 오르면 게이트 회귀 → 모니터가 빨강 경보 | [loop.py](src/agent/loop.py)·[policy.py](src/agent/policy.py) |
 
 ---
 
-## 7. 상태 (2026-07-28)
+## 7. 상태 (2026-07-29)
 
 | 항목 | 상태 |
 |---|---|
 | 런타임 코어 (4-seam ReAct + Tier A + DLP) | ✅ 구현·테스트 |
 | 평가 하네스 (KoTIP-Bench + 애블레이션 McNemar/Wilson) | ✅ 헤드라인 실측 완료 |
 | **실행 서비스** (FastAPI + HITL + authz + 상태 백엔드) | ✅ 구동 가능, 파일럿 전 단계 |
+| **실행 모니터링** (메트릭·`/v1/metrics`·`scripts.monitor`·`leaks_total`·heartbeat) | ✅ 구현·테스트 |
 | 학습 (R6 PII NER·R7 유해·레일) | ✅ GPU 산출(오프라인 부록) |
-| 유닛/통합 테스트 | ✅ **120 통과** (.venv; CI-core 114, presidio 6) |
+| 유닛/통합 테스트 | ✅ **125 통과** (.venv; CI-core 119, presidio 6) |
+| 발표 자산 (슬라이드·그림·PDF/PPTX) | ✅ 전 단계 스크립트화([USAGE §3-6](docs/USAGE.md)) — 수기 캡처 없음 |
+| **편집 가능 발표자료** (PptxGenJS · 네이티브 표/텍스트 + 발표자 노트) | ✅ `report/발표자료_편집본.pptx` ([gen_pptx.mjs](scripts/pptx/gen_pptx.mjs)) |
 
-**남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, 대시보드/경보.
+**남은 로드맵** ([docs/PRODUCTION.md](docs/PRODUCTION.md)): 실 외부 API 어댑터(Stripe/SMTP), 상태 영속화(DB/redis), per-ticket 고객 스코프, Prometheus 노출 형식 + Grafana 대시보드 + 외부 page 경보.
 
 **정직성 표기:** 헤드라인은 런타임 배선+근거 있는 3가지(Tier A·Kanana 채널갭·RegexVault DLP)만 주장. R6/R7/R4/ShieldGemma는 오프라인 부록. R10/R11은 데이터셋 매핑만(미실행). 사전등록 예측 P1b는 반증되어 정직 보고.
 

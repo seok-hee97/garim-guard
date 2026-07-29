@@ -1,0 +1,51 @@
+{
+  "basis": "vs_none",
+  "level": "row(case_id)",
+  "condition": "all",
+  "exploratory": true,
+  "note": "행 단위(난독화 변형 상관 미보정) 탐색적 p. 보수적 판단은 ablation_table.md 의 군집 단위 McNemar 를 쓸 것.",
+  "arms": {
+    "plea": {
+      "b01": 5,
+      "b10": 6,
+      "n_discordant": 11,
+      "p_value": 1.0,
+      "n_pairs": 60
+    },
+    "spotlight": {
+      "b01": 2,
+      "b10": 7,
+      "n_discordant": 9,
+      "p_value": 0.17969,
+      "n_pairs": 60
+    },
+    "classifier_gate": {
+      "b01": 1,
+      "b10": 1,
+      "n_discordant": 2,
+      "p_value": 1.0,
+      "n_pairs": 60
+    },
+    "tier_a": {
+      "b01": 10,
+      "b10": 0,
+      "n_discordant": 10,
+      "p_value": 0.00195,
+      "n_pairs": 60
+    },
+    "tier_a_b": {
+      "b01": 10,
+      "b10": 0,
+      "n_discordant": 10,
+      "p_value": 0.00195,
+      "n_pairs": 60
+    },
+    "cg_plus_tier_a": {
+      "b01": 10,
+      "b10": 0,
+      "n_discordant": 10,
+      "p_value": 0.00195,
+      "n_pairs": 60
+    }
+  }
+}
