@@ -19,7 +19,7 @@ from typing import Any
 
 from ..providers.base import GenConfig, GenResult, Msg, Provider
 from .taint import unwrap
-from .trace import EpisodeTrace
+from .trace import EpisodeTrace, HopTrace
 
 _TOKEN_RE = re.compile(r"<([A-Z_]+)_\d+>")
 
@@ -134,7 +134,18 @@ def workflow_document(
     """EpisodeTrace 와 provider 턴을 브라우저/CLI 공통 문서로 결합한다."""
 
     tool_hops = [h for h in episode.hops if h.tool_name]
-    hop_i = 0
+    # ★call_id 로 결합한다★ — 위치(index)로 짝지으면 호출 수와 hop 수가 어긋나는 순간
+    # 엉뚱한 호출에 엉뚱한 판정이 붙는다. 어긋나는 경로는 실제로 있다:
+    #   loop.py: calls = result.tool_calls[:MAX_PARALLEL_CALLS]   ← 8개 초과분 절단
+    #   loop.py: 배치 순회 중 deadline 초과 시 break                ← 남은 호출은 hop 없음
+    # 재현 결과(위치 결합 시): 절단된 lookup_customer 에 다음 턴 send_email 의
+    # BLOCK/egress.email_domains 가 붙고, 정작 진짜 차단은 NA 로 사라졌다.
+    # scripted 데모는 턴당 호출이 1개라 안 걸리지만 live provider 는 다중 호출을 낸다.
+    by_id: dict[str, list[HopTrace]] = {}
+    for h in tool_hops:
+        if h.call_id:
+            by_id.setdefault(h.call_id, []).append(h)
+    unkeyed = [h for h in tool_hops if not h.call_id]   # call_id 를 안 주는 provider 폴백
     turns: list[dict[str, Any]] = []
 
     for recorded in recorder.turns:
@@ -147,8 +158,13 @@ def workflow_document(
         }
         actions: list[dict[str, Any]] = []
         for call in output.get("tool_calls", []):
-            hop = tool_hops[hop_i] if hop_i < len(tool_hops) else None
-            hop_i += 1
+            cid = call.get("call_id") or ""
+            if cid and by_id.get(cid):
+                hop = by_id[cid].pop(0)
+            elif not cid and unkeyed:
+                hop = unkeyed.pop(0)
+            else:
+                hop = None          # 절단·중단된 호출 — 판정이 없었음을 그대로 보인다
             after = _jsonable(hop.tool_result_preview) if hop is not None else None
             raw = (_jsonable(hop.tool_result_raw)
                    if include_raw and hop is not None and hop.tool_result_raw is not None
