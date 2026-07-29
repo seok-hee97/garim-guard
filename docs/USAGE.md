@@ -33,7 +33,7 @@ cp .env.example .env                                   # GEMINI/GOOGLE_API_KEY �
 python -c "import src.config, src.providers.base, src.agent, src.dlp, src.rails"   # import 스모크
 python -m scripts.run_demo                              # ★핵심★ 무방어=유출 vs 게이트=차단 3-arm 대비
 python -m app.trace_view --out /tmp/trace_view.html     # 실행 과정 타임라인 HTML(기본 출력은 tracked라 --out 권장)
-python -m pytest --ignore=tests/test_dlp_defenses.py -q # CI-core 128 passed (presidio·키 불요)
+python -m pytest --ignore=tests/test_dlp_defenses.py -q # CI-core 131 passed (presidio·키 불요)
 ```
 
 `scripts.run_demo` 출력(실측):
@@ -197,7 +197,7 @@ python -m scripts.export_deck_pdf             # ⑨ 발표자료.pdf (PPTX → P
 | 명령 | 전제 | 검증 |
 |---|---|---|
 | `run_demo` · `cli --provider scripted` · `app.trace_view` | 없음 | 실행확인 |
-| `pytest` (전체 134 / CI-core 128) | presidio(전체) / 없음(CI-core) | 실행확인 |
+| `pytest` (전체 137 / CI-core 131) | presidio(전체) / 없음(CI-core) | 실행확인 |
 | `eval.ablation` · `check_contamination` · `expansion_v2 --report-only` | 없음(기존 runs.jsonl) | 실행확인 |
 | `gen_slide_figs` · `gen_arch_stack` · `gen_model_arch` · `gen_trace_shot` | matplotlib(figs) / graphviz(flow) / Chrome(stack·shot) | 실행확인 |
 | `uvicorn ... server` + `GET /healthz` | 없음 | 실행확인 |

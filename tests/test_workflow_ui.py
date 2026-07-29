@@ -227,3 +227,46 @@ def test_tool_error_is_not_reported_as_gate_block():
     a3 = ok["turns"][0]["actions"][0]
     assert a3["outcome"] == "executed"
     assert ok["summary"]["blocked"] == 0 and ok["summary"]["errored"] == 0
+
+
+def test_non_tool_hops_are_surfaced_as_runtime_events():
+    """★도구 없는 홉도 화면에 남는다★ — provider 오류·안전필터가 통째로 사라지던 회귀 방지.
+
+    회귀 이력: workflow_document 의 turns 는 recorder.turns 에서만 나오고 hop 소스는
+    `[h for h in episode.hops if h.tool_name]` 이었다. loop.py 가 provider 오류(140)와
+    모델 안전필터 차단(160)을 tool_name 없는 홉으로 남기는데, 이 홉들은 문서 어디에도
+    실리지 않아 화면이 "아무 일도 없었다"처럼 보였다.
+    """
+    import asyncio
+
+    from src.agent.loop import run_episode
+    from src.agent.policy import DefenseHooks
+    from src.agent.toolworld import default_world
+    from src.agent.workflow import (WorkflowRecorderProvider, format_workflow_text,
+                                    workflow_document)
+    from src.config import gen_config, load_policy
+
+    class _Boom:
+        name = "boom"
+
+        async def generate(self, messages, cfg):       # noqa: ARG002
+            raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    async def _go():
+        policy = load_policy()
+        rec = WorkflowRecorderProvider(_Boom(), mode="live")
+        ep = await run_episode("t", rec, gen_config(policy),
+                               hooks=DefenseHooks(policy, {"tier_a": True}, rail=None),
+                               world=default_world(), defenses={"tier_a": True},
+                               scenario="e", episode_id="boom00000000")
+        return ep, workflow_document(ep, rec, rail_name="n", defenses={"tier_a": True},
+                                     provider_label="p", model="n")
+
+    ep, doc = asyncio.run(_go())
+    non_tool = [h for h in ep.hops if not h.tool_name]
+    assert non_tool, "provider 오류 홉이 만들어지지 않았다 — 테스트 전제가 깨졌다"
+
+    events = doc.get("runtime_events") or []
+    assert len(events) == len(non_tool), "도구 없는 홉이 문서에서 누락됐다"
+    assert any("provider_error" in (e.get("note") or "") for e in events)
+    assert "provider_error" in format_workflow_text(doc), "CLI 출력에 런타임 이벤트가 없다"

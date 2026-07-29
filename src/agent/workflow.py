@@ -212,6 +212,21 @@ def workflow_document(
             "actions": actions,
         })
 
+    # ★도구 없는 홉도 화면에 실어야 한다★ — loop.py 는 provider 오류(140)·모델 안전필터
+    # 차단(160)·DLP fail-closed 를 tool_name 없는 홉으로 남긴다. turns 는 recorder 에서만
+    # 나오므로 이 홉들은 문서 어디에도 실리지 않았고, 화면은 "아무 일도 없었다"처럼 보였다.
+    # live provider 가 429 를 맞거나 안전필터가 걸리면 그 사실이 통째로 사라진다.
+    runtime_events = [
+        {
+            "hop": h.hop,
+            "decision": h.gate_decision,
+            "rule": h.gate_rule,
+            "note": h.note,
+            "latency_ms": h.latency_ms,
+        }
+        for h in episode.hops if not h.tool_name
+    ]
+
     first_user = ""
     if recorder.turns:
         for message in recorder.turns[0].messages:
@@ -255,6 +270,7 @@ def workflow_document(
             "pending_approval": episode.pending_approval,
         },
         "turns": turns,
+        "runtime_events": runtime_events,
         "audit": audit or {},
     }
 
@@ -318,6 +334,11 @@ def format_workflow_text(document: dict[str, Any]) -> str:
         if turn.get("provider_error"):
             lines.append(f"  [PROVIDER ERROR] {turn['provider_error']}")
 
+    if document.get("runtime_events"):
+        lines.append("╠══ 런타임 이벤트(도구 없는 홉) ══════════════════════════════╣")
+        for ev in document["runtime_events"]:
+            rule = f" · rule={ev['rule']}" if ev.get("rule") else ""
+            lines.append(f"  [hop {ev['hop']}] {ev['decision']}{rule} — {ev.get('note', '')}")
     lines += [
         "╠══ RESULT ═══════════════════════════════════════════════════╣",
         f"  finish={summary['finish_reason']} · attempted={summary['attempted']} "

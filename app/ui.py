@@ -221,10 +221,11 @@ function renderRun(d){
   <span class="tag">${esc(m.rail)}</span>${m.defenses.map(x=>`<span class="tag good">${esc(x)}</span>`).join("")}
   <div class="sub" style="margin-top:8px">${esc(m.scenario_description)}</div></div>
   <div class="grid">${metric("Finish",s.finish_reason)}${metric("Hops",s.hops)}${metric("Attempted",s.attempted)}
-  ${metric("Executed",s.executed)}${metric("Blocked",s.blocked)}</div>
+  ${metric("Executed",s.executed)}${metric("Blocked",s.blocked)}${s.errored?metric("실행오류",s.errored):""}</div>
   <div class="panel"><h2>① 입력과 before_model</h2><div class="stage"><div class="stage-title">ORIGINAL INPUT</div>${pre(inp.original)}</div>
   <div class="stage model"><div class="stage-title">PROVIDER-VISIBLE INPUT ${inp.changed_by_before_model?"· DLP/방어로 변경됨":""}</div>
   ${pre(inp.provider_visible)}</div></div>`;
+  h+=eventsHtml(d.runtime_events);
   d.turns.forEach(t=>h+=turnHtml(t,m));
   h+=`<div class="panel"><h2>최종 결과</h2><div class="final">${esc(s.final_text||"(최종 텍스트 없음)")}</div>
   <div class="flowline">finish=${esc(s.finish_reason)} · latency=${esc(s.latency_ms)}ms
@@ -247,6 +248,13 @@ function turnHtml(t,m){
   }else h+=`<div class="stage model"><div class="stage-title">MODEL FINAL RESPONSE</div>${pre(o.text||"")}</div>`;
   if(t.provider_error)h+=`<div class="stage block"><div class="stage-title">PROVIDER ERROR</div>${pre(t.provider_error)}</div>`;
   return h+`</div></div>`;
+}
+function eventsHtml(evs){
+  if(!evs||!evs.length)return "";
+  // 도구 없는 홉(provider 오류·모델 안전필터·DLP fail-closed) — 없으면 화면에서 통째로 사라진다.
+  return `<div class="panel"><h2>⚠ 런타임 이벤트 (도구 호출 없이 발생)</h2>`+
+    evs.map(e=>`<div class="stage block"><div class="stage-title">HOP ${e.hop} · ${esc(e.decision)}${e.rule?" · "+esc(e.rule):""}</div>${pre(e.note||"")}</div>`).join("")+
+    `</div>`;
 }
 function actionHtml(a){
   // 결과는 workflow.py 가 분류한 outcome 을 따른다 — !executed 를 차단으로 읽으면
