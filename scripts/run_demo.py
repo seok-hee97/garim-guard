@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 
 from src.config import ROOT, gen_config, load_policy
 from src.agent.cli import SCENARIOS, _DEMO_SCRIPT, _build_rail
@@ -45,14 +46,24 @@ def _mark(h) -> str:
     return "✅ 실행" if h.executed else f"🛑 차단({h.gate_rule})"
 
 
-async def _run_arm(arm_defs: dict, scenario: str):
+def _demo_episode_id(scenario: str, arm: str) -> str:
+    """★재현 가능한 episode_id★ — (시나리오, arm) 의 안정 해시.
+
+    기본값인 uuid4 를 쓰면 데모를 돌릴 때마다 results/demo_traces.jsonl 이 id 만 달라진 채
+    변경으로 잡혀(git dirty) '결정적 재생'이라는 문서 표현과 어긋난다. 홉·판정이 결정적이면
+    식별자도 결정적이어야 커밋된 트레이스가 바이트 단위로 재현된다."""
+    return hashlib.sha256(f"safeagent-demo:{scenario}:{arm}".encode()).hexdigest()[:12]
+
+
+async def _run_arm(arm_defs: dict, scenario: str, arm: str = "none"):
     policy = load_policy()
     cfg = gen_config(policy)
     user_input, _ = SCENARIOS[scenario]
     provider = FakeProvider.scripted(_DEMO_SCRIPT[scenario])   # ★키 불요★
     hooks = DefenseHooks(policy, arm_defs, rail=_build_rail())
     ep = await run_episode(user_input, provider, cfg, hooks=hooks,
-                           world=default_world(), defenses=arm_defs, scenario=scenario)
+                           world=default_world(), defenses=arm_defs, scenario=scenario,
+                           episode_id=_demo_episode_id(scenario, arm))
     return ep
 
 
@@ -70,9 +81,13 @@ async def _main() -> int:
 
     exfil = {}
     for label, defs, desc in ARMS:
-        ep = await _run_arm(defs, args.scenario)
+        ep = await _run_arm(defs, args.scenario, arm=label)
         # 트레이스에 arm 라벨을 실어 뷰어가 그룹핑
         ep.scenario = f"{args.scenario} · arm={label}"
+        # ★벽시계 제거★ — 커밋되는 데모 픽스처를 바이트 재현 가능하게 만든다. 홉·게이트 판정은
+        # 결정적인데 total_latency_ms 만 실행마다 달라져 git 이 매번 더러워졌다. 실제 지연은
+        # 아래 '관측 메트릭' 요약(p50/p95, in-process 레지스트리)에서 그대로 볼 수 있다.
+        ep.total_latency_ms = 0        # 0 = 이 픽스처에 타이밍 미기록(측정값 아님)
         writer.write(ep)
         print(f"── [{label}] {desc} " + "─" * max(2, 44 - len(label) - len(desc)))
         for h in ep.hops:
@@ -96,6 +111,9 @@ async def _main() -> int:
     print(f"    gate_blocks_total   : {snap['counters'].get('gate_blocks_total', {})}")
     print(f"    tool_executed_total : {snap['counters'].get('tool_executed_total', {})}")
     print(f"    dlp_redactions_total: {snap['counters'].get('dlp_redactions_total', {})}")
+    # ★critical 불변식★ — 실제로 allowlist 밖으로 나간 실행. 무방어 arm 1건만이 정상이고,
+    # 게이트 arm 이 여기 잡히면 회귀다(scripts.monitor 가 같은 카운터를 빨강으로 경보).
+    print(f"    leaks_total ★      : {snap['counters'].get('leaks_total', {})}  (무방어 arm 1건만 정상)")
     _lat = snap["histograms"].get("episode_latency_ms", {}).get("_", {})
     if _lat:
         print(f"    episode_latency     : p50={_lat['p50_ms']}ms p95={_lat['p95_ms']}ms n={_lat['count']}")

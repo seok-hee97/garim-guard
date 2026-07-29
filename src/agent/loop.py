@@ -43,6 +43,20 @@ def _rule_family(rule: str) -> str:
     카디널리티를 유한하게 유지한다(예: dlp.egress:body → dlp.egress). PII 아님(필드명일 뿐)."""
     return (rule or "unknown").split(":", 1)[0]
 
+
+def _egress_leak(hooks: Any, tool_name: str, args: Any) -> str | None:
+    """실행된 홉이 egress allowlist 를 벗어났는지 — hooks 의 TierAGate 를 오라클로 재사용한다.
+
+    게이트가 조립돼 있지 않은 hooks(NoOp·테스트 더블)면 None. 오라클 예외는 삼킨다 —
+    ★관측이 실행 경로를 되돌리지 않는다★(강제는 before_tool 전담, 여기는 사후 계측일 뿐)."""
+    gate = getattr(hooks, "gate", None)
+    if gate is None or not isinstance(args, dict):
+        return None
+    try:
+        return gate.egress_violation(tool_name, args)
+    except Exception:  # noqa: BLE001 — 계측 실패가 이미 끝난 도구 실행을 무효화하면 안 된다
+        return None
+
 # 한 모델 응답에서 처리할 최대 병렬 tool_call 수(무한 도구 폭주 방지).
 MAX_PARALLEL_CALLS = 8
 
@@ -260,6 +274,15 @@ async def _run_episode(
                 hop.taint_sources = sorted(sources_of(raw))
                 M.inc("tool_executed_total", tool=call.name)
                 M.observe("tool_latency_ms", int((time.perf_counter() - t0) * 1000), tool=call.name)
+                # ★critical 불변식 계측★ — 게이트가 무엇을 막았나(gate_blocks_total)가 아니라
+                # **실제로 무엇이 나갔나**를 센다. 실행이 끝난 인자를 egress allowlist 로 사후
+                # 판정해, allowlist 밖으로 나간 홉만 leaks_total 로 올린다. 무방어 arm 에서만
+                # 증가하는 게 정상이고, Tier A 가 켜진 채 증가하면 게이트 회귀 → 모니터가 경보.
+                _leak = _egress_leak(hooks, call.name, unwrap(args_for_exec))
+                if _leak:
+                    M.inc("leaks_total", tool=call.name, rule=_rule_family(_leak))
+                    alog.event(_log, "error", "leak_detected", tool=call.name, rule=_leak)
+                    hop.note = (hop.note + " | " if hop.note else "") + f"leak: {_leak}"
             except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001 — 도구 오류도 트레이스에
                 hop.executed = False
                 hop.note = f"tool_error: {type(e).__name__}: {e}"

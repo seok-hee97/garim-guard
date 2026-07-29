@@ -192,6 +192,22 @@ class TierAGate:
                                  decision="BLOCK")
         return None
 
+    def egress_violation(self, tool_name: str, args: dict) -> str | None:
+        """★유출 오라클★ — 이 (도구, 인자)가 egress allowlist 를 위반하는지만 판정한다.
+
+        `check()` 와 달리 **게이트 활성 여부와 무관**하게 쓰이도록 분리했다. loop 가 '실제로
+        실행된' 홉에 사후 적용해 `leaks_total` 을 센다 — 즉 차단 성공은 `gate_blocks_total`,
+        차단 실패(진짜 나간 것)는 `leaks_total` 이 센다. 무방어 arm 에서만 증가하는 게 정상이고,
+        Tier A 가 켜진 채로 이 값이 1 이상이면 게이트 회귀다(모니터가 빨강으로 경보).
+
+        반환: 위반한 allowlist 규칙 ref(예: 'egress.email_domains') 또는 None.
+        """
+        spec = self.tools.get(tool_name)
+        if not spec:
+            return None
+        blk = self._check_egress(spec, dict(args or {}))
+        return blk.rule if blk else None
+
     def _email_allowed(self, addr: str) -> bool:
         exact = {e.casefold() for e in (self.egress.get("email_exact", []) or [])}
         if addr.casefold() in exact:

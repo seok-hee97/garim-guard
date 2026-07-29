@@ -27,6 +27,25 @@ def test_counter_gauge_histogram_snapshot():
     assert h["count"] == 4 and h["p50_ms"] > 0 and h["p95_ms"] >= h["p50_ms"]
 
 
+def test_percentile_interpolates_inside_bucket():
+    """백분위는 버킷 상한을 그대로 뱉지 않고 [하한,상한) 안에서 보간해야 한다(과대보고 방지)."""
+    M.reset()
+    for _ in range(100):
+        M.observe("lat_ms", 30.0)          # 전량 (25,50] 버킷
+    h = M.snapshot()["histograms"]["lat_ms"]["_"]
+    assert 25.0 < h["p50_ms"] < 50.0, h    # 버킷 상한(50)으로 붙지 않음
+    assert h["p50_ms"] <= h["p95_ms"] <= 50.0
+
+
+def test_percentile_empty_and_monotonic():
+    M.reset()
+    assert M._percentile({"buckets": [0] * len(M.BUCKETS_MS), "sum": 0.0, "count": 0}, 0.5) == 0.0
+    for v in (5, 50, 500, 5000):
+        M.observe("lat2_ms", v)
+    h = M.snapshot()["histograms"]["lat2_ms"]["_"]
+    assert h["p50_ms"] <= h["p95_ms"]
+
+
 def test_cardinality_guard_drops_excess_series():
     """라벨 폭발/PII 오염 fail-safe — metric 당 시리즈 상한 초과분은 드롭 + dropped 카운트."""
     M.reset()
@@ -96,3 +115,45 @@ def test_monitor_renders_server_down_gracefully():
     from scripts.monitor import _render
     out = _render(None, None, "http://localhost:8000/v1/metrics")
     assert "server down" in out
+
+
+def test_monitor_leak_alarm_reflects_counter():
+    """★모니터의 leak 경보가 실제 카운터에 물려 있는지★ — 0=초록 문구, ≥1=경보 문구.
+
+    (회귀 이력: monitor 가 코드베이스 어디서도 방출하지 않는 leaks_total 을 읽어 경보가
+     구조적으로 절대 뜨지 않았다. 이 테스트가 그 재발을 막는다.)"""
+    from scripts.monitor import _render
+    base = {"build": {}, "in_flight": {}, "ready": True, "uptime_s": 1, "histograms": {}}
+    clean = _render({**base, "counters": {}}, None, "u")
+    assert "유출 0" in clean and "LEAK 경보" not in clean
+    dirty = _render({**base, "counters": {"leaks_total": {"tool=send_email,rule=egress.email_domains": 2}}},
+                    None, "u")
+    assert "LEAK 경보" in dirty and "2건" in dirty
+
+
+def test_leaks_total_emitted_only_when_gate_absent():
+    """★critical 불변식 계측★ — 무방어 arm 은 실제 유출 1건, Tier A arm 은 0건이어야 한다.
+
+    leaks_total 은 '게이트가 무엇을 막았나'가 아니라 '실제로 allowlist 밖으로 무엇이 나갔나'를
+    센다. 게이트가 켜진 채 이 값이 오르면 게이트 회귀다."""
+    import asyncio
+    from scripts.run_demo import _run_arm
+
+    async def _leaks(defs: dict) -> dict:
+        M.reset()
+        await _run_arm(defs, "poisoned_kb", arm="t")
+        return M.snapshot()["counters"].get("leaks_total", {})
+
+    none_leaks = asyncio.run(_leaks({}))
+    assert sum(none_leaks.values()) == 1, none_leaks
+    assert any("send_email" in k and "egress.email_domains" in k for k in none_leaks)
+    assert asyncio.run(_leaks({"tier_a": True})) == {}
+
+
+def test_demo_episode_ids_are_deterministic():
+    """같은 (시나리오, arm) 은 항상 같은 episode_id — 커밋된 트레이스가 바이트 재현된다."""
+    from scripts.run_demo import _demo_episode_id
+    a = _demo_episode_id("poisoned_kb", "tier_a")
+    assert a == _demo_episode_id("poisoned_kb", "tier_a")
+    assert a != _demo_episode_id("poisoned_kb", "none")
+    assert len(a) == 12

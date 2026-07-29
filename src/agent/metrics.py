@@ -95,17 +95,29 @@ def dec_gauge(name: str, n: float = 1, **labels: Any) -> None:
 
 
 def _percentile(h: dict[str, Any], q: float) -> float:
-    """누적 버킷 선형보간 근사 백분위(ms). count=0 이면 0."""
+    """누적 버킷 **선형보간** 근사 백분위(ms). count=0 이면 0.
+
+    목표 순위가 걸린 버킷을 찾고, 그 버킷 [하한, 상한) 안에서 관측이 균등분포한다고 보고
+    보간한다(Prometheus histogram_quantile 과 동일 가정). 버킷 상한을 그대로 반환하면
+    p50 이 항상 5·10·25… 같은 눈금값으로만 나와 실제보다 크게 보고된다.
+    상한이 +Inf 인 최상위 버킷은 외삽 불가 → 마지막 유한 경계로 절단(하한 편향, 정직).
+    """
     count = h["count"]
     if count == 0:
         return 0.0
     target = q * count
     cum = 0
     for i, c in enumerate(h["buckets"]):
+        if c == 0:
+            continue
+        if cum + c >= target:
+            upper = BUCKETS_MS[i]
+            if upper == float("inf"):
+                return float(BUCKETS_MS[-2])      # 외삽 금지 — 마지막 유한 경계로 절단
+            lower = float(BUCKETS_MS[i - 1]) if i > 0 else 0.0
+            frac = (target - cum) / c             # 0 < frac ≤ 1
+            return lower + (upper - lower) * frac
         cum += c
-        if cum >= target:
-            edge = BUCKETS_MS[i]
-            return float(edge) if edge != float("inf") else float(BUCKETS_MS[-2])
     return float(BUCKETS_MS[-2])
 
 

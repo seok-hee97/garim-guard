@@ -63,21 +63,24 @@ def _render(metrics: dict | None, progress: dict | None, url: str) -> str:
                    f"  ready={rc}{ready}{_X}  uptime={metrics.get('uptime_s',0)}s")
         out.append(f"in-flight: episodes={_B}{inf.get('episodes',0)}{_X}  idem={inf.get('idem',0)}")
         counters = metrics.get("counters", {})
-        # leak 경보(critical 불변식)
-        leaks = counters.get("leaks_total") or counters.get("tool_executed_total", {})
         out.append("")
         out += _table("episodes_total (finish_reason)", counters.get("episodes_total", {}))
         out += _table("gate_blocks_total (rule)", counters.get("gate_blocks_total", {}))
+        out += _table("leaks_total (tool,rule) ★0 이어야 정상★", counters.get("leaks_total", {}))
         out += _table("dlp_redactions_total (entity)", counters.get("dlp_redactions_total", {}))
         out += _table("errors_total (stage)", counters.get("errors_total", {}))
         out += _table("http_requests_total (method,route,status)", counters.get("http_requests_total", {}))
         lat = metrics.get("histograms", {}).get("episode_latency_ms", {}).get("_", {})
         if lat:
             out.append(f"{_DIM}episode_latency{_X}  p50={lat.get('p50_ms')}ms p95={lat.get('p95_ms')}ms n={lat.get('count')}")
-        # critical leak 경보
+        # ★critical 불변식 경보★ — leaks_total 은 '실제로 allowlist 밖으로 나간' 실행만 센다.
+        # 0 은 침묵이 아니라 초록으로 명시한다(계측이 살아있음과 유출 0 을 구분하기 위해).
         leaks_total = counters.get("leaks_total", {})
-        if leaks_total:
-            out.append(f"{_R}⚠ LEAK 경보 leaks_total={leaks_total}{_X}")
+        n_leaks = sum(leaks_total.values()) if leaks_total else 0
+        if n_leaks:
+            out.append(f"{_R}⚠ LEAK 경보 — allowlist 밖 실행 {n_leaks}건: {leaks_total}{_X}")
+        else:
+            out.append(f"{_G}● 유출 0 — allowlist 밖 실행 없음(leaks_total=0){_X}")
     if progress is not None:
         out.append("─" * 68)
         pct = progress.get("pct", 0)
