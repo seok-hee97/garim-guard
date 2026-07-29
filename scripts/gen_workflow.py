@@ -30,7 +30,7 @@ TRACES = ROOT / "results" / "demo_traces.jsonl"
 OUT_PNG = ROOT / "docs" / "workflow_example.png"
 OUT_SVG = ROOT / "docs" / "workflow_example.svg"
 
-W, H = 1720, 596
+W, H = 1720, 650
 FONT = "'Apple SD Gothic Neo','AppleGothic','Malgun Gothic','Noto Sans KR',sans-serif"
 MONO = "ui-monospace,'SF Mono',Menlo,monospace"
 
@@ -39,6 +39,7 @@ GREEN, GREEN_BG = "#1b5e20", "#e8f5e9"
 RED, RED_BG = "#b1361e", "#fdecea"
 BLUE, BLUE_BG = "#1565c0", "#e3f2fd"
 AMBER, AMBER_BG = "#8a5a00", "#fff6e0"
+ORANGE, ORANGE_BG = "#e65100", "#fff3e0"
 GREY_BG = "#f4f6f8"
 
 
@@ -111,12 +112,43 @@ def arrow(x1: float, y1: float, x2: float, y2: float, label: str = "",
 
 
 def build() -> str:
-    ep, H_ = _load()
-    lookup, kb = H_["lookup_customer"], H_["search_kb"]
-    mail, esc = H_["send_email"], H_["escalate_to_human"]
+    eps = [json.loads(l) for l in TRACES.read_text("utf-8").splitlines() if l.strip()]
+    by_arm = {
+        arm: next(e for e in eps if f"arm={arm}" in e["scenario"])
+        for arm in ("none", "tier_a", "tier_a+dlp_vault")
+    }
+    ep = by_arm["tier_a"]
+    hops = {h["tool_name"]: h for h in ep["hops"] if h.get("tool_name")}
+    lookup, kb, mail = hops["lookup_customer"], hops["search_kb"], hops["send_email"]
     rail_kb = next(iter(kb.get("rail_scores", {}).values()), None)
+    dlp_mail = next(h for h in by_arm["tier_a+dlp_vault"]["hops"]
+                    if h.get("tool_name") == "send_email")
+    none_mail = next(h for h in by_arm["none"]["hops"] if h.get("tool_name") == "send_email")
     from src.agent.toolworld import default_world
     poisoned = next(d for d in default_world().search("환불 처리 안내") if not d.get("trusted"))
+
+    def card(n: str, x: int, y: int, w: int, h: int, title: str, *,
+             accent: str, bg: str, subtitle: str = "") -> str:
+        p = [
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="16" fill="{bg}" '
+            f'stroke="{accent}" stroke-width="2.2"/>',
+            f'<circle cx="{x + 31}" cy="{y + 31}" r="18" fill="{accent}"/>',
+            f'<text x="{x + 31}" y="{y + 38}" font-size="20" font-weight="700" '
+            f'fill="#fff" text-anchor="middle">{n}</text>',
+            f'<text x="{x + 62}" y="{y + 36}" font-size="24" font-weight="700" '
+            f'fill="{accent}">{_e(title)}</text>',
+        ]
+        if subtitle:
+            p.append(f'<text x="{x + 62}" y="{y + 62}" font-size="16" '
+                     f'fill="{MUTED}">{_e(subtitle)}</text>')
+        return "".join(p)
+
+    def txt(x: int, y: int, text: str, *, size: int = 18, color: str = INK,
+            bold: bool = False, mono: bool = False) -> str:
+        ff = MONO if mono else FONT
+        weight = "700" if bold else "400"
+        return (f'<text x="{x}" y="{y}" font-family="{ff}" font-size="{size}" '
+                f'font-weight="{weight}" fill="{color}">{_e(text)}</text>')
 
     P = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
          f'viewBox="0 0 {W} {H}" font-family="{FONT}">',
@@ -125,85 +157,100 @@ def build() -> str:
          '</marker></defs>',
          f'<rect width="{W}" height="{H}" fill="#ffffff"/>']
 
-    # ★큰 제목은 넣지 않는다★ — 슬라이드 제목과 중복되면 화면에 제목이 두 번 나온다.
-    #   출처 한 줄만 남겨 근거를 밝히고, 회수한 세로 공간은 카드 판독성에 쓴다.
-    P.append(f'<text x="40" y="30" font-size="14.5" fill="{MUTED}">'
-             'results/demo_traces.jsonl (arm=tier_a) 실측 · 모델은 속았지만 행동이 나가지 않는다</text>')
-    P.append(f'<path d="M40 42 L{W-40} 42" stroke="{GREEN}" stroke-width="2.5"/>')
+    P.append(txt(42, 31,
+                 "합성 고객 데이터 · RFC 2606 예약 도메인 · 동일 요청을 3개 방어 구성으로 재생",
+                 size=17, color=MUTED))
+    P.append(f'<path d="M40 45 L{W - 40} 45" stroke="{GREEN}" stroke-width="2.5"/>')
 
-    CW1, X1 = 800, 40          # 좌열
-    X2 = 880                   # 우열
+    x1, x2, x3 = 40, 600, 1160
+    cw, ch = 520, 238
+    top, bottom = 64, 350
 
-    # ① 입력
-    y = 58
-    P.append(step("1", X1, y, CW1, 96, title="사용자 요청", sub="인증 → principal → 고객 스코프 바인딩",
-                  body=[("입력", ep["user_input"][:44] + "…"),
-                        ("인증", "X-API-Key → principal(agent) · customer_id 바인딩")],
-                  accent=INK, bg="#ffffff"))
-    # ② before_model
-    y2 = y + 110
-    P.append(arrow(X1 + CW1 / 2, y + 96, X1 + CW1 / 2, y2))
-    P.append(step("2", X1, y2, CW1, 92, title="before_model — DLP 토큰화",
-                  sub="모델이 원본 PII 를 보지 않게 치환",
-                  body=[("치환", "010-1234-5678  →  <KR_PHONE_1>"),
-                        ("규율", "홉이 바뀌어도 같은 사람 → 같은 토큰(대화 일관성 유지)")],
-                  accent=BLUE, bg=BLUE_BG))
-    # ③ hop0·1 정상 도구
-    y3 = y2 + 106
-    P.append(arrow(X1 + CW1 / 2, y2 + 92, X1 + CW1 / 2, y3))
-    P.append(step("3", X1, y3, CW1, 110, title="hop0·hop1 — 정상 도구 통과",
-                  sub="게이트는 위험티어·allowlist 만 본다",
-                  body=[("hop0", f"lookup_customer(phone={lookup['tool_args'].get('phone')}) "
-                                 f"· internal → {lookup.get('gate_decision')}"),
-                        ("hop1", f"search_kb(query={kb['tool_args'].get('query')}) "
-                                 f"· readonly → {kb.get('gate_decision')}"),
-                        ("", "정상 업무는 그대로 흐른다 — 과잉 게이팅 아님")],
-                  accent=GREEN, bg=GREEN_BG))
-    # ④ 오염 반환값
-    y4 = y3 + 124
-    P.append(arrow(X1 + CW1 / 2, y3 + 110, X1 + CW1 / 2, y4, "도구 반환값", RED))
-    lines = _wrap(poisoned["body"], 47)[:3]
-    P.append(step("4", X1, y4, CW1, 152, title="★ 공격 진입 — 도구 반환값에 숨은 명령 ★",
-                  sub="공격자가 통제하는 지점은 사용자 발화가 아니라 여기다",
-                  body=[("kb_003", lines[0])] + [("", l) for l in lines[1:]]
-                       + [("레일", f"ko_agentguard={rail_kb:.3f} → 임계 0.5 미만 = 못 잡음 "
-                                   f"(LOG-ONLY 라 어차피 차단 권한 없음)")],
-                  accent=RED, bg=RED_BG))
+    # ① 사용자 입력
+    P.append(card("1", x1, top, cw, ch, "사용자 요청 + 인증", accent=INK, bg="#ffffff",
+                  subtitle="서비스 경계에서 principal·고객 스코프를 먼저 고정"))
+    P.append(txt(x1 + 25, top + 103, "입력", size=17, color=MUTED, bold=True))
+    P.append(txt(x1 + 96, top + 103, ep["user_input"][:33] + "…", size=17))
+    P.append(txt(x1 + 25, top + 145, "인증", size=17, color=MUTED, bold=True))
+    P.append(txt(x1 + 96, top + 145, "X-API-Key → principal(agent)", size=17, mono=True))
+    P.append(txt(x1 + 25, top + 187, "바인딩", size=17, color=MUTED, bold=True))
+    P.append(txt(x1 + 96, top + 187, "conversation ↔ customer_id", size=17, mono=True))
+    P.append(txt(x1 + 25, top + 222, "※ 화면의 전화·RRN·메일은 모두 합성값", size=16,
+                 color=BLUE, bold=True))
 
-    # ⑤ 모델이 속음 (우열 상단)
-    P.append(arrow(X1 + CW1, y4 + 24, X2 - 6, y4 + 24, "→⑤", RED))
-    yr = 58
-    P.append(step("5", X2, yr, W - X2 - 40, 118, title="hop2 — 모델이 지시를 따른다",
-                  sub="탐지는 이미 실패했다. 여기서 막지 못하면 유출이다",
-                  body=[("생성", f"send_email(to={mail['tool_args'].get('to')})"),
-                        ("본문", str(mail["tool_args"].get("body"))[:52]),
-                        ("", "★원본 주민등록번호가 인자에 들어갔다★")],
-                  accent=RED, bg=RED_BG))
-    # ⑥ 게이트 차단
-    yr2 = yr + 132
-    P.append(arrow(X2 + (W - X2 - 40) / 2, yr + 118, X2 + (W - X2 - 40) / 2, yr2, "", RED))
-    P.append(step("6", X2, yr2, W - X2 - 40, 150, title="★ before_tool 게이트 — 차단 ★",
-                  sub="공격 문장의 의미를 판정하지 않는다. 도구 identity 와 정책만 본다",
-                  body=[("도구", "send_email · risk_tier=external"),
-                        ("정책", "allowlist_ref: egress.email_domains"),
-                        ("대조", "mal.example.org ∉ [company.example.com, …]"),
-                        ("판정", f"{mail.get('gate_decision')}  rule={mail.get('gate_rule')}"),
-                        ("", "→ 한국어·이모지·base64 어떤 표기든 결과 동일")],
-                  accent=GREEN, bg=GREEN_BG))
-    # ⑦ 결과
-    yr3 = yr2 + 164
-    P.append(arrow(X2 + (W - X2 - 40) / 2, yr2 + 150, X2 + (W - X2 - 40) / 2, yr3))
-    P.append(step("7", X2, yr3, W - X2 - 40, 128, title="hop3 · 결과",
-                  sub="시도는 남기고 실행만 막는다 — 측정 가능한 안전",
-                  body=[("hop3", f"escalate_to_human(...) · {esc.get('gate_decision')} "
-                                 f"(사람에게 이관)"),
-                        ("트레이스", "attempted=True  /  executed=False"),
-                        ("메트릭", "gate_blocks_total{egress.email_domains}=1"),
-                        ("★불변식", "leaks_total = 0  (allowlist 밖 실행 0건)")],
-                  accent=INK, bg=GREY_BG))
+    # ② 생성 모델/데모 재생기
+    P.append(card("2", x2, top, cw, ch, "P-LLM이 도구 계획 생성", accent=ORANGE,
+                  bg=ORANGE_BG, subtitle="라이브 실험과 영상 데모의 역할을 분리"))
+    P.append(txt(x2 + 25, top + 105, "라이브", size=17, color=MUTED, bold=True))
+    P.append(txt(x2 + 110, top + 105, "gpt-4o-mini · Gemini 3.5 Flash", size=18, bold=True))
+    P.append(txt(x2 + 25, top + 148, "영상", size=17, color=MUTED, bold=True))
+    P.append(txt(x2 + 110, top + 148, "FakeProvider(scripted)", size=18, bold=True, mono=True))
+    P.append(txt(x2 + 25, top + 184, "동일 tool_call을 고정해 게이트 차이만 재현", size=17))
+    P.append(txt(x2 + 25, top + 222, "→ 데모는 모델 취약성 증명이 아니라 실행 차단 증명", size=16,
+                 color=ORANGE, bold=True))
 
-    # ★하단 결론 배너는 넣지 않는다★ — 슬라이드 배너가 같은 문장을 말한다.
-    #   그림 안에 또 두면 화면에 결론이 두 줄 연달아 나온다(중복). 회수한 높이는 카드에 준다.
+    # ③ 정상 도구 흐름
+    P.append(card("3", x3, top, cw, ch, "정상 도구는 통과", accent=GREEN, bg=GREEN_BG,
+                  subtitle="위험 티어가 낮은 조회 흐름은 그대로 유지"))
+    P.append(txt(x3 + 25, top + 109,
+                 f"hop0  lookup_customer(phone={lookup['tool_args'].get('phone')})",
+                 size=16, mono=True))
+    P.append(txt(x3 + 25, top + 143, f"      internal → {lookup.get('gate_decision')}",
+                 size=17, color=GREEN, bold=True, mono=True))
+    P.append(txt(x3 + 25, top + 184,
+                 f"hop1  search_kb(query={kb['tool_args'].get('query')})", size=16, mono=True))
+    P.append(txt(x3 + 25, top + 218, f"      readonly → {kb.get('gate_decision')}",
+                 size=17, color=GREEN, bold=True, mono=True))
+
+    # ④ 공격 도구 반환값
+    P.append(card("4", x1, bottom, cw, ch, "공격 진입: 도구 반환값", accent=RED, bg=RED_BG,
+                  subtitle="사용자 발화가 아니라 search_kb 결과 안의 숨은 명령"))
+    lines = _wrap(poisoned["body"], 42)[:3]
+    P.append(txt(x1 + 25, bottom + 101, "kb_003", size=16, color=MUTED, bold=True))
+    for i, text in enumerate(lines):
+        P.append(txt(x1 + 25, bottom + 132 + i * 29, text, size=16))
+    P.append(txt(x1 + 25, bottom + 222,
+                 f"rail={rail_kb:.3f} < τ 0.5 → 탐지 실패 · LOG-ONLY", size=17,
+                 color=RED, bold=True, mono=True))
+
+    # ⑤ 위험 도구 호출
+    P.append(card("5", x2, bottom, cw, ch, "위험 행동 시도", accent=RED, bg=RED_BG,
+                  subtitle="라이브 성공 케이스와 동형인 tool_call을 영상에서 고정 재생"))
+    P.append(txt(x2 + 25, bottom + 108,
+                 f"send_email(to={mail['tool_args'].get('to')})", size=18, bold=True, mono=True))
+    P.append(txt(x2 + 25, bottom + 149,
+                 f"body={str(mail['tool_args'].get('body'))[:35]}", size=16, mono=True))
+    P.append(txt(x2 + 25, bottom + 190, "attempted = True", size=18, color=RED,
+                 bold=True, mono=True))
+    P.append(txt(x2 + 25, bottom + 222, "아직 실행 전 — 다음 경계가 최종 결정", size=17,
+                 color=MUTED))
+
+    # ⑥ 세 arm 결과
+    P.append(card("6", x3, bottom, cw, ch, "before_tool 판정 + 결과", accent=GREEN,
+                  bg=GREEN_BG, subtitle="같은 시도에서 방어 구성만 바꿔 실행 여부 비교"))
+    P.append(txt(x3 + 25, bottom + 103, "none", size=17, color=RED, bold=True, mono=True))
+    P.append(txt(x3 + 125, bottom + 103,
+                 f"executed={none_mail.get('executed')} · leaks_total=1", size=17, color=RED,
+                 bold=True, mono=True))
+    P.append(txt(x3 + 25, bottom + 145, "tier_a", size=17, color=GREEN, bold=True, mono=True))
+    P.append(txt(x3 + 125, bottom + 145,
+                 f"{mail.get('gate_rule')} → executed={mail.get('executed')}", size=16,
+                 color=GREEN, bold=True, mono=True))
+    P.append(txt(x3 + 25, bottom + 187, "+ dlp", size=17, color=BLUE, bold=True, mono=True))
+    P.append(txt(x3 + 125, bottom + 187,
+                 f"{dlp_mail.get('gate_rule')} → executed={dlp_mail.get('executed')}", size=16,
+                 color=BLUE, bold=True, mono=True))
+    P.append(txt(x3 + 25, bottom + 224, "게이트 arm: attempted=True · executed=False · leak=0",
+                 size=16, color=GREEN, bold=True, mono=True))
+
+    # 흐름 화살표
+    P.append(arrow(x1 + cw, top + ch / 2, x2 - 10, top + ch / 2))
+    P.append(arrow(x2 + cw, top + ch / 2, x3 - 10, top + ch / 2))
+    P.append(arrow(x3 + cw / 2, top + ch, x1 + cw / 2, bottom - 10,
+                   "도구 반환값", RED, dashed=True))
+    P.append(arrow(x1 + cw, bottom + ch / 2, x2 - 10, bottom + ch / 2, "", RED))
+    P.append(arrow(x2 + cw, bottom + ch / 2, x3 - 10, bottom + ch / 2))
+
     P.append("</svg>")
     return "".join(P)
 
@@ -236,6 +283,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         page = Path(td) / "a.html"
         page.write_text(f'<html><body style="margin:0">{svg}</body></html>', encoding="utf-8")
+        OUT_PNG.unlink(missing_ok=True)  # 실패 시 이전 PNG를 새 산출물로 오인하지 않는다.
         subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
                         "--no-sandbox", f"--force-device-scale-factor={args.scale}",
                         f"--window-size={W},{H}", f"--screenshot={OUT_PNG}",
