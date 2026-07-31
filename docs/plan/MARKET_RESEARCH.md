@@ -152,8 +152,8 @@
 |---|---|---|---|---|
 | ① | **한국 고유 식별자 PII 커버리지** — 주민번호·전화번호는 다들 하지만 사업자등록번호·법인등록번호·외국인등록번호·건강보험증번호·운전면허(지역코드)·여권을 체계적으로 다룬다고 명시한 곳이 드물다. Presidio는 **기본 영어 전용**이고 OpenAI Privacy Filter의 엔티티 8종에도 한국 식별자가 없다 | Presidio 공식 문서가 "기본 설정에는 영어용 recognizer와 모델만 포함"이라 명시 | ✅ **제품 축 A** | [기획서 §1.3](기획서.md#13-차별화-축) |
 | ② | **공개 한국어 인젝션 코퍼스 부재** — 2025 정보보호학회 논문(30만+ 프롬프트)은 미공개, `korean-guardrail-dataset`의 인젝션 파트는 5K 수준 번역본. 한글 자모분해·초성체·로마자·한자혼용·존댓말 사회공학 등 한국어 고유 우회 벡터는 체계적으로 다뤄진 적이 없다 | Prompt Guard 2·ProtectAI DeBERTa는 한국어 미지원. Kanana Safeguard-Prompt조차 F1 0.844로 개선 여지 | ✅ **평가 축 B** | [기획서 §3](기획서.md#3-벤치마크평가셋-구축) |
-| ③ | **tool-call / MCP 층 DLP** — 어떤 OSS 게이트웨이도 tool call *인자* 안의 PII나, tool 결과로 들어온 비신뢰 데이터가 다음 tool call로 유출되는 경로를 추적하지 않는다. LiteLLM MCP Guardrails·NeMo tool-calling rail은 호출 허용 여부만 본다 | 국내에서는 윈스만 근접. OWASP Agentic Top 10은 2025-12에야 나옴 | ✅ **제품 축 C** | [ARCHITECTURE §5](ARCHITECTURE.md#5-tool-call-dlp) |
-| ④ | **한국어 가역 마스킹** — 조사 결합(`홍길동이` → `[PERSON_1]이`) 처리가 한국어 특유의 난제인데 이걸 푸는 OSS가 없다. 레퍼런스였던 LLM Guard의 Anonymize/Deanonymize는 2026-07-09 아카이브됐고 한국어 품질도 낮았다 | — | ✅ **제품 축 A에 포함** | [ARCHITECTURE §3](ARCHITECTURE.md#3-가역-마스킹-볼트) |
+| ③ | **tool-call / MCP 층 DLP** — 어떤 OSS 게이트웨이도 tool call *인자* 안의 PII나, tool 결과로 들어온 비신뢰 데이터가 다음 tool call로 유출되는 경로를 추적하지 않는다. LiteLLM MCP Guardrails·NeMo tool-calling rail은 호출 허용 여부만 본다 | 국내에서는 윈스만 근접. OWASP Agentic Top 10은 2025-12에야 나옴 | ✅ **제품 축 C** | [ARCHITECTURE §6](ARCHITECTURE.md#6-tool-call-dlp--축-c) |
+| ④ | **한국어 가역 마스킹** — 조사 결합(`홍길동이` → `[PERSON_1]이`) 처리가 한국어 특유의 난제인데 이걸 푸는 OSS가 없다. 레퍼런스였던 LLM Guard의 Anonymize/Deanonymize는 2026-07-09 아카이브됐고 한국어 품질도 낮았다 | — | ✅ **제품 축 A에 포함** | [ARCHITECTURE §5.2](ARCHITECTURE.md#52-가역-마스킹-볼트) |
 | ⑤ | **오탐률(FPR) 공개 부재** — 국내 8개 제품 중 오탐률을 수치로 공개한 곳이 0. 공개 비교 벤치마크도 없어 비교 자체가 불가능 | §2.2 매트릭스 · 과탐이 곧 우회(섀도우 AI)를 유발한다는 InjecGuard(arXiv:2410.22770)의 지적 | ✅ **헤드라인 지표로 승격** | [기획서 §2](기획서.md#2-목표-및-성공-지표) |
 
 미대응으로 남기는 갭(정직하게 기록): Shadow AI 앱 카탈로그, 멀티모달 유출 경로(OCR·HWP/HWPX 파싱), 출력물 워터마킹, 비용·토큰 거버넌스.
@@ -162,7 +162,7 @@
 
 ## §5. 규제 앵커 → 기능 번역
 
-국내 시장의 수요 동인이자, 감사 로그 스키마의 `regulatory_tags[]` 설계 근거다([ARCHITECTURE §6](ARCHITECTURE.md#6-감사-로그-스키마)).
+국내 시장의 수요 동인이자, 감사 로그 스키마의 `regulatory_tags[]` 설계 근거다([ARCHITECTURE §8](ARCHITECTURE.md#8-감사-로그-스키마)).
 
 | 규제·지침 | 시점 | 핵심 요구 | 게이트웨이 기능으로의 번역 |
 |---|---|---|---|
@@ -173,7 +173,7 @@
 | **N2SF (국가망보안체계)** | 2026 「국가 사이버보안 기본 지침」 개정으로 공식화 | 정보서비스 모델 8종에 "생성형 AI 활용" 포함. KISA 2026 도입 지원 45억, 6개 컨소시엄 | 망분리 완화 = 공공기관이 외부 AI에 접근 → **프롬프트 통제 레이어가 필수 전제**. 탐지 모델의 완전 로컬 구동이 요건 |
 | **국정원 / 과기정통부 AI 보안 가이드라인** | 2023-06 최초 → 개정판 + 「AI 보안 가이드북」(15개 위협 · 30개 대응) | 공공(국정원, N2SF 연계) / 민간(과기정통부) 이원 | 위협 분류를 정책 카테고리로 사용 |
 
-> **설계에의 직접 함의**: N2SF와 금융권 요건이 겹치는 지점이 "탐지 엔진 자체가 어디서 도는가"다. 국내 벤더 대부분이 "LLM 기반 탐지"라고만 하고 그 LLM의 위치를 밝히지 않는다. 본 프로젝트는 **탐지는 전부 로컬, 생성만 외부**라는 분리를 명시적 설계 원칙으로 세운다([ARCHITECTURE §7](ARCHITECTURE.md#7-온디바이스--api-분리-원칙)).
+> **설계에의 직접 함의**: N2SF와 금융권 요건이 겹치는 지점이 "탐지 엔진 자체가 어디서 도는가"다. 국내 벤더 대부분이 "LLM 기반 탐지"라고만 하고 그 LLM의 위치를 밝히지 않는다. 본 프로젝트는 **탐지는 전부 로컬, 생성만 외부**라는 분리를 명시적 설계 원칙으로 세운다([ARCHITECTURE §9](ARCHITECTURE.md#9-온디바이스--api-분리-원칙)).
 
 ---
 
@@ -205,7 +205,7 @@
 | **Kong AI Gateway** | OSS 티어가 `ai-proxy` + 정규식 `ai-prompt-guard`뿐. 시맨틱 가드·PII sanitizer·커스텀 가드레일은 전부 Enterprise |
 | **smilegate-ai/kor_unsmile** | 비영리·학술 목적 배포 → 상용 학습 불가 |
 | **ai4privacy/pii-masking-*** | 커스텀 학술 라이선스, 상용은 별도 계약 필요 |
-| **OPA/Rego (초기 도입)** | 솔로 5주 범위에 운영 부담 과잉. 단 스키마는 Rego 컴파일 가능한 형태로 설계 — [ARCHITECTURE §6](ARCHITECTURE.md#6-감사-로그-스키마) |
+| **OPA/Rego (초기 도입)** | 솔로 5주 범위에 운영 부담 과잉. 단 스키마는 Rego 컴파일 가능한 형태로 설계 — [ARCHITECTURE §8](ARCHITECTURE.md#8-감사-로그-스키마) |
 | **NeMo Guardrails** | Apache 2.0에 활발(v0.23.0, 2026-07)하고 HF classifier rail로 Kanana를 꽂을 수 있으나, Colang DSL 학습 비용이 솔로 5주에 부담. **v2 후보로 기록** |
 
 ### 6.3 한국어 데이터 자산
