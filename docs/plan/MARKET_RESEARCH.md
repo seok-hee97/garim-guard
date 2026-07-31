@@ -150,7 +150,7 @@
 
 | # | 갭 | 근거 | 본 프로젝트 | 위치 |
 |---|---|---|---|---|
-| ① | **한국 고유 식별자 PII 커버리지** — 주민번호·전화번호는 다들 하지만 사업자등록번호·법인등록번호·외국인등록번호·건강보험증번호·운전면허(지역코드)·여권을 체계적으로 다룬다고 명시한 곳이 드물다. Presidio는 **기본 영어 전용**이고 OpenAI Privacy Filter의 엔티티 8종에도 한국 식별자가 없다 | Presidio 공식 문서가 "기본 설정에는 영어용 recognizer와 모델만 포함"이라 명시 | ✅ **제품 축 A** | [기획서 §1.3](기획서.md#13-차별화-축) |
+| ① | **한국 고유 식별자를 다루는 오픈소스·온프렘 수단이 없다** — Presidio는 **기본 영어 전용**이고 OpenAI Privacy Filter의 엔티티 8종에도 한국 식별자가 없다. ⚠️ **단 클라우드에는 있다** — Google Cloud Sensitive Data Protection에 한국 infoType 6종(`KOREA_RRN`, `KOREA_PASSPORT`, `KOREA_ARN`, `KOREA_BRN`, `KOREA_DRIVERS_LICENSE_NUMBER`, `KOREA_NHI_NUMBER`)이 내장돼 있다. 갭은 "탐지기가 없다"가 아니라 **"데이터를 내보내지 않고 쓸 수 있는 탐지기가 없다"** 이다 | Presidio 공식 문서가 "기본 설정에는 영어용 recognizer와 모델만 포함"이라 명시 · [SDP infoType 레퍼런스](https://docs.cloud.google.com/sensitive-data-protection/docs/infotypes-reference) | ✅ **제품 축 A** (온프렘 한정으로 좁혀 정의) | [기획서 §1.3](기획서.md#13-차별화-축) |
 | ② | **공개 한국어 인젝션 코퍼스 부재** — 2025 정보보호학회 논문(30만+ 프롬프트)은 미공개, `korean-guardrail-dataset`의 인젝션 파트는 5K 수준 번역본. 한글 자모분해·초성체·로마자·한자혼용·존댓말 사회공학 등 한국어 고유 우회 벡터는 체계적으로 다뤄진 적이 없다 | Prompt Guard 2·ProtectAI DeBERTa는 한국어 미지원. Kanana Safeguard-Prompt조차 F1 0.844로 개선 여지 | ✅ **평가 축 B** | [기획서 §3](기획서.md#3-벤치마크평가셋-구축) |
 | ③ | **tool-call / MCP 층 DLP** — 어떤 OSS 게이트웨이도 tool call *인자* 안의 PII나, tool 결과로 들어온 비신뢰 데이터가 다음 tool call로 유출되는 경로를 추적하지 않는다. LiteLLM MCP Guardrails·NeMo tool-calling rail은 호출 허용 여부만 본다 | 국내에서는 윈스만 근접. OWASP Agentic Top 10은 2025-12에야 나옴 | ✅ **제품 축 C** | [ARCHITECTURE §6](ARCHITECTURE.md#6-tool-call-dlp--축-c) |
 | ④ | **한국어 가역 마스킹** — 조사 결합(`홍길동이` → `[PERSON_1]이`) 처리가 한국어 특유의 난제인데 이걸 푸는 OSS가 없다. 레퍼런스였던 LLM Guard의 Anonymize/Deanonymize는 2026-07-09 아카이브됐고 한국어 품질도 낮았다 | — | ✅ **제품 축 A에 포함** | [ARCHITECTURE §5.2](ARCHITECTURE.md#52-가역-마스킹-볼트) |
@@ -193,6 +193,39 @@
 | **LLM Guard** | MIT, **2026-07-09 아카이브** | 설계 청사진 (코드 채택 아님) | 입력 15종 + 출력 20종 스캐너 taxonomy, Anonymize→LLM→Deanonymize 볼트 패턴 |
 
 **라이선스 조합 판정**: LiteLLM(MIT) + Presidio(MIT) + Kanana 3종(Apache 2.0) + privacy-filter(Apache 2.0) + Qwen3Guard(Apache 2.0) — **전부 상용 배포까지 제약 없음.** 브리프의 "on-device 모델 라이선스 확인" 요구를 이 표가 충족한다.
+
+### 6.1.1 Google 스택 — 브리프 요건의 근거 (2026-07 확인)
+
+브리프가 지목한 "gemma4"는 실재한다. 그리고 라이선스가 이 프로젝트에 결정적으로 유리하다.
+
+| 항목 | 확인 결과 |
+|---|---|
+| **Gemma 4** | **2026-03-31 출시. 라이선스 Apache 2.0** (Gemmaverse 최초). 상업적 사용·수정·재배포·파생 가중치 배포 모두 허용, MAU 임계값 없음, 특허 라이선스 포함. E2B(2.3B effective) / E4B(4.5B effective) / 12B / 26B-A4B(MoE) / 31B. E2B·E4B는 명시적으로 온디바이스용, 컨텍스트 128K. llama.cpp 출시 당일 지원, GGUF 다수 |
+| **Gemma 3 대비** | Gemma 1/2/3은 **Gemma Terms of Use** — 재배포 시 사용 제한 조항 전파 의무, Prohibited Use Policy 참조 편입(Google이 임의 갱신 가능), 해지 조항 존재. OSI 승인 오픈소스가 아니다. **Gemma 4를 쓰면 이 부담이 전부 사라진다** |
+| **Gemini API 현행** | GA: `gemini-3.6-flash`(2026-07-21), `gemini-3.5-flash`, `gemini-3.5-flash-lite`. ⚠️ **`gemini-2.5-*` 계열은 2026-10-16 종료 예정** |
+| **Gemini free tier** | ⚠️ **free tier 데이터는 제품 개선에 사용된다.** 보안 게이트웨이가 실제 프롬프트를 free tier로 보내면 안 된다 — 유료 tier여야 학습에서 제외된다 |
+| **데이터 레지던시** | Vertex AI 서울 리전(`asia-northeast3`) 존재. **글로벌 엔드포인트는 레지던시를 보장하지 않으므로** 국내 처리 요건이 있으면 리전 엔드포인트 명시 필요 |
+| **ShieldGemma** | 최신이 여전히 ShieldGemma 2(2025-03, Gemma 3 기반, **이미지 전용**). 텍스트용 ShieldGemma 1은 영어 기준. **Gemma 4 기반 guard 모델은 2026-07 기준 존재하지 않는다** |
+| **한국어 근거** | ⚠️ Gemma 4·Gemini 3.x 모두 **KMMLU 등 한국어 전용 벤치마크 공식 수치가 없다.** FLEURS ASR 한국어(CER 0.066/0.053)와 MMMLU 종합 점수만 있고 언어별 분해는 미공개 |
+
+**보조 Gemma 파생** (게이트웨이에 쓸 수 있는 것): **FunctionGemma 270M**(2025-12, 온디바이스 구조화 function calling 전용) — 완전 오프라인 데모 에이전트에 유용. **EmbeddingGemma 308M**(2025-09, 온디바이스 임베딩).
+
+**온디바이스 실측 기대치** (⚠️ 전부 3rd-party 측정, Google 공식 아님): Gemma 4 E2B CPU only 약 5~10 tok/s, E4B 약 2~5 tok/s, Ryzen 미니PC + Vulkan 약 21 tok/s. 게이트웨이는 짧은 판정 출력만 필요하므로 실용 범위이나, **프리필 시간이 긴 프롬프트에서 지배적**이 되므로 대상 하드웨어에서 직접 측정해야 한다.
+
+### 6.1.2 Google Cloud의 한국어 보안 제품 — 실질 경쟁자
+
+조사 중 발견한 사실로, 갭 ①의 정의를 좁히게 만든 근거다.
+
+- **Sensitive Data Protection**(구 Cloud DLP)에 **한국 infoType 6종 내장**: `KOREA_RRN`(민감도 HIGH), `KOREA_PASSPORT`, `KOREA_ARN`(외국인등록번호), `KOREA_BRN`(사업자등록번호), `KOREA_DRIVERS_LICENSE_NUMBER`, `KOREA_NHI_NUMBER`(건강보험).
+- **Model Armor**(GA)는 **공식 지원 언어에 한국어를 명시**한다. 프롬프트 인젝션·탈옥 탐지, RAI 안전 필터, SDP 연동 PII 탐지·마스킹, 악성 URL 탐지. 2026-07-10 **텍스트 스트리밍 sanitization GA**.
+
+**그럼에도 본 프로젝트가 성립하는 이유**:
+1. **데이터가 나간다** — 두 제품 모두 프롬프트를 Google 클라우드로 전송한다. 폐쇄망·N2SF·금융권 요건에서 쓸 수 없다.
+2. **서울 리전 레지던시 미확인** — Model Armor 릴리스 노트에서 `asia-northeast3` 데이터 레지던시 지원이 확인되지 않는다(일본·영국은 2026-07 확대 확인).
+3. **법적 제약** — 개인정보보호법은 2014년 8월 이후 **법적 근거 없는 주민등록번호 처리를 동의 여부와 무관하게 금지**하며 유출 시 최대 5억원 과징금. 주민번호를 클라우드로 보내는 구성 자체가 검토 대상이 된다.
+4. **커버리지 차이** — SDP 6종에 **법인등록번호가 없고**, 본 프로젝트는 8종을 다룬다.
+
+→ 갭 ①을 "한국 PII 탐지기가 없다"가 아니라 **"데이터를 내보내지 않고 쓸 수 있는 한국 PII 탐지기가 없다"** 로 정정했다([§4](#4-시장-갭--본-프로젝트의-좌표)). 이 정정이 온디바이스 설계의 정당화를 오히려 강화한다.
 
 ### 6.2 검토 후 기각
 

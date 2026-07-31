@@ -22,15 +22,25 @@
 
 ## 무엇을 만드는가
 
+게이트웨이가 **심(seam) 두 개**에 선다. 하나로는 부족하다 — LLM 프록시만 두면 도구를 실행하지 않으므로 차단이 권고에 그친다.
+
+```
+에이전트 (Google ADK · Gemini)
+   ├──[심 1] LLM 프록시 ─────► Gemini 3.6 Flash / 로컬 Gemma 4
+   └──[심 2] MCP 게이트웨이 ──► 사내 도구 (CRM · KB · 결제 · 메일)
+              ▲ 도구 실행 경계 — 여기가 진짜 차단 지점
+        두 심이 하나의 세션 볼트·오염 원장을 공유한다
+```
+
 | 축 | 내용 |
 |---|---|
-| **A. 한국형 PII 스위트 + 가역 볼트** | 주민등록번호·외국인등록번호·여권·운전면허·사업자등록번호·법인등록번호·계좌·카드 8종을 **체크섬 검증**과 함께 탐지. 조사 결합을 처리하는 가역 마스킹 |
-| **C. tool-call DLP** | tool call 인자 안의 PII 검사 + tool 반환값에서 파생된 값이 다음 호출로 흐르는 경로 추적. 어떤 OSS 게이트웨이도 하지 않는다 |
+| **A. 한국형 PII 스위트 + 가역 볼트** | 주민등록번호·외국인등록번호·여권·운전면허·사업자등록번호·법인등록번호·계좌·카드 8종을 **체크섬 검증**과 함께 탐지. 조사 결합을 처리하는 가역 마스킹. 체크섬은 형식만 맞는 무작위 숫자열의 약 90%를 걸러낸다(오탐 약 1/10) |
+| **C. tool-call / MCP DLP** | 도구 신뢰 등급에 따른 조건부 PII 복원, description 핀닝(rug pull 방어), **Lethal Trifecta 흐름 판정**으로 다단계 유출 차단 |
 | **B. 한국어 인젝션 벤치마크** (평가 인프라) | 자모분해·초성체·로마자·한자혼용·존댓말 사회공학 등 한국어 고유 우회 벡터. **공개 코퍼스가 존재하지 않는 영역** |
 
-**시장에서의 좌표**: 국내에 같은 범주의 상용 제품이 최소 8종 있지만 **오탐률을 공개한 곳이 하나도 없고**, 한국어 프롬프트 DLP의 공개 비교 벤치마크도 없다. Presidio는 기본이 영어 전용이고, Llama Guard·Prompt Guard의 공식 지원 언어에 한국어가 없다. 자세한 근거는 [시장 조사 편람](docs/plan/MARKET_RESEARCH.md)에 있다.
+**시장에서의 좌표**: 국내에 같은 범주의 상용 제품이 최소 8종 있지만 **오탐률을 공개한 곳이 하나도 없다.** 한국 PII 탐지기가 아예 없는 것은 아니다 — Google Cloud SDP에 한국 infoType 6종이 있고 Model Armor는 한국어를 공식 지원한다. **다만 둘 다 프롬프트를 클라우드로 보낸다.** 그래서 갭은 "탐지기가 없다"가 아니라 **"데이터를 내보내지 않고 쓸 수 있는 탐지기가 없다"** 이다. 근거는 [시장 조사 편람](docs/plan/MARKET_RESEARCH.md)에 있다.
 
-**범위 밖**: Shadow AI 앱 카탈로그, 브라우저 확장, 네트워크 인라인 SSL 인터셉션, OCR, 웹 관리 콘솔. 못 하는 것을 아는 것도 설계의 일부이므로 [기획서 §1.4](docs/plan/기획서.md#14-범위-in--out)에 표로 명시했다.
+**범위 밖**: Shadow AI 앱 카탈로그, 브라우저 확장, 네트워크 인라인 SSL 인터셉션, OCR, 웹 관리 콘솔, OAuth 2.1 Resource Server 전체 구현. 그리고 **MCP를 통과하지 않는 도구는 보지 못한다.** 못 하는 것을 아는 것도 설계의 일부이므로 [기획서 §1.4](docs/plan/기획서.md#14-범위-in--out)에 표로 명시했다.
 
 ---
 
@@ -40,7 +50,8 @@
 |---|---|
 | [기획서](docs/plan/기획서.md) | 배경·목표·범위·성공 지표·평가 계획·리스크. [TEMP.md](TEMP.md)의 7단 양식 |
 | [시장 조사 편람](docs/plan/MARKET_RESEARCH.md) | SecureBridge 기능 분해, 국내 8개 제품 비교, 글로벌 동향, 시장 갭 5개, 규제 매핑, 컴포넌트·라이선스 |
-| [아키텍처](docs/plan/ARCHITECTURE.md) | 게이트웨이 토폴로지, 훅 매핑, 가드 캐스케이드와 레이턴시 예산, 정책 엔진, 감사 스키마 |
+| [에이전트 시스템 설계](docs/plan/AGENT_SYSTEM.md) | **두 심 구조, 세션 상태, 도구 신뢰 등급, Lethal Trifecta, MCP 게이트웨이 상세, 데모 시나리오.** 재검토에서 찾은 설계 결함 4건의 교정을 담는다 |
+| [아키텍처](docs/plan/ARCHITECTURE.md) | 가드 캐스케이드와 레이턴시 예산, 정책 엔진, 감사 스키마, 온디바이스 분리 |
 | [로드맵](docs/plan/ROADMAP.md) | 5주 + 버퍼 주차별 계획과 검증 기준, 평가 원칙 5조, 결정 대기 8건 |
 | [자산 처분 맵](docs/plan/ASSET_REUSE.md) | 구 프로젝트 코드 63개 항목의 KEEP / ADAPT / REFERENCE / DROP 판정 |
 
@@ -57,9 +68,11 @@
 | PII span 추출 | `FrameByFrame/privacy-filter-korean` (active 50M, CPU) | Apache 2.0 |
 | 인젝션 레일 | `kakaocorp/kanana-safeguard-prompt-2.1b` | Apache 2.0 |
 | 비동기 감사 라벨링 | `kanana-safeguard-8b` / `-siren-8b` | Apache 2.0 |
-| 업스트림 생성 | **Gemini API** + **Gemma 3 로컬** | — |
+| MCP 게이트웨이 | FastMCP v3 Proxy + Middleware | Apache 2.0 |
+| 데모 에이전트 | Google ADK (`McpToolset`) | Apache 2.0 |
+| 업스트림 생성 | **Gemini API** (`gemini-3.6-flash`) + **Gemma 4 E4B 로컬** | Apache 2.0 (Gemma 4) |
 
-채택 스택 전체가 MIT 또는 Apache 2.0이라 상용 배포까지 제약이 없다. 검토 후 기각한 후보와 사유는 [MARKET_RESEARCH §6.2](docs/plan/MARKET_RESEARCH.md#62-검토-후-기각)에 있다.
+채택 스택 전체가 MIT 또는 Apache 2.0이라 상용 배포까지 제약이 없다. **Gemma 4는 2026-03 출시로 Gemmaverse 최초 Apache 2.0** — Gemma 3까지의 ToU 전파 의무·해지 조항이 사라졌다. 검토 후 기각한 후보와 사유는 [MARKET_RESEARCH §6.2](docs/plan/MARKET_RESEARCH.md#62-검토-후-기각)에 있다.
 
 ---
 
