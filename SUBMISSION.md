@@ -24,6 +24,9 @@
 
 `git archive` 로 추적 파일만 뽑으면 **8.5 MB** 다. 이대로 제출하면 된다.
 
+> 아래 표는 ★추적 파일 기준★ 이다(`git ls-files <dir> | xargs du -ch`). 작업 디렉터리를
+> `du` 로 재면 `scripts/pptx/node_modules`(7.6 MB)·`__pycache__` 가 섞여 훨씬 크게 나온다.
+
 ```bash
 git archive --format=zip --prefix=safeagent-kr/ HEAD -o safeagent-kr.zip
 unzip -l safeagent-kr.zip | tail -1        # 크기 확인
@@ -31,7 +34,7 @@ unzip -l safeagent-kr.zip | tail -1        # 크기 확인
 
 | 디렉터리 | 크기 | 제출 | 이유 |
 |---|---:|---|---|
-| `src` `eval` `app` `scripts` `config` `tests` | 10.7 MB | ✅ | 구현 본체 |
+| `src` `eval` `app` `scripts` `config` `tests` | 916 KB | ✅ | 구현 본체 |
 | `data/kotip/v0.1` | 1.5 MB | ✅ | 평가셋 — 이게 있어야 재현된다 |
 | `results` | 924 KB | ✅ | 발표 수치의 출처. 없으면 검증 불가 |
 | `docs` `report` | 5.6 MB | ✅ | 아키텍처 그림 · 발표 산출물 |
@@ -95,7 +98,7 @@ HF_TOKEN=hf_... python -m scripts.push_hf
 
 **이 둘은 수치만 보고하고 가중치는 로컬 보관한다.** `models/gpu_trained/MANIFEST.md` 에 같은
 판단이 적혀 있고, `scripts/push_hf.py` 의 `DENY_PREFIXES` 가 코드로 막는다. 심사에서 모델을
-요청하면 학습 스크립트(`eval/train_pii.py`·`train_harm.py`)와 `report/GPU_RUNBOOK.md` 로
+요청하면 학습 스크립트(`eval/train_pii_ner.py`·`eval/train_harm.py`)와 `report/GPU_RUNBOOK.md` 로
 재학습 경로를 제시한다.
 
 ### 받는 쪽

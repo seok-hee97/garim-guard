@@ -202,7 +202,6 @@ curl -s localhost:8000/v1/audit -H 'X-API-Key: demo-auditor-key'
 open report/trace_view.html         # 정적 트레이스 뷰어
 ```
 
-### 5-4. 컨테이너
 
 ```bash
 docker build -t safeagent-kr .

