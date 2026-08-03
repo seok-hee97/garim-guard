@@ -444,34 +444,81 @@ train/
 
 ## 4. 모델
 
-### 4.1 선정
+브리프가 *"use on-device model for program (prefer to use google model (ex: gemma4)) (and check the license for use)"* 를 요구한다. **조사 결과 이 두 요구가 서로 충돌한다.** 그 충돌을 먼저 드러낸 뒤 선정한다.
 
-| 역할 | 모델 | 라이선스 | 크기 | 근거 |
-|---|---|---|---|---|
-| **L1-PII 베이스** | `skt/A.X-Encoder-base` | **Apache 2.0** | 0.1B | 한국어 ModernBERT, 16k 컨텍스트, 전량 활성이라 CPU 예측 가능 |
-| **L1-ATK 베이스** | `skt/A.X-Encoder-base` | Apache 2.0 | 0.1B | 동일. 두 헤드를 같은 백본으로 |
-| **R2 교사** | `kakaocorp/kanana-safeguard-prompt-2.1b` | **Apache 2.0** | 2.1B | 한국어 인젝션 F1 0.844. **학습 시에만 GPU에서 사용** |
-| **L2 (선택)** | `Gemma 4 E2B` (GGUF Q4) | **Apache 2.0** | 2.3B | 브리프의 Google·온디바이스 요건. CPU 5~10 tok/s |
+### 4.1 ★ 핵심 긴장 — Apache 2.0을 원하면 Gemma 4뿐인데, Gemma 4는 분류를 못 한다
 
-**전 스택 Apache 2.0이라 상용 배포까지 제약이 없다.** Gemma 4는 2026-03 출시로 Gemmaverse 최초 Apache 2.0이며, Gemma 3까지 있던 ToU 전파 의무와 해지 조항이 사라졌다.
+**Gemma 4로 토큰 분류(NER)는 불가능하다.** transformers의 `gemma4` 모듈에 분류 헤드가 하나도 없다 — 존재하는 클래스는 `Gemma4ForCausalLM`·`Gemma4ForConditionalGeneration` 계열뿐이다. `MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES`에 등록된 Gemma 계열은 `gemma`·`gemma2`·`t5gemma`·`t5gemma2`이고 **gemma3도 gemma4도 없다.** 추가 PR(#45438)은 **OPEN + ON HOLD**이며 그나마 SequenceClassification만 다루고 TokenClassification은 범위 밖이다.
 
-### 4.2 기각한 후보와 사유
+그래서 Gemma 계열에서 분류를 하려면 **Gemma 3 기반 파생**으로 내려가야 하는데, **그 순간 Apache 2.0을 잃는다.**
+
+| 후보 | Google | 라이선스 | 토큰 분류 | 시퀀스 분류 | CPU 적합성 |
+|---|:-:|---|---|---|---|
+| **Gemma 4 E2B** | ✅ | **Apache 2.0** | ❌ **헤드 없음** | ❌ 없음(PR 보류) | ❌ 유효 2.3B이나 **임베딩 포함 5.1B**, 인과 마스크 |
+| **EmbeddingGemma 308M** | ✅ | **Gemma ToU** | ⚠️ 직접 배선(~20줄) | ✅ `Gemma3TextForSequenceClassification` 그대로 로드 | ✅ **300M, 진짜 양방향** (`use_bidirectional_attention: true`) |
+| **T5Gemma 2 270m-270m** | ✅ | **Gemma ToU** | ✅ **공식 지원** | ✅ | ⚠️ v2는 인코더 전용 토글이 없어 **enc+dec 항상 실행 → 약 2배** |
+| `skt/A.X-Encoder-base` | ❌ | **Apache 2.0** | ✅ | ✅ | ✅ 0.1B, 16k, 전량 활성 |
+
+**Gemma ToU를 받아들인다는 것의 실제 의미**: 재배포 시 사용 제한 조항 전파 의무, Prohibited Use Policy 참조 편입(Google이 임의 갱신 가능), 해지 조항. OSI 승인 오픈소스가 아니다. 브리프가 *"check the license for use"* 를 요구한 것이 정확히 이 지점이다.
+
+부가 사실: **ShieldGemma에 Gemma 4 기반 후속이 없고**(최신이 2025-03 Gemma 3 기반 이미지 전용), **Gemma 4의 공식 한국어 벤치마크 수치가 단 하나도 없다**(기술보고서 arXiv:2607.02770에 KMMLU/KLUE/Ko-NER 전무). 그리고 **Gemma 토큰 분류 생태계가 사실상 존재하지 않는다** — HF 전체에 11개, 다운로드 0~33회.
+
+### 4.2 선정 원칙 — 태스크 성격에 따라 계열을 나눈다
+
+브리프의 *"사용 목적에 따라 BERT도 사용 가능"* 이라는 완화가 §4.1의 긴장을 푼다. **모델 계열을 선호도가 아니라 태스크 성격으로 정한다.**
+
+| 태스크 성격 | 모델 계열 | 이유 |
+|---|---|---|
+| **판별 (토큰 분류·시퀀스 분류)** | **BERT 계열 인코더** | **양방향 어텐션**이 필수다. NER은 뒤 문맥을 봐야 경계를 정한다(`이상무가` — 인명인가 직책인가). 디코더의 인과 마스크는 구조적으로 불리하다. 그리고 소형(0.1~0.3B)이라 CPU에서 예측 가능하다 |
+| **생성·판정 (자유 서술)** | **Gemma 4** | 정책을 프롬프트로 주고 판정시키는 자리. Apache 2.0이고 Google 모델이라 브리프 요건을 정면으로 충족한다 |
+| **교사 (의사라벨 생성)** | **Gemma 4 + Kanana 병행** | 생성형이므로 Gemma의 자리. 두 교사의 합의를 라벨로 |
+
+이 원칙이 §4.1의 충돌을 해소한다. **Gemma 4가 분류 헤드가 없는 것은 결함이 아니라 설계 의도**다 — 생성 모델이니까. 판별에는 판별용 아키텍처를 쓰고, Gemma는 생성이 필요한 자리에 쓴다.
+
+**따라서 L1 백본의 기본값은 `skt/A.X-Encoder-base`(한국어 ModernBERT, Apache 2.0, 0.1B)다.** 다만 Gemma 계열 인코더 파생이 실제로 더 나은지는 W1에 실측으로 확인한다 — 근거 없이 배제하지 않는다.
+
+| 역할 | 채택 | 라이선스 | 근거 |
+|---|---|---|---|
+| **L1-PII (NER)** | **`skt/A.X-Encoder-base`** (기본값) — 대안으로 EmbeddingGemma 308M / T5Gemma 2 270m를 W1에 실측 비교 | **Apache 2.0** | 한국어 ModernBERT, 16k 컨텍스트, 양방향, 전량 활성이라 CPU 지연이 예측 가능 |
+| **L1-ATK (공격 분류)** | **`skt/A.X-Encoder-base`** (같은 백본, 다른 헤드) — 대안 EmbeddingGemma 308M(`Gemma3TextForSequenceClassification` 그대로 로드) | Apache 2.0 / Gemma ToU | 백본을 공유하면 메모리가 절반이다. 참조 구현 `robustintelligence/pi-t5gemma-2-1b-v5.0`(인코더 전용 + mean-pooling + 선형 헤드, FPR 0.5%에서 F1 89)의 레시피를 이식 |
+| **L2 판정 (선택)** | **`FrameByFrame/guardrail-korean-gemma-4-E2B`** | Gemma 4 계열 | **한국어 가드레일 파인튜닝이 이미 존재한다** — PII 탐지 + 프롬프트 인젝션 + 모더레이션, 13개 한/영 데이터셋 67k, **F1 0.925**. `thorough` 모드 판정기이자 **베이스라인**으로 쓴다 |
+| **R2 교사** | `kanana-safeguard-prompt-2.1b` + **Gemma 4 E2B 병행** | Apache 2.0 | 두 교사의 **합의(agreement)를 라벨로** 쓰면 의사라벨 품질이 올라간다. Gemma 4는 생성형이므로 교사 자리가 자연스럽다 |
+
+#### 4.2.1 W1 백본 실측 비교 — 기본값을 뒤집을 근거가 있는가
+
+기본값은 A.X-Encoder지만, **Gemma 계열이 더 나은지를 근거 없이 배제하지 않는다.** 세 후보를 같은 조건에서 잰다.
+
+| 기준 | 측정 방법 |
+|---|---|
+| ① CPU 지연 (ONNX INT8, 128/256/512 토큰) | 목표 `interactive` 예산 안 |
+| ② 한국어 NER F1 (KLUE-NER 파일럿 + 합성 셋) | 동일 데이터·동일 학습 설정 |
+| ③ 메모리 (RSS) | P1 프로파일(8GB) 수용 여부 |
+| ④ **라이선스** | Apache 2.0(A.X-Encoder) vs Gemma ToU(Gemma 계열) |
+
+**①②③에서 Gemma 계열이 유의하게 앞서면 Gemma ToU를 받아들이고 기본값을 뒤집는다. 대등하거나 밀리면 Apache 2.0인 A.X-Encoder를 유지한다.** 어느 쪽이든 **판단 근거를 수치로 공개한다.**
+
+**백본 공유가 기본이다.** L1-PII와 L1-ATK가 같은 인코더에 헤드만 둘을 붙이면 메모리가 절반이고 로딩도 한 번이다. 두 태스크가 서로 다른 백본을 요구할 만큼 성능 차가 나는지도 ②에서 함께 본다.
+
+⚠️ **T5Gemma 2의 함정**: v1은 `is_encoder_decoder=False`로 인코더 전용이 되지만 **v2에는 그 토글이 없다.** `T5Gemma2ForTokenClassification.forward()`가 항상 인코더+디코더를 다 돌리고 디코더의 `last_hidden_state`에 헤드를 붙인다 → CPU 연산량 약 2배. 공식 지원이라는 장점이 이 비용을 상쇄하는지가 ①의 관건이다.
+
+### 4.3 기각한 후보와 사유
 
 | 대상 | 사유 |
 |---|---|
-| **`openai/privacy-filter`** | **실측으로 탈락.** M2 MacBook MPS에서 중앙값 958ms / p90 1,725ms, CPU 전용은 2~3배 느림. "활성 50M"은 CPU 지연으로 번역되지 않는다 — top-4-of-128 라우팅이 토큰마다 메모리 대역폭에 묶이고 1.5B 가중치가 전부 상주한다. MoE는 대역폭을 FLOPs와 바꾸는데 노트북 CPU에서는 반대 방향의 거래다 |
+| **Gemma 4를 L1 백본으로** | 분류 헤드 없음(PR 보류 중), 임베딩 포함 5.1B, 인과 마스크. **결함이 아니라 생성 모델이기 때문이다** — 생성형 자리(L2·교사)에 쓴다 |
+| **`openai/privacy-filter`** | **실측으로 탈락.** M2 MacBook MPS 중앙값 958ms / p90 1,725ms, CPU는 2~3배 느림. "활성 50M"이 CPU 지연으로 번역되지 않는다 — top-4-of-128 라우팅이 토큰마다 메모리 대역폭에 묶이고 1.5B가 전부 상주한다 |
 | `klue/roberta-*` | CC-BY-SA-4.0. ShareAlike가 학습 가중치에 전파되는지 불확실 → **평가 비교용으로만** |
 | Llama Guard / Prompt Guard | 한국어 공식 미지원 + Llama Community License |
-| ShieldGemma | 영어 중심, 2는 이미지 전용, Gemma 4 기반 후속 없음 |
+| ShieldGemma | 영어 전용(1) / 이미지 전용(2). **Gemma 4 기반 후속 없음** |
 | 클라우드 API (Model Armor, Cloud DLP) | **프롬프트가 외부로 나간다.** 제품 논리와 정면 모순 |
 
-> **`openai/privacy-filter` 기각은 앞선 설계의 오류를 바로잡은 것이다.** "active 50M이니 CPU 실용 가능"이라 추론했는데 틀렸다. 이 실측이 L1 베이스를 A.X-Encoder로 확정하게 만들었다.
+> **`openai/privacy-filter` 기각은 앞선 설계의 오류를 바로잡은 것이다.** "active 50M이니 CPU 실용 가능"이라 추론했는데 틀렸다.
 
-### 4.3 ONNX INT8 — 선택이 아니라 필수
+### 4.4 ONNX INT8 — 선택이 아니라 필수
 
 CPU에서 0.1B 인코더를 512토큰으로 돌리면 PyTorch fp32 기준 150~400ms다. ONNX Runtime INT8로 50~150ms까지 내려간다. **L1 목표 지연은 양자화를 전제로만 성립한다.**
 
-그래서 **W1 첫날에 스톡 A.X-Encoder를 ONNX INT8로 내보내 실제 노트북에서 128/256/512 토큰 지연을 측정한다.** 반나절이면 되고, 이 숫자가 아키텍처를 확정한다. 앞선 계획은 이 답이 3주차에 나오게 설계돼 있었는데, 그때는 이미 그 가정 위에 2주를 지은 뒤다.
+그래서 **W1 첫날에 §4.2.1의 세 후보를 전부 ONNX INT8로 내보내 실제 노트북에서 128/256/512 토큰 지연을 측정한다.** 반나절이면 되고, 이 숫자가 아키텍처를 확정한다. 앞선 계획은 이 답이 3주차에 나오게 설계돼 있었는데, 그때는 이미 그 가정 위에 2주를 지은 뒤다.
 
 **입력 길이 상한을 둔다.** 긴 프롬프트는 청크로 나눠 검사하고, 청크 경계에 걸친 엔티티는 오버랩 윈도우로 처리한다.
 
@@ -791,7 +838,7 @@ CARD  PHONE  EMAIL
 | 참고 솔루션 SecureBridge류 | 같은 범주(프롬프트 DLP)이되 **온프렘·오픈소스·검사 전용**으로 좁힘. 시장 분석은 [plan/MARKET_RESEARCH.md](plan/MARKET_RESEARCH.md) |
 | 개발언어 Python | 전 스택 Python (ONNX Runtime·llama.cpp 바인딩) |
 | **프로그램은 온디바이스 모델** | L0 규칙 + L1 소형 모델 + L2 로컬 LLM 전부 로컬. **외부 통신 0을 패킷 캡처로 증명** |
-| **Google 모델 선호 (gemma4)** | §4에서 별도로 다룬다 — 어느 자리에 쓰고 어디는 왜 못 쓰는지를 측정으로 |
+| **Google 모델 선호 (gemma4)** | §4.1에 **충돌을 먼저 드러냈다** — Gemma 4는 분류 헤드가 없고, 분류 가능한 Gemma 파생(EmbeddingGemma·T5Gemma 2)은 Apache 2.0이 아니다. L1-ATK는 EmbeddingGemma, L2는 한국어 Gemma 4 가드레일, 교사는 Gemma 4 병행. L1-PII 백본은 **W1 실측으로 결정하고 근거를 공개** |
 | 라이선스 확인 | §4·§5에 모델·데이터 전수 심사. 채택은 Apache 2.0/MIT/CC-BY/ODC-BY만 |
 | **테스트에 Gemini/OpenAI API** | §7.4 — ① 검사 대상 ② 정확도 상한 기준선 ③ 합성 코퍼스 생성 보조 |
 | 상세 설계: 모델·학습방법·학습데이터·아키텍처 | §4 / §6 / §5 / §3 |
