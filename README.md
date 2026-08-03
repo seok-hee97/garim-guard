@@ -121,4 +121,6 @@ R2는 **교사를 둘 쓴다.** `kanana-safeguard-prompt-2.1b`의 출력이 SAFE
 
 ## 라이선스
 
-미정. 구현 착수 시 결정한다.
+**Apache-2.0**. CredSweeper(MIT)·ONNX Runtime(MIT)·A.X-Encoder(Apache-2.0) 임포트 결합이 전부 문제없고, 특허 조항이 있어 상용 채택에 유리하다. GPL 계열은 택하지 않는다 — trufflehog(AGPL-3.0)를 기각한 것과 같은 이유다.
+
+학습 데이터도 같은 기준으로 걸렀다. 허용은 **Apache-2.0 / MIT / CC-BY-4.0 / CC0**뿐이고, 검증 스크립트가 **HuggingFace API를 런타임에 조회**해 강제한다 — 문서에 적힌 라이선스 문자열을 읽지 않는다. 실제로 PolyGuardPrompts를 ODC-BY로 잘못 적어 뒀다가 CC-BY-4.0으로 정정한 적이 있어서, 문서를 진실의 원천으로 삼으면 그 오류가 그대로 통과한다.
