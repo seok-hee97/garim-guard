@@ -2,13 +2,42 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "replan/**"]
   pull_request:
     branches: [main]
 
 jobs:
-  core:
-    name: core tests (no presidio/torch)
+  # ── 설계 프로브 회귀 ────────────────────────────────────────
+  # 부록 A의 실측 주장이 계속 성립하는지 검사한다. 구현 착수 전에도 돈다.
+  # ⚠️ 깨진 프로브를 기준선으로 동결하지 않는다 — 고칠 때 회귀로 보이기 때문이다.
+  #    현재 xfail 없음: offset_probe는 구간 맵으로 재작성돼 9/9 통과한다.
+  probes:
+    name: design probes (부록 A 회귀)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # 유니코드 DB 버전이 마이너마다 다르다 — 골든 결과가 환경마다 깨진다 (DESIGN §8.6.2)
+          python-version: "3.11"
+      - name: 프로브 실행 (외부 의존 없는 것만)
+        run: |
+          set -e
+          for f in checksum_probe fpr_probe josa_probe vault_probe \
+                   normalize_probe offset_probe marker_probe; do
+            echo "── docs/$f.py ──"
+            python "docs/$f.py"
+          done
+      - name: 역매핑 왕복 검증이 전건 통과하는가
+        run: |
+          python docs/offset_probe.py | grep -qE "^9/9 " \
+            || { echo "offset_probe 회귀 — 구간 맵 왕복이 깨졌다"; exit 1; }
+
+  # ── 구 SafeAgent-KR (봉인) ─────────────────────────────────
+  # src/·eval/·scripts/ 는 대체된 이전 프로젝트다 (docs/plan/README.md).
+  # 가림 품질과 무관하며, 이 잡이 녹색인 것은 가림에 대해 아무것도 말하지 않는다.
+  legacy:
+    name: legacy SafeAgent-KR (봉인 — 가림 품질 신호 아님)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,5 +56,16 @@ jobs:
       - name: Tests (presidio 의존 test_dlp_defenses 는 full 잡에서)
         run: pytest -q --ignore=tests/test_dlp_defenses.py
 
-  # full 잡(presidio/spacy 설치 + 전체 테스트)은 무겁고 선택적이라 로컬/수동으로 실행:
-  #   pip install -r requirements.txt && pytest -q
+  # ── 가림 (구현 착수 후 활성) ────────────────────────────────
+  # W1에 garim/ 패키지가 생기면 아래 주석을 푼다. 지금은 잡 자체가 없다 —
+  # 존재하지 않는 것을 검사하는 척하는 녹색 배지를 만들지 않는다.
+  #
+  # garim:
+  #   name: garim (unit + golden)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: astral-sh/setup-uv@v5
+  #     - run: uv sync --frozen
+  #     - run: uv run pytest tests/ -q
+  #     - run: uv run python -m compileall -q garim bench train

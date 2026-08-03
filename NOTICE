@@ -1,0 +1,14 @@
+가림(Garim)
+Copyright 2026 Garim contributors
+
+이 저장소는 Apache License 2.0으로 배포된다 (LICENSE 참조).
+
+── 이전 저작물 고지 ────────────────────────────────────────
+`src/`, `eval/`, `data/`, `scripts/`, `report/` 아래의 코드는 이 저장소의
+이전 프로젝트인 SafeAgent-KR의 산출물이고, 커밋 `9cdb4d7`까지 **MIT License**로
+배포됐다. 그 시점까지의 배포본에 대한 MIT 허가는 철회되지 않는다.
+
+가림(`garim/`, `bench/`, `train/`, `docs/`)은 Apache License 2.0으로 배포된다.
+Apache-2.0을 택한 이유는 특허 조항과, CredSweeper(MIT)·ONNX Runtime(MIT)·
+skt/A.X-Encoder-base(Apache-2.0) 임포트 결합이 전부 문제없기 때문이다.
+설계 근거는 docs/DESIGN.md §8.6.2에 있다.
