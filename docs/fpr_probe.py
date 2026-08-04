@@ -84,18 +84,34 @@ def gen3_rrn():
             f"{random.choice('34')}{random.randint(0, 999999):06d}")
 
 def is_gen3_sig(d):
-    """3세대 '서명': 생년월일이 2020-10-05 이후이고 성별코드가 3/4/7/8."""
-    s = d.replace("-", "")
-    if len(s) != 13 or not s.isdigit():
+    """★ 폐기됨. 회귀 방지용으로만 남긴다.
+
+    '3세대 서명 = 생년월일 2020-10-05 이후 + 성별 3/4/7/8'은 틀렸다.
+    3세대는 **발급·변경 시점**으로 정의되고 발급일은 13자리 어디에도 없다.
+    1980년생이 2021년에 번호를 변경하면 생년월일은 과거이고 성별코드도
+    1/2 그대로인데 뒤 6자리는 임의다 — 이 함수는 그런 진짜 번호를 0% 잡는다.
+    성인 외국인등록번호(약 160만 명)도 전원 0%다.
+
+    관측 불가능한 잠재변수(발급일)를 판정 조건으로 쓴 것이 결함의 뿌리였다.
+    대체: rrn_datesex()로 형식 정합만 보고, 나머지는 문맥이 가른다(DESIGN §3.2.3).
+    """
+    raise NotImplementedError(
+        "is_gen3_sig는 폐기됐다 — 문자열로 세대를 판정할 수 없다. "
+        "DESIGN.md §3.2.3 참조. 형식 정합은 rrn_datesex()를 쓴다.")
+
+
+ANCHORS = ("주민등록번호", "주민번호", "외국인등록번호", "내국인등록번호", "등록번호")
+ANTI_ANCHORS = ("주문", "송장", "운송장", "사번", "사원번호", "시리얼", "일련번호")
+
+
+def has_anchor(text, span):
+    """근접 앵커 — L1 없이 도는 유일한 결정적 문맥 경로 (DESIGN §3.2.3).
+    창: 스팬 시작 기준 좌 20자 / 우 5자. 한국어는 라벨이 값 앞에 온다."""
+    a, b = span
+    win = text[max(0, a - 20):min(len(text), b + 5)]
+    if any(x in win for x in ANTI_ANCHORS):
         return False
-    yy, mm, dd, g = int(s[:2]), int(s[2:4]), int(s[4:6]), int(s[6])
-    if g not in (3, 4, 7, 8):
-        return False
-    try:
-        b = dt.date(2000 + yy, mm, dd)
-    except ValueError:
-        return False
-    return GEN3_START <= b <= _TODAY
+    return any(x in win for x in ANCHORS)
 
 def rrn_datesex(d):
     """생년월일 유효성 + 성별코드 정합만. 체크섬을 빼고 잰다 —
@@ -135,9 +151,9 @@ for name, xs in groups:
     print(f"  {name:<14} {r1:>8.2%} {r2:>15.2%} {r3:>9.2%} {r2/r3 if r3 else 0:>8.1f}x")
 print("  → 250배의 대부분은 생년월일·성별 정합이 만들었다. 체크섬의 한계 기여는 그 뒤에 남는 몫뿐이다.")
 
-print("\n(c) 3세대를 L0 단독으로 채택하면 FPR이 얼마나 되는가 — §3.2.3")
-print("     채택 규칙: 체크섬 실패 + 3세대 서명(생년월일 2020-10-05~ + 성별 3/4/7/8)")
-print(f"  {'오탐원':<14} {'현행(3중검증)':>13} {'L0단독채택':>12}")
+print("\n(c) 체크섬 실패분을 L1 결합 후보로 넘기면 오탐 스트림이 얼마나 늘어나는가 — §3.2.3")
+print("     후보 규칙: 체크섬 실패 + 날짜·성별코드 정합 통과 (세대 판정은 하지 않는다)")
+print(f"  {'오탐원':<14} {'L0 확정':>13} {'L1 결합 후보':>12}")
 print("  " + "-"*44)
 tot_cur = tot_new = 0
 BIG = [("주문번호",  [order_no() for _ in range(N3)]),
@@ -146,9 +162,11 @@ BIG = [("주문번호",  [order_no() for _ in range(N3)]),
 for name, xs in BIG:
     re_hit = [x for x in xs if RRN_RE.fullmatch(x)]
     cur = sum(rrn_full(x) for x in re_hit)
-    new = cur + sum(1 for x in re_hit if not rrn_ck(x) and is_gen3_sig(x))
+    new = cur + sum(1 for x in re_hit if not rrn_ck(x) and rrn_datesex(x))
     tot_cur += cur/N3; tot_new += new/N3
     print(f"  {name:<14} {cur/N3:>12.2%} {new/N3:>12.2%}")
 print(f"  {'평균':<14} {tot_cur/3:>12.2%} {tot_new/3:>12.2%}")
-print("  → 3세대 생년월일 구간이 업무 주문번호의 날짜 구간과 겹친다. 체크섬이 사라지면")
-print("     L0에 남은 판별 정보가 없다. 그래서 3세대는 L1 문맥과 결합해야만 채택한다.")
+print("  → 체크섬이 실패하면 남는 것은 '유효 날짜 + 성별 + 균등난수 6자리'이고,")
+print("     그것은 주문번호·송장번호와 분포가 같다. 잉여(redundancy)가 0이다.")
+print("     ⚠️ 이 비율의 분모는 'RRN 형식 업무 문자열 1건'이지 음성 세그먼트가 아니다.")
+print("        FPR ≈ d × (위 비율), d = 음성 세그먼트 중 RRN 형식 밀도. d는 W6b에 잰다.")

@@ -24,3 +24,10 @@ results/.progress.json.tmp
 TEMP.md
 *.bak
 ~$*
+
+# 합성 코퍼스 산출물 — 커밋 금지 (DESIGN.md §5.3.5.1)
+# 체크섬 유효 주민등록번호는 실존 번호와 우연히 일치할 수 있다(2세대 7.0e-3).
+# 생성기와 seed만 배포하고 값은 평가 시점에 만든다.
+data/synth/
+data/corpus/
+bench/out/
