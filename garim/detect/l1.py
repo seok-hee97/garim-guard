@@ -1,0 +1,251 @@
+"""L1 multi-head boundary.
+
+The runtime owns exactly one encoder session. A backend returns four logical heads from one
+forward pass: PII spans, a 4-way attack distribution, romanization probability, and Korean
+honorific/social-engineering probability. This module intentionally does not download models.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Protocol, runtime_checkable
+
+from garim.models import ContentType, Origin
+
+
+@dataclass(frozen=True, slots=True)
+class L1Entity:
+    label: str
+    span: tuple[int, int]
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class L1Output:
+    entities: list[L1Entity] = field(default_factory=list)
+    attack_probabilities: dict[str, float] = field(
+        default_factory=lambda: {
+            "NONE": 1.0,
+            "INJECTION": 0.0,
+            "JAILBREAK": 0.0,
+            "SYSTEM_LEAK": 0.0,
+        }
+    )
+    romanized_evasion: float = 0.0
+    honorific_social_engineering: float = 0.0
+
+    def validate(self, text_length: int) -> None:
+        required = {"NONE", "INJECTION", "JAILBREAK", "SYSTEM_LEAK"}
+        if set(self.attack_probabilities) != required:
+            raise ValueError("L1 attack head must expose exactly four classes")
+        if any(not 0.0 <= score <= 1.0 for score in self.attack_probabilities.values()):
+            raise ValueError("L1 attack probabilities must be in [0, 1]")
+        if any(not 0 <= entity.span[0] < entity.span[1] <= text_length for entity in self.entities):
+            raise ValueError("L1 entity span is outside normalized input")
+        if not 0.0 <= self.romanized_evasion <= 1.0:
+            raise ValueError("romanized_evasion must be in [0, 1]")
+        if not 0.0 <= self.honorific_social_engineering <= 1.0:
+            raise ValueError("honorific_social_engineering must be in [0, 1]")
+
+
+@runtime_checkable
+class L1Backend(Protocol):
+    name: str
+
+    def infer(
+        self,
+        text: str,
+        *,
+        normalization_delta: dict[str, int],
+        origin: Origin,
+        content_type: ContentType,
+    ) -> L1Output:
+        """Run one shared-encoder forward pass and return all four logical heads."""
+
+
+PII_LABEL_TO_CODE = {
+    "KR_RRN": "L-KR-01",
+    "KR_FRN": "L-KR-02",
+    "KR_PASSPORT": "L-KR-03",
+    "KR_DL": "L-KR-04",
+    "KR_BIZNO": "L-KR-05",
+    "KR_CORPNO": "L-KR-06",
+    "KR_NHI": "L-KR-07",
+    "KR_ACCOUNT": "L-KR-08",
+    "CARD": "L-CM-01",
+    "PHONE": "L-CM-02",
+    "EMAIL": "L-CM-03",
+    "PERSON": "L-CT-01",
+    "ADDRESS": "L-CT-02",
+    "ORG_ID": "L-CT-03",
+}
+
+NORMALIZATION_DELTA_ORDER = (
+    "nfkc",
+    "zero_width",
+    "tag_chars",
+    "homoglyph",
+    "jamo_composed",
+    "hanja",
+    "space",
+    "b64_decoded",
+)
+
+
+class OnnxL1Backend:
+    """Local ONNX Runtime adapter for the shared-encoder/four-head model contract.
+
+    ``model_dir`` must contain ``garim_l1.int8.onnx``, tokenizer files, and
+    ``labels.json`` with a ``pii_labels`` array. All model loading is local-only.
+    """
+
+    name = "onnx-int8"
+
+    def __init__(self, model_dir: str | Path, *, max_length: int = 512) -> None:
+        try:
+            import onnxruntime as ort
+            from transformers import AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError("install garim-guard[l1] to use OnnxL1Backend") from exc
+
+        directory = Path(model_dir)
+        model_path = directory / "garim_l1.int8.onnx"
+        label_path = directory / "labels.json"
+        if not model_path.is_file() or not label_path.is_file():
+            raise ValueError("model_dir must contain garim_l1.int8.onnx and labels.json")
+        try:
+            metadata = json.loads(label_path.read_text(encoding="utf-8"))
+            self.pii_labels = list(metadata["pii_labels"])
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(f"invalid L1 labels file: {label_path}") from exc
+        if len(self.pii_labels) != 29 or self.pii_labels[0] != "O":
+            raise ValueError("pii_labels must contain O plus 14 BIO entity pairs")
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            directory, local_files_only=True, use_fast=True
+        )
+        if not self.tokenizer.is_fast:
+            raise ValueError("L1 requires a fast tokenizer for source offset mapping")
+        self.session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        self.input_names = {item.name for item in self.session.get_inputs()}
+        self.output_names = [item.name for item in self.session.get_outputs()]
+        required_outputs = {
+            "pii_logits",
+            "attack_logits",
+            "romanized_logits",
+            "honorific_logits",
+        }
+        if set(self.output_names) != required_outputs:
+            raise ValueError(
+                "ONNX outputs must be pii_logits, attack_logits, romanized_logits, "
+                "honorific_logits"
+            )
+        self.max_length = max_length
+
+    @staticmethod
+    def _softmax(values: object) -> object:
+        import numpy as np
+
+        array = np.asarray(values, dtype=np.float32)
+        shifted = array - array.max(axis=-1, keepdims=True)
+        exponent = np.exp(shifted)
+        return exponent / exponent.sum(axis=-1, keepdims=True)
+
+    @staticmethod
+    def _sigmoid(value: object) -> float:
+        import numpy as np
+
+        scalar = float(np.asarray(value, dtype=np.float32).reshape(-1)[0])
+        return float(1.0 / (1.0 + np.exp(-scalar)))
+
+    def _decode_entities(self, logits: object, offsets: list[tuple[int, int]]) -> list[L1Entity]:
+        import numpy as np
+
+        probabilities = self._softmax(logits)[0]
+        label_ids = np.asarray(probabilities).argmax(axis=-1)
+        entities: list[L1Entity] = []
+        active_label: str | None = None
+        active_start = 0
+        active_end = 0
+        active_scores: list[float] = []
+
+        def flush() -> None:
+            nonlocal active_label, active_scores
+            if active_label is not None and active_end > active_start:
+                entities.append(
+                    L1Entity(
+                        active_label,
+                        (active_start, active_end),
+                        sum(active_scores) / len(active_scores),
+                    )
+                )
+            active_label = None
+            active_scores = []
+
+        for token_index, label_id in enumerate(label_ids):
+            start, end = offsets[token_index]
+            label = self.pii_labels[int(label_id)]
+            if start == end or label == "O":
+                flush()
+                continue
+            prefix, _, entity_label = label.partition("-")
+            if prefix == "B" or entity_label != active_label:
+                flush()
+                active_label = entity_label
+                active_start = start
+            active_end = end
+            active_scores.append(float(probabilities[token_index, int(label_id)]))
+        flush()
+        return entities
+
+    def infer(
+        self,
+        text: str,
+        *,
+        normalization_delta: dict[str, int],
+        origin: Origin,
+        content_type: ContentType,
+    ) -> L1Output:
+        import numpy as np
+
+        del origin, content_type  # origin/type decisions are applied outside the model
+        encoded = self.tokenizer(
+            text,
+            truncation=True,
+            max_length=self.max_length,
+            return_offsets_mapping=True,
+            return_tensors="np",
+        )
+        offsets = [tuple(map(int, pair)) for pair in encoded.pop("offset_mapping")[0]]
+        feed = {name: value for name, value in encoded.items() if name in self.input_names}
+        # ★ §6.2.2 는 "규칙별 카운트를 log1p 스케일"을 요구한다. 초판은 원시 카운트를
+        #   넘겼고, 델타 입력이 그래프에 없으면 조용히 건너뛰었다 — §6.2.2 의 핵심
+        #   feature 가 오류 없이 빠졌다. 이제 필수로 요구하고 log1p 를 적용한다.
+        if "normalization_delta" not in self.input_names:
+            raise RuntimeError(
+                "ONNX graph is missing the required 'normalization_delta' input "
+                "(DESIGN §6.2.2 · §4.6). Re-export with the delta head wired in-graph."
+            )
+        feed["normalization_delta"] = np.log1p(
+            np.asarray(
+                [[float(normalization_delta[key]) for key in NORMALIZATION_DELTA_ORDER]],
+                dtype=np.float32,
+            )
+        )
+        raw_outputs = self.session.run(self.output_names, feed)
+        outputs = dict(zip(self.output_names, raw_outputs, strict=True))
+
+        attack = self._softmax(outputs["attack_logits"])[0]
+        attack_labels = ("NONE", "INJECTION", "JAILBREAK", "SYSTEM_LEAK")
+        result = L1Output(
+            entities=self._decode_entities(outputs["pii_logits"], offsets),
+            attack_probabilities={
+                label: float(attack[index]) for index, label in enumerate(attack_labels)
+            },
+            romanized_evasion=self._sigmoid(outputs["romanized_logits"]),
+            honorific_social_engineering=self._sigmoid(outputs["honorific_logits"]),
+        )
+        result.validate(len(text))
+        return result

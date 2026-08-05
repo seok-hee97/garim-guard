@@ -1,7 +1,0 @@
-{
-  "model": "klue/roberta-base",
-  "data": "K-MHaS",
-  "test_n": 21939,
-  "macro_f1": 0.7093,
-  "micro_f1": 0.8314
-}

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "garim-guard"
+version = "0.1.0"
+description = "Local-first Korean prompt leak and injection inspector"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = {text = "Apache-2.0"}
+dependencies = [
+  "pydantic>=2.7,<3",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+l1 = ["numpy>=1.26,<3", "onnxruntime>=1.18,<2", "transformers>=4.44,<5"]
+train = ["torch>=2.2,<3", "transformers>=4.44,<5"]
+dev = ["pytest>=8,<9", "ruff>=0.6,<1"]
+
+[project.scripts]
+garim = "garim.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["garim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

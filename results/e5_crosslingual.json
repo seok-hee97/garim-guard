@@ -1,7 +1,0 @@
-{
-  "encoder": "e5-small(frozen)+LR",
-  "in_domain_en_f1": 0.9538,
-  "kotip_ko_f1": 0.0,
-  "p3_collapse": 0.9538,
-  "note": "영어학습 → 한국어 KoTIP 전이 실패(F1 0.0, TF-IDF와 동일). 다국어 인코더도 한국어/채널 문제를 자동으로 못 고침. KO eval 음성셋은 근사구성(주의)."
-}
