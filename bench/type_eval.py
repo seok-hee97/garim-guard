@@ -190,12 +190,22 @@ class ConditioningContrast:
     def measurable(self) -> bool:
         return sum(self.exercised.values()) > 0
 
+    # 교환비 임계. 오탐 1 을 줄이려고 재현율 1 을 내주면 남는 것이 없다.
+    MIN_TRADE_RATIO = 1.0
+
     @property
     def verdict(self) -> str:
-        """§8.4-5 에 넘길 한 단어. `inconclusive` 를 `cut` 으로 접지 않는다."""
+        """§8.4-5 에 넘길 한 단어. `inconclusive` 를 `cut` 으로 접지 않는다.
+
+        keep   기여가 있고 교환비가 임계 이상
+        review 기여는 있으나 재현율 대가가 그만큼 크다 — 기제별로 갈라 봐야 한다
+        cut    기여가 없다
+        """
         if not self.measurable:
             return "inconclusive"
-        return "keep" if self.contributes else "cut"
+        if not self.contributes:
+            return "cut"
+        return "keep" if self.trade_ratio >= self.MIN_TRADE_RATIO else "review"
 
     @property
     def false_positive_reduction(self) -> float:
@@ -209,7 +219,21 @@ class ConditioningContrast:
 
     @property
     def contributes(self) -> bool:
-        return self.false_positive_reduction > 0 and self.recall_cost <= 0
+        """기여가 **있는가**. 값어치가 있는가는 `trade_ratio` 가 따로 답한다."""
+        return self.false_positive_reduction > 0
+
+    @property
+    def trade_ratio(self) -> float:
+        """줄인 오탐 ÷ 잃은 재현율. 대가가 없으면 `inf`.
+
+        ★ 초판은 `recall_cost <= 0` 을 기여의 조건으로 걸었다. 그러면 오탐을 0.049
+        줄이고 재현율을 0.014 내준 결과가 `cut` 으로 나온다 — 유리한 교환을 기여
+        없음으로 접는 것이라 §8.4-5 가 물은 것("기여가 있는가")에 답하지 못한다.
+        불리언 하나에 숨은 임계를 넣지 않고 비율을 드러낸다.
+        """
+        if self.recall_cost <= 0:
+            return float("inf")
+        return self.false_positive_reduction / self.recall_cost
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -218,6 +242,9 @@ class ConditioningContrast:
             "exercised_rows": dict(sorted(self.exercised.items())),
             "false_positive_reduction": round(self.false_positive_reduction, 4),
             "recall_cost": round(self.recall_cost, 4),
+            "trade_ratio": (
+                None if self.trade_ratio == float("inf") else round(self.trade_ratio, 2)
+            ),
             "contributes": self.contributes,
             "by_type_false_positive_delta": {
                 name: round(
@@ -279,7 +306,9 @@ def main() -> int:
     )
     print(
         f"전체 오탐 감소 {payload['false_positive_reduction']:+.4f} · "
-        f"재현율 대가 {payload['recall_cost']:+.4f} · **판정 {payload['verdict']}**"
+        f"재현율 대가 {payload['recall_cost']:+.4f} · "
+        f"교환비 {payload['trade_ratio'] if payload['trade_ratio'] is not None else '∞'} · "
+        f"**판정 {payload['verdict']}**"
     )
     if payload["verdict"] == "inconclusive":
         print(
@@ -289,7 +318,7 @@ def main() -> int:
     if args.output:
         print(f"-> {write_report(args.output, result)}")
     # 0=keep / 1=cut / 2=inconclusive. `inconclusive` 를 `cut` 과 같은 코드로 내지 않는다.
-    return {"keep": 0, "cut": 1, "inconclusive": 2}[result.verdict]
+    return {"keep": 0, "cut": 1, "inconclusive": 2, "review": 3}[result.verdict]
 
 
 if __name__ == "__main__":

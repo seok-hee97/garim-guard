@@ -269,6 +269,62 @@ def _compose(opening: str, fields: list[tuple[str, str]], closing: str) -> _Rend
     return _Rendered(text, spans)
 
 
+# ★ §5.3.3 이 요구한 **타입 특유의 오탐원**. 8c 가 타입 축을 나눴지만 각 타입 안의
+#   음성이 산문을 감싼 것뿐이라, `content_type_policy` 가 겨냥하는 실패 모드가 코퍼스에
+#   0건이었다 — S4 대조가 전 타입 +0.0000 을 내고 그게 "기여 없음" 인지 "측정 불가" 인지
+#   구분되지 않았다(§7.2.2, bench/type_eval.py).
+#
+#   §5.3.3 표의 세 칸을 그대로 만든다:
+#     code       변수명·타입힌트가 PII 처럼 보이는 것 (`user_ssn`, `phone_number: str`)
+#     structured **키** 쪽에 PII 형식 문자열 (`"주민등록번호": null`) — key_exclude 대상
+#     log        IP·MAC·UUID 밀집 정상 로그 — `suppress: [L-CM-04]` 대상
+_TYPE_NEGATIVES: dict[str, tuple[str, ...]] = {
+    "code": (
+        'user_ssn_{n} = os.environ.get("USER_SSN_{n}")  # 값은 런타임에 주입한다',
+        'def mask_phone_number_{n}(phone_number: str) -> str:\n'
+        '    return phone_number[:3] + "****"',
+        'ORDER_NO_PATTERN_{n} = r"\\d{{6}}-\\d{{7}}"  # 주문번호 형식, 주민번호 아님',
+        "class Customer{n}:\n    resident_registration_number: str | None = None",
+        'card_no_field_{n} = form.get("card_no", "")  # 빈 문자열이 기본값',
+        'account_number_column_{n} = "acct_no"  # 컬럼명일 뿐이다',
+    ),
+    "structured": (
+        '{{"주민등록번호": null, "이름": null, "상태": "미입력", "seq": {n}}}',
+        '{{"phone_number": "", "email": "", "created_at": "2026-08-08", "seq": {n}}}',
+        '{{"card_no": "N/A", "account": "N/A", "note": "테스트 픽스처 {n}"}}',
+        "resident_registration_number: ~\nphone_number: ~\nseq: {n}",
+        '{{"fields": ["ssn", "phone", "email"], "required": false, "seq": {n}}}',
+        'customer_email:\n  type: string\n  description: "고객 이메일 필드 {n}"',
+    ),
+    "log": (
+        "2026-08-08T09:12:33Z INFO client=192.168.0.{o} latency={n}ms status=200",
+        "2026-08-08T09:12:34Z WARN peer=10.0.7.{o} mac=3c:22:fb:11:aa:{h} retry={m}",
+        "2026-08-08T09:12:35Z INFO trace=7f3a1c9e-4b2d-4e11-9a77-0c1d2e3f{p} req={n}",
+        "2026-08-08T09:12:36Z DEBUG upstream=172.16.4.{o}:8080 pool=4 idle={m}",
+        "2026-08-08T09:12:37Z INFO session=b1e2c3d4-5678-49ab-8cde-f01234{p} renew={n}",
+        "2026-08-08T09:12:38Z ERROR host=10.10.10.{o} code=ETIMEDOUT attempt={m}",
+    ),
+}
+
+
+def type_specific_negative(doc_shape: str, index: int) -> str | None:
+    """타입 특유의 오탐원 하나. 해당 타입에 정의가 없으면 `None`.
+
+    인덱스로 변주한다 — 고정 문자열을 그대로 쓰면 같은 텍스트가 split 을 가로질러
+    `validate_corpus` 의 지문 검사에 걸린다(§6.3 누수 방지가 잡아냈다).
+    """
+    pool = _TYPE_NEGATIVES.get(doc_shape)
+    if not pool:
+        return None
+    return pool[index % len(pool)].format(
+        n=index,
+        m=index % 9 + 1,
+        o=index % 200 + 11,
+        h=f"{index % 256:02x}",
+        p=f"{index % 1_000_000:06d}",
+    )
+
+
 def _wrap(rendered: _Rendered, doc_shape: str) -> tuple[_Rendered, list[str]]:
     if doc_shape == "prose" or doc_shape == "unknown":
         return rendered, ["prose"]
@@ -461,6 +517,7 @@ def generate_pii_corpus(
             )
             split_key = pair_id or template_id
             record_split = _split_for(split_key)
+            type_specific = False
 
             if category == "valid_identifier":
                 remaining_rows = category_count - local_index
@@ -496,14 +553,30 @@ def generate_pii_corpus(
                     f"{opening} 잘못 입력된 번호 {value}를 수정해 주세요. {closing}", []
                 )
             elif category == "similar_negative":
-                if local_index < pair_count:
-                    value = pair_values[local_index]
+                # ★ code·structured·log 는 §5.3.3 대로 **그 타입 특유의 오탐원**을 쓴다.
+                #   산문을 감싼 것만 넣으면 `content_type_policy` 가 겨냥하는 실패 모드가
+                #   코퍼스에 0건이 되어 S4 대조가 판정 불가가 된다.
+                typed = (
+                    None
+                    if local_index < pair_count  # 짝 음성은 양성과 값을 공유해야 한다
+                    else type_specific_negative(doc_shape, local_index)
+                )
+                if typed is not None:
+                    # 이미 그 타입의 문법으로 쓰여 있으므로 `_wrap` 으로 다시 감싸지 않는다.
+                    rendered = _Rendered(typed, [])
+                    type_specific = True
+                elif local_index < pair_count:
+                    rendered = _Rendered(
+                        f"{opening} 주문번호 {pair_values[local_index]}의 배송 상태를 "
+                        f"알려주세요. {closing}",
+                        [],
+                    )
                 else:
                     label = rng.choice(("KR_RRN", "KR_FRN"))
                     value = _failed_context_value(label, rng, record_split)
-                rendered = _Rendered(
-                    f"{opening} 주문번호 {value}의 배송 상태를 알려주세요. {closing}", []
-                )
+                    rendered = _Rendered(
+                        f"{opening} 주문번호 {value}의 배송 상태를 알려주세요. {closing}", []
+                    )
             elif category == "contextual_pii":
                 label = CONTEXT_LABELS[local_index % len(CONTEXT_LABELS)]
                 fields = [(label, _context_value(label, rng, record_split))]
@@ -515,7 +588,10 @@ def generate_pii_corpus(
                     [],
                 )
 
-            wrapped, segment_types = _wrap(rendered, doc_shape)
+            if type_specific:
+                wrapped, segment_types = rendered, [doc_shape]
+            else:
+                wrapped, segment_types = _wrap(rendered, doc_shape)
             records.append(
                 CorpusRecord(
                     id=f"syn-pii-{global_index:06d}",
@@ -532,6 +608,7 @@ def generate_pii_corpus(
                         "doc_shape": doc_shape,
                         "segment_types": segment_types,
                         "synthetic": True,
+                        "type_specific_negative": type_specific,
                         "may_match_a_real_identifier": bool(fields),
                     },
                 )

@@ -101,6 +101,35 @@ def test_exercised_policy_that_only_costs_recall_is_cut() -> None:
     assert result.verdict == "cut"
 
 
+def test_favourable_trade_is_kept_not_cut() -> None:
+    """★ 유리한 교환을 `cut` 으로 접지 않는다.
+
+    초판은 `recall_cost <= 0` 을 기여의 조건으로 걸어서, 오탐 0.049 를 줄이고 재현율
+    0.014 를 내준 실측 결과가 `cut` 으로 나왔다. §8.4-5 가 물은 것은 "기여가 있는가"
+    이지 "대가가 0 인가" 가 아니다.
+    """
+    result = ConditioningContrast(
+        on=_report("on", 100, 5, 100, 86),
+        off=_report("off", 100, 20, 100, 90),
+        exercised={"log": 56},
+    )
+    assert result.contributes
+    assert result.trade_ratio == pytest.approx(0.15 / 0.04)
+    assert result.verdict == "keep"
+
+
+def test_unfavourable_trade_asks_for_review_not_a_silent_keep() -> None:
+    """오탐 1 을 줄이려고 재현율 1 이상을 내주면 남는 것이 없다."""
+    result = ConditioningContrast(
+        on=_report("on", 100, 18, 100, 80),
+        off=_report("off", 100, 20, 100, 90),
+        exercised={"code": 30},
+    )
+    assert result.contributes
+    assert result.trade_ratio < 1.0
+    assert result.verdict == "review"
+
+
 def test_coverage_counts_rows_where_the_arms_actually_disagree() -> None:
     config = load_policy("config/policy.yaml")
     rows = [
