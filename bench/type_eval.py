@@ -270,6 +270,87 @@ def contrast(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Mechanism:
+    """정책 한 칸 — (타입, 필드). 절삭은 이 단위로 결정된다."""
+
+    content_type: str
+    field: str
+
+    def __str__(self) -> str:
+        return f"{self.content_type}.{self.field}"
+
+
+def active_mechanisms(config: PolicyConfig) -> list[Mechanism]:
+    """기본값과 다른 칸만 고른다 — 켜져 있지도 않은 것을 판정하지 않는다."""
+    from garim.policy.schema import ContentPolicy
+
+    default = ContentPolicy()
+    return [
+        Mechanism(name, field)
+        for name, policy in sorted(config.content_type_policy.items())
+        for field in type(policy).model_fields
+        if getattr(policy, field) != getattr(default, field)
+    ]
+
+
+def without_mechanism(config: PolicyConfig, mechanism: Mechanism) -> PolicyConfig:
+    """그 칸 하나만 기본값으로 되돌린 정책."""
+    from garim.policy.schema import ContentPolicy
+
+    policy = config.content_type_policy[mechanism.content_type]
+    reverted = policy.model_copy(
+        update={mechanism.field: getattr(ContentPolicy(), mechanism.field)}
+    )
+    return config.model_copy(
+        update={
+            "content_type_policy": {**config.content_type_policy, mechanism.content_type: reverted}
+        }
+    )
+
+
+def per_mechanism(
+    records: Sequence[CorpusRecord], *, policy_path: str = "config/policy.yaml"
+) -> dict[str, dict[str, Any]]:
+    """★ leave-one-out 절삭 판정.
+
+    전체 ON/OFF 는 **합계가 기제 하나의 손해를 가린다.** 실제로 그랬다 — `log` 의
+    큰 이득이 `code` 델타의 순손해를 덮어 전체 판정이 `keep` 으로 나왔고, 그러면
+    "타입 조건화를 유지한다" 가 세 기제 전부를 유지한다는 뜻이 되어버린다.
+
+    각 칸을 하나씩 되돌려 "이걸 빼면 무슨 일이 일어나는가" 를 묻는다 — 절삭 결정이
+    실제로 답해야 하는 질문이다.
+    """
+    config = load_policy(policy_path)
+    full = evaluate(records, config, arm="full")
+    verdicts: dict[str, dict[str, Any]] = {}
+    for mechanism in active_mechanisms(config):
+        stripped = without_mechanism(config, mechanism)
+        reduced = evaluate(records, stripped, arm=f"without:{mechanism}")
+        # 이 칸을 **빼면** 어떻게 되는가. 부호를 한 번 뒤집으므로 주석으로 못박는다.
+        #   fpr_gain > 0    빼면 오탐이 늘어난다  → 이 칸이 오탐을 줄이고 있었다(이득)
+        #   recall_gain > 0 빼면 재현율이 오른다  → 이 칸이 재현율을 깎고 있었다(대가)
+        fpr_gain = reduced.overall_false_positive_rate - full.overall_false_positive_rate
+        recall_gain = reduced.overall_recall - full.overall_recall
+        if fpr_gain == 0 and recall_gain == 0:
+            verdict = "inconclusive"  # 이 칸은 이 코퍼스에서 아무 판정도 바꾸지 않았다
+        elif fpr_gain <= 0 and recall_gain > 0:
+            # 빼면 재현율이 오르고 오탐은 안 는다 — 이 칸은 순손해다.
+            verdict = "cut"
+        elif fpr_gain > 0 and recall_gain <= 0:
+            verdict = "keep"  # 빼면 오탐만 늘어난다 — 공짜 이득이다
+        elif fpr_gain > 0 and fpr_gain >= recall_gain:
+            verdict = "keep"  # 대가가 있지만 이득이 그보다 크다
+        else:
+            verdict = "review"
+        verdicts[str(mechanism)] = {
+            "verdict": verdict,
+            "false_positive_contribution": round(fpr_gain, 4),
+            "recall_contribution": round(-recall_gain, 4),
+        }
+    return verdicts
+
+
 def write_report(path: str | Path, result: ConditioningContrast) -> Path:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -289,6 +370,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=3000)
     parser.add_argument("--split", default="test")
     parser.add_argument("--output")
+    parser.add_argument(
+        "--per-mechanism",
+        action="store_true",
+        help="정책 칸 하나씩 되돌려 절삭을 판정한다 — 합계는 기제 하나의 손해를 가린다",
+    )
     args = parser.parse_args()
 
     records = [r for r in generate_pii_corpus() if r.split == args.split][: args.limit]
@@ -315,6 +401,13 @@ def main() -> int:
             "  ⚠️ 코퍼스가 이 기능을 건드리지 않는다 — 0.0000 은 '기여 없음' 이 아니라\n"
             "     '측정 불가' 다. §8.4-5 의 절삭 트리거를 여기서 당기면 안 된다."
         )
+    if args.per_mechanism:
+        print(f"\n{'기제':34} {'오탐 기여':>10} {'재현율 기여':>12} {'판정':>12}")
+        for name, row in per_mechanism(records, policy_path=args.policy).items():
+            print(
+                f"{name:34} {row['false_positive_contribution']:>+10.4f} "
+                f"{row['recall_contribution']:>+12.4f} {row['verdict']:>12}"
+            )
     if args.output:
         print(f"-> {write_report(args.output, result)}")
     # 0=keep / 1=cut / 2=inconclusive. `inconclusive` 를 `cut` 과 같은 코드로 내지 않는다.

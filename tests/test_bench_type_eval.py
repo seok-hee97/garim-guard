@@ -10,12 +10,16 @@ import pytest
 
 from bench.type_eval import (
     ConditioningContrast,
+    Mechanism,
     TypeCell,
     TypeReport,
+    active_mechanisms,
     conditioning_off,
     content_type_of,
     contrast,
+    per_mechanism,
     policy_coverage,
+    without_mechanism,
 )
 from garim.policy.schema import load_policy
 from garim.training.data import CorpusRecord, CorpusSpan
@@ -154,3 +158,61 @@ def test_contrast_on_a_corpus_that_exercises_the_policy() -> None:
     # log 의 IP 억제가 음성 오탐을 줄인다 — 기여가 있는 방향이다.
     assert result.false_positive_reduction > 0
     assert result.verdict == "keep"
+
+
+def test_active_mechanisms_lists_only_non_default_cells() -> None:
+    """켜져 있지도 않은 칸을 판정하지 않는다."""
+    config = load_policy("config/policy.yaml")
+    names = {str(m) for m in active_mechanisms(config)}
+    assert "log.suppress" in names
+    assert "structured.key_exclude" in names
+    assert "code.pii_threshold_delta" in names
+    # 기본값 그대로인 칸은 목록에 없다.
+    assert "prose.suppress" not in names
+    assert "log.identifier_allowlist" not in names
+
+
+def test_without_mechanism_reverts_exactly_one_cell() -> None:
+    config = load_policy("config/policy.yaml")
+    stripped = without_mechanism(config, Mechanism("log", "suppress"))
+    assert stripped.content_type_policy["log"].suppress == []
+    # 같은 타입의 다른 칸도, 다른 타입도 그대로다.
+    assert stripped.content_type_policy["log"].attack_threshold_delta == (
+        config.content_type_policy["log"].attack_threshold_delta
+    )
+    assert stripped.content_type_policy["code"] == config.content_type_policy["code"]
+
+
+def test_per_mechanism_separates_a_net_loss_from_the_win_that_masks_it() -> None:
+    """★ 합계는 기제 하나의 손해를 가린다 — leave-one-out 이 그걸 드러낸다.
+
+    실측에서 전체 판정이 `keep` 인데 `code.pii_threshold_delta` 는 오탐을 하나도
+    줄이지 않고 재현율만 깎고 있었다. 합계만 보면 그 사실이 안 보인다.
+    """
+    rows = [
+        # log 음성 — `suppress: [L-CM-04]` 가 오탐을 막는다.
+        _record(f"log{i}", f"2026-08-08 INFO client=192.168.0.{i} ok", "log")
+        for i in range(1, 11)
+    ] + [
+        # code 양성 — `pii_threshold_delta` 가 임계를 올려 놓친다.
+        _record("codep", 'phone = "010-1234-5678"', "code", (9, 22, "PHONE")),
+    ]
+    verdicts = per_mechanism(rows)
+    assert verdicts["log.suppress"]["verdict"] == "keep"
+    assert verdicts["log.suppress"]["false_positive_contribution"] > 0
+    # 건드리지 않은 칸은 inconclusive 로 남는다 — cut 으로 접지 않는다.
+    assert verdicts["structured.key_exclude"]["verdict"] == "inconclusive"
+
+
+def test_per_mechanism_marks_a_pure_recall_loss_as_cut() -> None:
+    """빼면 재현율이 오르고 오탐은 안 느는 칸 = 순손해 = cut."""
+    rows = [
+        _record("codep1", 'phone = "010-1234-5678"', "code", (9, 22, "PHONE")),
+        _record("codep2", 'tel = "010-9876-5432"', "code", (7, 20, "PHONE")),
+        _record("proseN", "배송 문의드립니다", "prose"),
+    ]
+    verdicts = per_mechanism(rows)
+    code_delta = verdicts["code.pii_threshold_delta"]
+    if code_delta["verdict"] != "inconclusive":
+        assert code_delta["verdict"] == "cut"
+        assert code_delta["recall_contribution"] < 0

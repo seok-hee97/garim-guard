@@ -372,7 +372,33 @@ L0 만으로는 예산의 15% 안이다. §7.1.3 이 L1 에 세그먼트당 160m
 고정 문자열을 그대로 쓰면 같은 텍스트가 split 을 가로질러 §6.3 지문 검사에 걸린다 —
 인덱스로 변주한다. 그 검사가 실제로 잡아냈다.
 
-### 남은 것
+### 기제별 판정 — 합계가 하나의 손해를 가리고 있었다
 
-`code` 델타(23행 갈림)와 `structured` `key_exclude`(0행)는 여전히 따로 봐야 한다.
-전체 판정이 `keep` 인 것은 `log` 하나가 끌어올린 결과다 — 기제별 판정은 다음 작업이다.
+전체 `keep` 은 `log` 하나가 끌어올린 값이다. 그대로 두면 "타입 조건화를 유지한다" 가
+**여덟 칸 전부를 유지한다**는 뜻이 되어버린다. `per_mechanism` 이 칸을 하나씩 되돌려
+"이걸 빼면 무슨 일이 일어나는가" 를 묻는다 — 절삭 결정이 실제로 답해야 하는 질문이다.
+
+| 기제 | 오탐 기여 | 재현율 기여 | 판정 |
+|---|---|---|---|
+| **`log.suppress`** | **+0.0487** | +0.0000 | **keep** — 전체 이득을 혼자 만든다 |
+| **`code.pii_threshold_delta`** | +0.0000 | **−0.0140** | **cut** — 오탐을 하나도 안 줄이고 재현율만 깎는다 |
+| `code.secret_threshold_delta` | 0 | 0 | inconclusive |
+| `code.attack_threshold_delta` | 0 | 0 | inconclusive |
+| `code.identifier_allowlist` | 0 | 0 | inconclusive |
+| `log.attack_threshold_delta` | 0 | 0 | inconclusive |
+| `structured.secret_threshold_delta` | 0 | 0 | inconclusive |
+| `structured.key_exclude` | 0 | 0 | inconclusive |
+
+부호를 한 번 뒤집는 계산이라 처음에 틀렸다 — `code` 델타가 `cut` 이어야 하는데
+`review` 로 나왔다. leave-one-out 은 "빼면 나빠지는 정도" 를 재므로 `fpr_gain > 0` 이
+이득이고 `recall_gain > 0` 이 대가다. 주석으로 못박았다.
+
+### 이 결과로 정책을 바꾸지는 않았다
+
+§8.4-5 는 "기여가 측정되지 않으면 먼저 자른다" 이고 `code.pii_threshold_delta` 는
+그 조건에 걸린다. 그런데 **근거가 합성 음성뿐이다.** §7.1.0 이 *"합성 음성 1,375 로는
+목표 FPR 이 검증 불가"* 라고 못박았으므로, 그 근거로 배포 정책을 바꾸지 않는다.
+
+→ **§8.1-8f 실 한국어 FPR 하네스가 이 결정의 선행 조건이다.** 그때까지 이 표는
+"합성에서 이렇게 나왔다" 로만 읽는다. 여섯 칸의 `inconclusive` 도 같은 이유로
+`cut` 이 아니다 — 코퍼스가 그 칸들을 아직 건드리지 않는다.
