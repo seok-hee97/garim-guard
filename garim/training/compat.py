@@ -86,13 +86,28 @@ def allow_decoupled_head_dim(config_classes: tuple[type, ...] | None = None) -> 
             config_class.__class_validators__ = original
 
 
+def _load_with_shim(loader: Any, model_dir: str | Path, kwargs: dict[str, Any]) -> Any:
+    kwargs.setdefault("local_files_only", True)
+    if not config_needs_decoupled_head_shim(read_local_config(model_dir)):
+        return loader(str(model_dir), **kwargs)
+    with allow_decoupled_head_dim():
+        return loader(str(model_dir), **kwargs)
+
+
 def load_local_causal_lm(model_dir: str | Path, **kwargs: Any) -> Any:
     """Load a pinned local causal LM, engaging the shim only when the config needs it."""
     from transformers import AutoModelForCausalLM
 
-    config = read_local_config(model_dir)
-    kwargs.setdefault("local_files_only", True)
-    if not config_needs_decoupled_head_shim(config):
-        return AutoModelForCausalLM.from_pretrained(str(model_dir), **kwargs)
-    with allow_decoupled_head_dim():
-        return AutoModelForCausalLM.from_pretrained(str(model_dir), **kwargs)
+    return _load_with_shim(AutoModelForCausalLM.from_pretrained, model_dir, kwargs)
+
+
+def load_local_tokenizer(model_dir: str | Path, **kwargs: Any) -> Any:
+    """★ 토크나이저도 같은 게이트를 타야 한다.
+
+    `AutoTokenizer.from_pretrained` 가 토크나이저 클래스를 정하려고 `config.json` 을
+    먼저 읽는다 — 모델보다 앞서 같은 검증자에 막힌다. 모델 쪽만 감싸 두면 shim 이
+    한 번도 발동하지 못하고 그대로 실패한다(실제로 그랬다).
+    """
+    from transformers import AutoTokenizer
+
+    return _load_with_shim(AutoTokenizer.from_pretrained, model_dir, kwargs)

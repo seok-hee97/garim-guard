@@ -66,21 +66,22 @@ def kanana_safeguard(model_dir: str | Path, *, device: str | None = None) -> Jud
     이 하네스는 모델 자체를 재는 것이므로 그 비대칭을 적용하지 않고 원 판정을 낸다.
     """
     import torch
-    from transformers import AutoTokenizer
 
-    from garim.training.compat import load_local_causal_lm
+    from garim.training.compat import load_local_causal_lm, load_local_tokenizer
 
     directory = str(model_dir)
     resolved = device or ("mps" if torch.backends.mps.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained(directory, local_files_only=True)
+    tokenizer = load_local_tokenizer(directory)
     # kanana 는 decoupled head_dim 이라 transformers>=5 의 검증자에 막힌다 — compat 참고.
     model = load_local_causal_lm(directory, dtype=torch.float16).to(resolved).eval()
 
     def judge(text: str) -> bool:
         messages = [{"role": "user", "content": text}]
-        input_ids = tokenizer.apply_chat_template(
-            messages, tokenize=True, return_tensors="pt"
-        ).to(resolved)
+        # transformers 4.x 는 텐서를, 5.x 는 BatchEncoding 을 돌려준다 — 둘 다 받는다.
+        encoded = tokenizer.apply_chat_template(
+            messages, tokenize=True, return_dict=True, return_tensors="pt"
+        )
+        input_ids = encoded["input_ids"].to(resolved)
         pad = tokenizer.pad_token_id
         attention_mask = (input_ids != pad).long() if pad is not None else None
         with torch.inference_mode():
