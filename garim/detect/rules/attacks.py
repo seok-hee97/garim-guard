@@ -17,8 +17,18 @@ _SYSTEM_LEAK = re.compile(
     r"(?:reveal|show|print|repeat).{0,20}(?:system|developer)\s+(?:prompt|message|instructions?)",
     re.IGNORECASE,
 )
+# ★ `제한(이|은)? 없는` 은 앵커로 쓸 수 없다. 한국어 위키 12,000 문장 실측에서
+#   이 패턴만으로 오탐 2건이 나왔다 — "제한 없는 연분수", "제한이 없는 소프트웨어".
+#   §8.1-8f 하네스가 처음 잡아낸 것이고, 정확히 그것을 하라고 만든 항목이다.
+#   → 대상어(AI·모델·정책·필터…)를 앞뒤 좁은 창 안에서 함께 요구한다.
+_UNRESTRICTED_TARGET = (
+    r"(?:AI|인공지능|모델|어시스턴트|assistant|챗봇|정책|규칙|필터|가이드라인|검열|제약)"
+)
 _JAILBREAK_PERSONA = re.compile(
-    r"\bDAN\b|developer\s+mode|제한(?:이|은)?\s*없는|너는\s*이제.{0,20}(?:이다|역할)|.{1,20}인\s*척해",
+    r"\bDAN\b|developer\s+mode|"
+    rf"{_UNRESTRICTED_TARGET}.{{0,12}}제한(?:이|은)?\s*없는|"
+    rf"제한(?:이|은)?\s*없는.{{0,12}}{_UNRESTRICTED_TARGET}|"
+    r"너는\s*이제.{0,20}(?:이다|역할)|.{1,20}인\s*척해",
     re.IGNORECASE,
 )
 _JAILBREAK_OTHER = re.compile(
