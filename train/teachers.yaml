@@ -1,0 +1,25 @@
+classes: [NONE, INJECTION, JAILBREAK, SYSTEM_LEAK]
+minimum_votes: 2
+minimum_confidence: 0.5
+
+teachers:
+  kanana:
+    model_id: kakaocorp/kanana-safeguard-prompt-2.1b
+    revision: 167d74d4706b236580b0e48318337c7ac6ba7848
+    votes_for: [NONE, INJECTION, SYSTEM_LEAK]
+    soft_targets: [NONE, INJECTION, SYSTEM_LEAK]
+    can_flip_none: false
+
+  gemma4:
+    model_id: google/gemma-4-E2B-it
+    revision: 3e22461f65e89153144f8adb70e3b8c2cc9845a7
+    votes_for: [NONE, INJECTION, JAILBREAK, SYSTEM_LEAK]
+    soft_targets: []
+    can_flip_none: true
+
+  qwen3guard_stream:
+    model_id: Qwen/Qwen3Guard-Stream-0.6B
+    revision: 419364a715de9840d47b1457982f64ff37f90ed4
+    votes_for: [JAILBREAK]
+    soft_targets: [JAILBREAK]
+    can_flip_none: false

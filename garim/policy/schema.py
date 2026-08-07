@@ -79,6 +79,20 @@ class Limits(BaseModel):
     max_segments: int = Field(64, ge=1)
     chunk_size: int = Field(512, ge=32)
     chunk_overlap: int = Field(64, ge=0)
+    # ★ §3.6 "청크 수 상한 초과 → warn + degraded" 의 상한. 이 필드가 없어서
+    #   그 행이 구현되지 않았다 — `max_segments` 가드는 `split_text` 결과만 세고
+    #   `chunk_text` 결과를 세지 않았다. 10만자(=max_input_chars) 입력에 L1 `infer`
+    #   가 447회 불리고도 `degraded=False` 로 보고됐다. §7.1.3 의 세그먼트당 L1
+    #   예산 160ms 를 곱하면 단일 호출이 약 71초다.
+    #
+    #   ⚠️ 상한은 **L1 에만** 건다. 스캔 자체를 멈추면 안 된다 — 그러면
+    #   `chunk.py` 가 닫은 fail-open(뒷부분이 조용히 검사되지 않는 것)이 24k자
+    #   이상 입력에서 그대로 되살아난다. `tests/test_segment.py` 의 꼬리 테스트가
+    #   실제로 그것을 잡았다. L0 는 결정적이고 싸므로 전량 돈다.
+    #
+    #   ⚠️ 128 은 실측이 아니다 — §7.1.3 지연 수치 전체가 W1 첫날 실측 대상이고
+    #      이 값도 거기서 다시 잡는다. 지금은 "무한이 아니다" 를 보장할 뿐이다.
+    max_l1_chunks: int = Field(128, ge=1)
     # ★ §3.6 "L1 지연 예산 초과 → 타임아웃 후 L0 결과 채택, degraded".
     #   초판은 동기 호출 + except 뿐이라 1.5초 걸리는 백엔드에 1.51초 블로킹하고
     #   degraded=False 를 냈다. §7.1.3 의 세그먼트당 L1 예산이 160ms 다.

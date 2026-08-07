@@ -1,0 +1,55 @@
+allowed_licenses: [Apache-2.0]
+
+models:
+  - name: l1_ax_encoder
+    model_id: skt/A.X-Encoder-base
+    revision: 9708f9c404ace91efd25c06fac2d73413616f4ef
+    purpose: backbone
+    license: Apache-2.0
+    gated: false
+    parameters: 149372240
+    note: 채택 L1 백본. ONNX QInt8 파일 크기/RSS/지연은 로컬 실측 전 미확정.
+
+  - name: teacher_kanana
+    model_id: kakaocorp/kanana-safeguard-prompt-2.1b
+    revision: 167d74d4706b236580b0e48318337c7ac6ba7848
+    purpose: teacher
+    license: Apache-2.0
+    gated: false
+    parameters: 2086984704
+
+  - name: teacher_gemma4
+    model_id: google/gemma-4-E2B-it
+    revision: 3e22461f65e89153144f8adb70e3b8c2cc9845a7
+    purpose: teacher
+    license: Apache-2.0
+    gated: false
+    parameters: 5123178051
+
+  - name: teacher_qwen3guard_stream
+    model_id: Qwen/Qwen3Guard-Stream-0.6B
+    revision: 419364a715de9840d47b1457982f64ff37f90ed4
+    purpose: teacher
+    license: Apache-2.0
+    gated: false
+    parameters: 597111296
+
+  - name: l2_qwen3guard_gen_4b
+    model_id: Qwen/Qwen3Guard-Gen-4B
+    revision: 6ec42827da0c1ff11e7a49dc269d2e810d27e108
+    purpose: l2_candidate
+    license: Apache-2.0
+    gated: false
+    parameters: 4411424256
+    enabled: false
+    note: RTP-LX는 독성 벤치다. 인젝션·PII 문맥 골드셋과 지연 게이트 전까지 비활성.
+
+  - name: l2_guardrail_korean_gemma4
+    model_id: FrameByFrame/guardrail-korean-gemma-4-E2B
+    revision: 090d21a33edf4159eab64dbcee33f77e2c0e2284
+    purpose: l2_candidate
+    license: Gemma
+    gated: false
+    parameters: 5123178051
+    enabled: false
+    note: Gemma ToU이며 자체 held-out 외 독립 검증이 없어 비활성.

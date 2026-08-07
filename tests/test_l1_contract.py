@@ -41,3 +41,16 @@ def test_l1_failure_keeps_l0_result_and_sets_degraded() -> None:
     assert result.verdict == "mask"
     assert result.masked_text == "<EMAIL_1>"
     assert result.degraded
+
+
+def test_l1_entity_boundary_does_not_absorb_trailing_whitespace() -> None:
+    class TrailingSpaceBackend:
+        name = "trailing-space"
+
+        def infer(self, text: str, **_: object) -> L1Output:
+            return L1Output(entities=[L1Entity("PERSON", (0, 4), 0.99)])
+
+    result = Inspector(l1_backend=TrailingSpaceBackend()).check("홍길동 요청")
+    person = next(finding for finding in result.leaks if finding.code == "L-CT-01")
+    assert person.span == (0, 3)
+    assert result.masked_text == "<PERSON_1> 요청"

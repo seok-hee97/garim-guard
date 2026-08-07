@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from time import perf_counter
+from typing import TypeVar
 
 from garim.detect.l1 import PII_LABEL_TO_CODE, L1Backend
 from garim.detect.merge import deduplicate_streams, merge_overlaps
@@ -34,6 +35,68 @@ class PipelineResult:
     #   "조용한 성능 저하가 구 프로젝트에서 문제였다"고 적었다. bool 하나로는
     #   호출자가 무엇이 degraded 인지 알 수 없다.
     degraded_reasons: list[str] = field(default_factory=list)
+
+
+_T = TypeVar("_T")
+
+
+class L1BusyError(RuntimeError):
+    """A previous timed-out inference still owns the bounded L1 worker."""
+
+
+def _call_with_deadline(
+    func: Callable[[], _T],
+    budget_seconds: float,
+    *,
+    gate: threading.Lock,
+    on_timeout: Callable[[], None] | None = None,
+) -> _T:
+    """`budget_seconds` 안에 결과를 못 받으면 포기한다 — §3.6.
+
+    ★ 회귀 — `ThreadPoolExecutor` 를 쓰면 안 된다.
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(...)
+            l1_findings = future.result(timeout=budget)   # TimeoutError 발생
+        # ← 여기서 __exit__ 가 shutdown(wait=True) 로 폭주 워커를 join 한다
+
+    `future.result()` 가 제때 터져도 `with` 블록을 빠져나가며 스레드가 끝날 때까지
+    기다렸다. 실행으로 확인: 예산 100ms 에 3초 자는 백엔드를 물리면 **실제 3,003ms**
+    를 쓰고도 `degraded_reasons=['l1_timeout']` 로 "타임아웃했다"고 보고했다.
+    예산의 30배를 블로킹한 것이라 §7.1.3 의 p50 300ms / p95 700ms 를 어떤 구현으로도
+    지킬 수 없었다.
+
+    파이썬에는 임의의 스레드를 안전하게 죽이는 방법이 없다. 대신 파이프라인마다
+    gate 하나만 허용한다. 타임아웃 난 워커가 끝나기 전에는 다음 추론을 시작하지
+    않아 공격자가 타임아웃 호출마다 새 백그라운드 추론을 쌓을 수 없다. ONNX
+    백엔드는 `cancel_current()` 로 ORT RunOptions 종료도 함께 요청한다.
+    """
+    if not gate.acquire(blocking=False):
+        raise L1BusyError("previous L1 inference is still running")
+    box: dict[str, object] = {}
+
+    def runner() -> None:
+        try:
+            box["value"] = func()
+        except BaseException as exc:  # 워커의 예외를 호출자 스레드로 옮긴다
+            box["error"] = exc
+        finally:
+            gate.release()
+
+    worker = threading.Thread(target=runner, daemon=True, name="garim-l1")
+    worker.start()
+    worker.join(budget_seconds)
+    if worker.is_alive():
+        if on_timeout is not None:
+            try:
+                on_timeout()
+            except Exception:
+                pass  # cancellation is best-effort; timeout semantics must remain stable
+        raise TimeoutError("L1 inference exceeded its budget")
+    error = box.get("error")
+    if error is not None:
+        raise error  # type: ignore[misc]
+    return box["value"]  # type: ignore[return-value]
 
 
 _STRUCTURED_KEY = re.compile(
@@ -68,10 +131,25 @@ def _evasion_codes(bundle: NormalizedBundle, stream: str) -> list[str]:
     return codes
 
 
+def _trim_span_whitespace(span: tuple[int, int], text: str) -> tuple[int, int]:
+    start, end = span
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
 class DetectionPipeline:
     def __init__(self, policy: PolicyEngine, l1_backend: L1Backend | None = None) -> None:
         self.policy = policy
         self.l1_backend = l1_backend
+        self._l1_gate = threading.Lock()
+
+    def _cancel_l1(self) -> None:
+        cancel = getattr(self.l1_backend, "cancel_current", None)
+        if callable(cancel):
+            cancel()
 
     def _scan_view(
         self,
@@ -130,6 +208,9 @@ class DetectionPipeline:
             if code is None:
                 continue
             span = to_source_span(entity.span, bundle.norm.interval_map, len(bundle.raw.text))
+            span = _trim_span_whitespace(span, bundle.raw.text)
+            if span[0] == span[1]:
+                continue
             multiplier = 0.9
             rule = "ner"
             if code in {"L-KR-01", "L-KR-02"}:
@@ -181,6 +262,8 @@ class DetectionPipeline:
         content_type: ContentType,
         segment_idx: int,
         source_offset: int = 0,
+        use_l0: bool = True,
+        use_l1: bool = True,
     ) -> PipelineResult:
         started = perf_counter()
         normalization_started = perf_counter()
@@ -188,25 +271,29 @@ class DetectionPipeline:
         normalization_ms = (perf_counter() - normalization_started) * 1000
 
         l0_started = perf_counter()
-        raw_findings = self._scan_view(
-            bundle.raw, source_len=len(text), origin=origin, stream="raw"
-        )
-        all_l0 = list(raw_findings)
-        all_l0.extend(
-            self._scan_view(bundle.norm, source_len=len(text), origin=origin, stream="norm")
-        )
-        all_l0.extend(
-            self._scan_view(bundle.nospace, source_len=len(text), origin=origin, stream="nospace")
-        )
-        for decoded in bundle.decoded:
+        all_l0: list[Finding] = []
+        if use_l0:
+            raw_findings = self._scan_view(
+                bundle.raw, source_len=len(text), origin=origin, stream="raw"
+            )
+            all_l0.extend(raw_findings)
+            all_l0.extend(
+                self._scan_view(bundle.norm, source_len=len(text), origin=origin, stream="norm")
+            )
             all_l0.extend(
                 self._scan_view(
-                    decoded,
-                    source_len=len(text),
-                    origin=origin,
-                    stream=decoded.name,
+                    bundle.nospace, source_len=len(text), origin=origin, stream="nospace"
                 )
             )
+            for decoded in bundle.decoded:
+                all_l0.extend(
+                    self._scan_view(
+                        decoded,
+                        source_len=len(text),
+                        origin=origin,
+                        stream=decoded.name,
+                    )
+                )
         l0_findings = deduplicate_streams(all_l0)
         l0_findings = [
             replace(
@@ -223,19 +310,25 @@ class DetectionPipeline:
         l1_ms = 0.0
         degraded = False
         degraded_reasons: list[str] = []
-        if self.l1_backend is not None:
+        # `use_l1=False` 는 호출자가 L1 예산을 다 쓴 경우다(§3.6, api.py 의
+        # max_l1_chunks). L0 는 그대로 돌고, degraded 보고는 호출자가 한다.
+        if self.l1_backend is not None and use_l1:
             l1_started = perf_counter()
             budget = self.policy.config.limits.l1_timeout_ms / 1000
             try:
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(
-                        self._l1_findings, bundle, origin=origin, content_type=content_type
-                    )
-                    l1_findings = future.result(timeout=budget)
-            except FuturesTimeout:
+                l1_findings = _call_with_deadline(
+                    lambda: self._l1_findings(bundle, origin=origin, content_type=content_type),
+                    budget,
+                    gate=self._l1_gate,
+                    on_timeout=self._cancel_l1,
+                )
+            except TimeoutError:
                 # ★ §3.6 — 예산 초과면 L0 결과를 채택하고 degraded 로 알린다.
                 degraded = True
                 degraded_reasons.append("l1_timeout")
+            except L1BusyError:
+                degraded = True
+                degraded_reasons.append("l1_busy")
             except Exception as exc:
                 degraded = True
                 degraded_reasons.append(f"l1_error:{type(exc).__name__}")

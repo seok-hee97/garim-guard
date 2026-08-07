@@ -4,18 +4,29 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from time import perf_counter
 
 from garim.detect.l1 import L1Backend
-from garim.detect.pipeline import DetectionPipeline
+from garim.detect.merge import merge_overlaps
+from garim.detect.pipeline import DetectionPipeline, PipelineResult
 from garim.mask.vault import Vault, mask_text
-from garim.models import CheckResult, Finding, Segment
+from garim.models import CheckResult, ContentType, Finding, Origin, Segment
 from garim.policy.engine import MASK_LABELS, SEVERITY, PolicyEngine
 from garim.policy.schema import PolicyConfig, load_policy
 from garim.segment.chunk import chunk_text
 from garim.segment.content_type import detect_content_type
 from garim.segment.split import split_text
+
+
+@dataclass(frozen=True, slots=True)
+class _L1Job:
+    text: str
+    origin: Origin
+    content_type: ContentType
+    segment_idx: int
+    source_offset: int
+    group: int
 
 
 class Inspector:
@@ -83,9 +94,28 @@ class Inspector:
         degraded = truncated_input or mode == "thorough"  # L2 미배선 + 입력 절단
         if mode == "thorough":
             degraded_reasons.append("l2_not_wired")
-        forced_block = False
-        forced_warn = truncated_input or mode == "thorough"
+        # 검사하지 않은 꼬리를 외부로 보낼 수 없으므로 절단은 fail-closed다.
+        forced_block = truncated_input
+        forced_warn = mode == "thorough"
         internal_segments = 0
+        # ★ §3.6 "청크 수 상한 초과 → warn + degraded" — 초판에 이 행이 없었다.
+        #   `max_segments` 가드는 `split_text` 결과만 세고 `chunk_text` 결과를 세지
+        #   않아, 10만자 입력에 L1 `infer` 가 447회 불리고도 `degraded=False` 였다.
+        #   상한은 **L1 에만** 건다 — 스캔을 멈추면 chunk.py 가 닫은 fail-open 이
+        #   되살아난다. L0 는 전량 돌고, L1 이 꺼진 사실만 degraded 로 알린다.
+        l1_chunk_cap = self.policy.config.limits.max_l1_chunks
+        l1_jobs: list[_L1Job] = []
+
+        def accumulate(result: PipelineResult, *, include_delta: bool) -> None:
+            nonlocal degraded
+            findings.extend(result.findings)
+            degraded = degraded or result.degraded
+            degraded_reasons.extend(result.degraded_reasons)
+            if include_delta:
+                for key, value in result.delta.items():
+                    delta[key] += value
+            for key, value in result.latency_ms.items():
+                latency[key] += value
 
         for segment_idx, segment in enumerate(inputs):
             try:
@@ -93,46 +123,95 @@ class Inspector:
             except UnicodeEncodeError:
                 degraded = True
                 forced_warn = True
+                degraded_reasons.append("input_encoding_error")
                 continue
             slices = split_text(segment.text)
             internal_segments += len(slices)
+            slice_types: list[str] = []
             for sliced in slices:
-                # ★ 청킹 — 없으면 L1 이 512토큰에서 조용히 자른다(§3.6·§10.1)
+                content_type = (
+                    segment.content_type
+                    if segment.content_type != "unknown"
+                    else sliced.content_type
+                )
+                if content_type == "unknown":
+                    content_type = detect_content_type(sliced.text)
+                slice_types.append(content_type)
+                content_types.append(content_type)
+
+            # L0는 원문 세그먼트 전체를 한 번만 본다. 세그먼트/청크 경계가 긴
+            # 시크릿이나 식별자를 자르는 문제를 없앤다. 혼합 타입은 보수적으로 prose다.
+            l0_content_type = (
+                segment.content_type
+                if segment.content_type != "unknown"
+                else (slice_types[0] if len(set(slice_types)) == 1 else "prose")
+            )
+            try:
+                accumulate(
+                    self.pipeline.scan(
+                        segment.text,
+                        origin=segment.origin,
+                        content_type=l0_content_type,
+                        segment_idx=segment_idx,
+                        use_l0=True,
+                        use_l1=False,
+                    ),
+                    include_delta=True,
+                )
+            except Exception:
+                degraded = True
+                forced_block = True
+                degraded_reasons.append("l0_error")
+                continue
+
+            if self.pipeline.l1_backend is None:
+                continue
+            tokenizer = getattr(self.pipeline.l1_backend, "tokenizer", None)
+            group_base = internal_segments - len(slices)
+            for slice_index, (sliced, content_type) in enumerate(
+                zip(slices, slice_types, strict=True)
+            ):
                 pieces = chunk_text(
                     sliced.text,
                     chunk_size=self.policy.config.limits.chunk_size,
                     chunk_overlap=self.policy.config.limits.chunk_overlap,
+                    tokenizer=tokenizer,
                 )
                 for piece in pieces:
-                    content_type = (
-                        segment.content_type
-                        if segment.content_type != "unknown"
-                        else sliced.content_type
-                    )
-                    if content_type == "unknown":
-                        content_type = detect_content_type(piece.text)
-                    if piece.start == 0:
-                        content_types.append(content_type)
-                    try:
-                        result = self.pipeline.scan(
+                    l1_jobs.append(
+                        _L1Job(
                             piece.text,
-                            origin=segment.origin,
-                            content_type=content_type,
-                            segment_idx=segment_idx,
-                            source_offset=sliced.start + piece.start,
+                            segment.origin,
+                            content_type,
+                            segment_idx,
+                            sliced.start + piece.start,
+                            group=group_base + slice_index,
                         )
-                    except Exception:
-                        # L0 예외는 결정적 코어의 실패이므로 fail-closed 다.
-                        degraded = True
-                        forced_block = True
-                        continue
-                    findings.extend(result.findings)
-                    degraded = degraded or result.degraded
-                    degraded_reasons.extend(result.degraded_reasons)
-                    for key, value in result.delta.items():
-                        delta[key] += value
-                    for key, value in result.latency_ms.items():
-                        latency[key] += value
+                    )
+
+        selected_jobs = _select_l1_jobs(l1_jobs, l1_chunk_cap)
+        if len(selected_jobs) < len(l1_jobs):
+            degraded = True
+            forced_warn = True
+            degraded_reasons.append("l1_chunk_cap")
+        for job in selected_jobs:
+            try:
+                accumulate(
+                    self.pipeline.scan(
+                        job.text,
+                        origin=job.origin,
+                        content_type=job.content_type,
+                        segment_idx=job.segment_idx,
+                        source_offset=job.source_offset,
+                        use_l0=False,
+                        use_l1=True,
+                    ),
+                    include_delta=False,
+                )
+            except Exception:
+                degraded = True
+                forced_warn = True
+                degraded_reasons.append("l1_pipeline_error")
 
         if internal_segments > self.policy.config.limits.max_segments:
             degraded = True
@@ -140,14 +219,14 @@ class Inspector:
 
         # ★ origin 정책 — trust_declared 일 때만 공격 축 강등 (§2.5b)
         origins = {idx: segment.origin for idx, segment in enumerate(inputs)}
+        findings = _merge_across_chunks(findings)
         findings = self.policy.apply_origin_policy(findings, origins)
-        origin_cap = self.policy.origin_verdict_cap(findings, origins)
 
         leaks = sorted((finding for finding in findings if not finding.is_attack), key=_finding_key)
         attacks = sorted((finding for finding in findings if finding.is_attack), key=_finding_key)
-        verdict = self.policy.aggregate(findings)
-        if origin_cap is not None and SEVERITY[verdict] > SEVERITY[origin_cap]:
-            verdict = origin_cap
+        # ★ 상한은 공격 축에만 건다(§2.5b). 초판은 전체 판정에 걸어 system 세그먼트의
+        #   공격 문구 한 줄이 user 세그먼트의 유출 block 을 warn 으로 끌어내렸다.
+        verdict = self.policy.aggregate_with_origin(findings, origins)
         if forced_warn and SEVERITY[verdict] < SEVERITY["warn"]:
             verdict = "warn"
         if forced_block:
@@ -194,6 +273,51 @@ class Inspector:
 
 def _finding_key(finding: Finding) -> tuple[int, int, int, str]:
     return (finding.segment_idx, finding.span[0], finding.span[1], finding.code)
+
+
+def _select_l1_jobs(jobs: list[_L1Job], limit: int) -> list[_L1Job]:
+    """Select bounded jobs while giving every source slice deterministic coverage."""
+    if len(jobs) <= limit:
+        return jobs
+    grouped: dict[int, list[int]] = defaultdict(list)
+    for index, job in enumerate(jobs):
+        grouped[job.group].append(index)
+
+    quotas = {group: 0 for group in grouped}
+    remaining = limit
+    while remaining:
+        progressed = False
+        for group in sorted(grouped):
+            if quotas[group] >= len(grouped[group]):
+                continue
+            quotas[group] += 1
+            remaining -= 1
+            progressed = True
+            if remaining == 0:
+                break
+        if not progressed:
+            break
+
+    chosen: set[int] = set()
+    for group, indexes in grouped.items():
+        quota = quotas[group]
+        if quota == 1:
+            positions = [len(indexes) // 2]
+        else:
+            positions = [round(step * (len(indexes) - 1) / (quota - 1)) for step in range(quota)]
+        chosen.update(indexes[position] for position in positions)
+    return [job for index, job in enumerate(jobs) if index in chosen]
+
+
+def _merge_across_chunks(findings: list[Finding]) -> list[Finding]:
+    """Deduplicate overlaps after all findings share original segment coordinates."""
+    grouped: dict[tuple[int, bool], list[Finding]] = defaultdict(list)
+    for finding in findings:
+        grouped[(finding.segment_idx, finding.is_attack)].append(finding)
+    merged: list[Finding] = []
+    for group in grouped.values():
+        merged.extend(merge_overlaps(group))
+    return sorted(merged, key=_finding_key)
 
 
 def _empty_delta() -> dict[str, int]:

@@ -22,10 +22,25 @@ jobs:
         run: python -m pytest
       - name: Lint and import check
         run: |
-          ruff check garim tests tools
-          python -m compileall -q garim tools
+          ruff check garim tests tools train
+          python -m compileall -q garim tools train
+          python train/validate_sources.py
+          python train/validate_models.py
       - name: No committed checksum-valid resident number
         run: python tools/no_committed_pii.py
+      # AI-Hub 이용정책 제5항(제3자 제공 금지) — DESIGN §5.4.3 의 강제 장치 셋 중 셋째.
+      # .gitignore 가 뚫렸을 때의 최후 방어다. 공개 저장소라 한 번 들어가면 되돌릴 수 없다.
+      - name: No committed AI-Hub data
+        run: |
+          tracked=$(git ls-files 'data/aihub' 'data/aihub/**')
+          if [ -n "$tracked" ]; then
+            echo "AI-Hub 데이터가 추적되고 있다 — 이용정책 제5항 위반:"
+            echo "$tracked"
+            exit 1
+          fi
+          grep -q 'data/aihub' .gitignore || { echo ".gitignore 에 data/aihub 가 없다"; exit 1; }
+          grep -q 'data/aihub' train/sources.yaml || { echo "sources.yaml 에 금지 경로가 없다"; exit 1; }
+          echo "OK: AI-Hub 경로가 세 장치 전부에서 막혀 있다"
 
   probes:
     name: design probes (appendix A)
@@ -39,11 +54,45 @@ jobs:
         run: |
           set -e
           for probe in checksum_probe fpr_probe josa_probe vault_probe \
-                       normalize_probe offset_probe marker_probe roundtrip_probe \
-                       token_efficiency_probe token_efficiency_fix; do
+                       normalize_probe offset_probe marker_probe roundtrip_probe; do
             python "docs/${probe}.py"
           done
+      # ★ 부록 A.3 의 두 프로브만 tiktoken 을 쓴다. 위 루프에 섞여 있어서
+      #   "dependency-free" 라는 잡 이름 그대로 설치 없이 돌았고, 커밋 4b6d905
+      #   이후 이 잡은 계속 exit 1 이었다. 의존성이 있는 것을 없는 척하지 않는다.
+      - name: Install tokenizer probe dependency
+        run: python -m pip install 'tiktoken>=0.7,<1'
+      - name: Run tokenizer-dependent design probes (appendix A.3)
+        run: |
+          set -e
+          python docs/token_efficiency_probe.py
+          python docs/token_efficiency_fix.py
       - name: Assert interval-map baseline
         run: python docs/offset_probe.py | grep -qE '^9/9 '
       - name: Assert generator-to-rule round trip
         run: python docs/roundtrip_probe.py | grep -q '전건 통과'
+
+  # ★ `dev` 는 pytest·ruff 뿐이라 `garim` 잡에서 torch 테스트가 통째로 skip 됐다.
+  #   그 결과 JointL1Model·손실·엔진·ONNX 내보내기·OnnxL1Backend 가 로컬에서도
+  #   CI 에서도 한 번도 실행되지 않은 채 "구현 완료" 로 기록돼 있었다. GPU 박스에서
+  #   처음 도는 코드를 없앤다. 자산은 필요 없다 — 작은 인코더/토크나이저로 계약만 건다.
+  train-stack:
+    name: L1 training stack (torch + onnx, CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU torch and the training extra
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[train,dev]'
+      - name: Assert the torch stack is importable (no silent skip)
+        run: python -c "import torch, transformers, onnx, onnxruntime; print(torch.__version__)"
+      - name: Training-stack tests
+        run: python -m pytest tests -k "training or l1" -q
+      - name: Implementation preflight
+        run: python train/preflight.py --stage implementation

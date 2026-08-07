@@ -1,0 +1,205 @@
+"""Auditable teacher prediction artifacts and accepted/review corpus resolution."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from garim.training.data import CorpusRecord, validate_corpus
+from garim.training.split import grouping_key, hashed_validation_split
+from garim.training.teachers import (
+    ATTACK_LABELS,
+    JAILBREAK_POSTERIOR_CLASSES,
+    SOFT_TARGET_CLASSES,
+    AttackLabel,
+    TeacherPolicy,
+    TeacherPrediction,
+    TeacherSpec,
+    resolve_teacher_label,
+)
+
+
+class TeacherArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    teacher: str
+    model_id: str
+    revision: str
+    label: AttackLabel
+    confidence: float = Field(ge=0.0, le=1.0)
+    class_probabilities: dict[str, float] | None = None
+    prompt_version: str | None = None
+
+    @model_validator(mode="after")
+    def validate_probabilities(self) -> TeacherArtifact:
+        if self.class_probabilities is not None:
+            if any(not 0.0 <= value <= 1.0 for value in self.class_probabilities.values()):
+                raise ValueError("class probabilities must be in [0, 1]")
+            if not self.class_probabilities:
+                raise ValueError("class probabilities cannot be empty")
+        return self
+
+
+def load_teacher_artifacts(path: str | Path) -> dict[str, TeacherArtifact]:
+    source = Path(path)
+    output: dict[str, TeacherArtifact] = {}
+    with source.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            try:
+                artifact = TeacherArtifact.model_validate_json(line)
+            except ValueError as exc:
+                raise ValueError(f"{source}:{line_number}: {exc}") from exc
+            if artifact.id in output:
+                raise ValueError(f"{source}: duplicate prediction id {artifact.id}")
+            output[artifact.id] = artifact
+    return output
+
+
+def _validation_split(record: CorpusRecord, percent: int) -> str:
+    return hashed_validation_split(
+        grouping_key(
+            record_id=record.id,
+            group_id=record.group_id,
+            template_id=record.template_id,
+        ),
+        percent,
+    )
+
+
+def _validate_soft_targets(
+    record_id: str, teacher: str, spec: TeacherSpec, artifact: TeacherArtifact
+) -> None:
+    """Hold every teacher to the soft-target contract its own manifest entry declares."""
+    if not spec.soft_targets:
+        return
+    declared = set(spec.soft_targets)
+    if artifact.class_probabilities is None or set(artifact.class_probabilities) != declared:
+        raise ValueError(
+            f"{record_id}: {teacher} must emit exactly {sorted(declared)} soft-target classes"
+        )
+    # A single-class head is a posterior, not a distribution — only ask a multi-class
+    # soft target to sum to one.
+    if len(declared) > 1 and abs(sum(artifact.class_probabilities.values()) - 1.0) > 1e-4:
+        raise ValueError(f"{record_id}: {teacher} soft targets must sum to one")
+
+
+def resolve_teacher_corpus(
+    records: Iterable[CorpusRecord],
+    artifacts: dict[str, dict[str, TeacherArtifact]],
+    policy: TeacherPolicy,
+    *,
+    validation_percent: int = 10,
+) -> tuple[list[CorpusRecord], list[CorpusRecord], list[dict[str, object]]]:
+    if not 0 <= validation_percent < 100:
+        raise ValueError("validation_percent must be in [0, 100)")
+    accepted: list[CorpusRecord] = []
+    review: list[CorpusRecord] = []
+    audit: list[dict[str, object]] = []
+    expected_teachers = set(policy.teachers)
+    soft_target_teacher = policy.soft_target_teacher(SOFT_TARGET_CLASSES)
+    jailbreak_teacher = policy.soft_target_teacher(JAILBREAK_POSTERIOR_CLASSES)
+    materialized = list(records)
+    record_ids = {record.id for record in materialized}
+    if len(record_ids) != len(materialized):
+        raise ValueError("teacher pool contains duplicate record IDs")
+    unexpected_teachers = set(artifacts) - expected_teachers
+    if unexpected_teachers:
+        raise ValueError(f"unregistered teacher artifact groups: {unexpected_teachers}")
+    for teacher, predictions in artifacts.items():
+        extra = set(predictions) - record_ids
+        if extra:
+            raise ValueError(
+                f"{teacher}: {len(extra)} prediction IDs are not in the teacher pool"
+            )
+
+    for record in materialized:
+        if record.task != "attack" or record.attack_label is not None:
+            raise ValueError(f"{record.id}: teacher pool must contain unlabeled attack rows")
+        row_artifacts: dict[str, TeacherArtifact] = {}
+        missing: list[str] = []
+        for teacher in expected_teachers:
+            artifact = artifacts.get(teacher, {}).get(record.id)
+            if artifact is None:
+                missing.append(teacher)
+                continue
+            spec = policy.teachers[teacher]
+            if artifact.teacher != teacher:
+                raise ValueError(f"{record.id}: artifact teacher name mismatch")
+            if artifact.model_id != spec.model_id or artifact.revision != spec.revision:
+                raise ValueError(f"{record.id}: {teacher} model/revision drift")
+            _validate_soft_targets(record.id, teacher, spec, artifact)
+            row_artifacts[teacher] = artifact
+
+        if missing:
+            decision_label = None
+            status = "review"
+            votes = {label: 0 for label in ATTACK_LABELS}
+        else:
+            decision = resolve_teacher_label(
+                {
+                    name: TeacherPrediction(item.label, item.confidence)
+                    for name, item in row_artifacts.items()
+                },
+                policy,
+            )
+            decision_label, status, votes = decision.label, decision.status, decision.votes
+
+        audit.append(
+            {
+                "id": record.id,
+                "status": status,
+                "label": decision_label,
+                "votes": votes,
+                "missing_teachers": missing,
+                "predictions": {
+                    name: {
+                        "label": item.label,
+                        "confidence": item.confidence,
+                        "prompt_version": item.prompt_version,
+                    }
+                    for name, item in sorted(row_artifacts.items())
+                },
+            }
+        )
+        if decision_label is None:
+            review.append(record)
+            continue
+
+        soft_probabilities = None
+        if soft_target_teacher is not None:
+            probabilities = row_artifacts[soft_target_teacher].class_probabilities
+            if probabilities is not None:
+                soft_probabilities = tuple(
+                    probabilities[label] for label in SOFT_TARGET_CLASSES
+                )
+        jailbreak_target = None
+        if jailbreak_teacher is not None:
+            probabilities = row_artifacts[jailbreak_teacher].class_probabilities
+            if probabilities is not None:
+                jailbreak_target = probabilities[JAILBREAK_POSTERIOR_CLASSES[0]]
+        split = _validation_split(record, validation_percent)
+        accepted.append(
+            record.model_copy(
+                update={
+                    "attack_label": decision_label,
+                    "kanana_probabilities": soft_probabilities,
+                    "qwen_jailbreak_target": jailbreak_target,
+                    "split": split,
+                    "meta": {
+                        **record.meta,
+                        "requires_teacher_label": False,
+                        "teacher_resolution": "class-specific-two-vote",
+                    },
+                }
+            )
+        )
+    # ★ 여기서 한 번 걸러야 한다. 버킷 분할이 group/template 을 쪼개면
+    #   `validate_corpus` 가 거부하는 코퍼스가 만들어지는데, 그 실패가 지금까지는
+    #   다음 로드까지 미뤄졌다. 만든 자리에서 터뜨린다.
+    if accepted:
+        validate_corpus(accepted)
+    return accepted, review, audit

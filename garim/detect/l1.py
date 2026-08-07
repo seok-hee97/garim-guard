@@ -8,6 +8,7 @@ honorific/social-engineering probability. This module intentionally does not dow
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -103,7 +104,13 @@ class OnnxL1Backend:
 
     name = "onnx-int8"
 
-    def __init__(self, model_dir: str | Path, *, max_length: int = 512) -> None:
+    def __init__(
+        self,
+        model_dir: str | Path,
+        *,
+        max_length: int = 512,
+        model_filename: str = "garim_l1.int8.onnx",
+    ) -> None:
         try:
             import onnxruntime as ort
             from transformers import AutoTokenizer
@@ -111,10 +118,12 @@ class OnnxL1Backend:
             raise RuntimeError("install garim-guard[l1] to use OnnxL1Backend") from exc
 
         directory = Path(model_dir)
-        model_path = directory / "garim_l1.int8.onnx"
+        if Path(model_filename).name != model_filename or not model_filename.endswith(".onnx"):
+            raise ValueError("model_filename must be a local .onnx basename")
+        model_path = directory / model_filename
         label_path = directory / "labels.json"
         if not model_path.is_file() or not label_path.is_file():
-            raise ValueError("model_dir must contain garim_l1.int8.onnx and labels.json")
+            raise ValueError(f"model_dir must contain {model_filename} and labels.json")
         try:
             metadata = json.loads(label_path.read_text(encoding="utf-8"))
             self.pii_labels = list(metadata["pii_labels"])
@@ -129,6 +138,9 @@ class OnnxL1Backend:
         if not self.tokenizer.is_fast:
             raise ValueError("L1 requires a fast tokenizer for source offset mapping")
         self.session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        self._ort = ort
+        self._run_options_lock = threading.Lock()
+        self._active_run_options = None
         self.input_names = {item.name for item in self.session.get_inputs()}
         self.output_names = [item.name for item in self.session.get_outputs()]
         required_outputs = {
@@ -143,6 +155,13 @@ class OnnxL1Backend:
                 "honorific_logits"
             )
         self.max_length = max_length
+
+    def cancel_current(self) -> None:
+        """Ask ONNX Runtime to terminate the active inference, if one exists."""
+        with self._run_options_lock:
+            run_options = self._active_run_options
+        if run_options is not None:
+            run_options.terminate = True
 
     @staticmethod
     def _softmax(values: object) -> object:
@@ -234,7 +253,15 @@ class OnnxL1Backend:
                 dtype=np.float32,
             )
         )
-        raw_outputs = self.session.run(self.output_names, feed)
+        run_options = self._ort.RunOptions()
+        with self._run_options_lock:
+            self._active_run_options = run_options
+        try:
+            raw_outputs = self.session.run(self.output_names, feed, run_options)
+        finally:
+            with self._run_options_lock:
+                if self._active_run_options is run_options:
+                    self._active_run_options = None
         outputs = dict(zip(self.output_names, raw_outputs, strict=True))
 
         attack = self._softmax(outputs["attack_logits"])[0]

@@ -15,8 +15,25 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-l1 = ["numpy>=1.26,<3", "onnxruntime>=1.18,<2", "transformers>=4.44,<5"]
-train = ["torch>=2.2,<3", "transformers>=4.44,<5"]
+l1 = ["numpy>=1.26,<3", "onnxruntime>=1.18,<2", "transformers>=5.5,<6"]
+train = [
+  "accelerate>=1.10,<2",
+  "datasets>=2.20,<4",
+  "huggingface-hub>=0.36,<2",
+  "numpy>=1.26,<3",
+  "onnx>=1.16,<2",
+  # torch.onnx.export defaults to the dynamo exporter, which imports onnxscript.
+  # Without it every export raised ModuleNotFoundError at the end of the pipeline.
+  "onnxscript>=0.7,<1",
+  "onnxruntime>=1.18,<2",
+  "pyarrow>=18,<24",
+  "safetensors>=0.5,<1",
+  "sentencepiece>=0.2,<1",
+  # `torch.export.Dim.DYNAMIC` and the `dynamo=` switch used by garim/training/export.py
+  # only exist from 2.6; the old floor advertised support this code does not have.
+  "torch>=2.6,<3",
+  "transformers>=5.5,<6",
+]
 dev = ["pytest>=8,<9", "ruff>=0.6,<1"]
 
 [project.scripts]

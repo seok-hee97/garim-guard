@@ -18,6 +18,15 @@ train/artifacts/
 data/synth/
 data/corpus/
 data/cassettes/
+data/raw/
+data/local/
+data/asset-manifest.json
+data/training-input-manifest.json
+
+# AI-Hub — 재배포 금지(이용정책 제5항) · 국외 반출 금지(제3항). DESIGN §5.4.3.
+# 저장소에 들어가는 순간 제5항 위반이고, 공개 저장소이므로 되돌릴 수 없다.
+# 이것은 세 장치 중 첫째다 — 나머지 둘은 train/sources.yaml 금지 경로와 CI 검사.
+data/aihub/
 bench/out/
 results/
 report/

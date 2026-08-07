@@ -138,5 +138,29 @@ class PolicyEngine:
             return "allow"
         return max((self.mode_for(finding.code) for finding in findings), key=SEVERITY.__getitem__)
 
+    def aggregate_with_origin(self, findings: list[Finding], origins: dict[int, str]) -> Verdict:
+        """판정 합산. origin 상한은 **공격 축에만** 건다 — §2.5b.
+
+        ★ 회귀 — 초판은 `aggregate(findings)` 전체 결과에 상한을 걸었다.
+        `origin_verdict_cap` 은 공격 finding 의 세그먼트만 보고 상한을 정하는데,
+        그 상한이 유출 축까지 함께 내렸다. 실행으로 확인한 결과:
+
+            system 세그먼트에 A-LEAK-01, user 세그먼트에 주민등록번호(L-KR-01, block)
+            → trust_declared=False: block / trust_declared=True: **warn**
+
+        프록시가 `trust_declared` 를 켜는 순간, 시스템 프롬프트에 공격 문구 한 줄만
+        있으면 사용자 메시지의 주민등록번호·API 키 block 이 전부 warn 으로 내려갔다.
+        §2.5b 가 "system 을 검사에서 빼는 것은 틀린 처방" 이라며 막으려던 우회를
+        다른 경로로 열어 준 셈이다.
+
+        두 축을 따로 합산하고 상한을 공격 쪽에만 먹인 뒤 다시 최댓값을 취한다.
+        """
+        leak_verdict = self.aggregate([f for f in findings if not f.is_attack])
+        attack_verdict = self.aggregate([f for f in findings if f.is_attack])
+        cap = self.origin_verdict_cap(findings, origins)
+        if cap is not None and SEVERITY[attack_verdict] > SEVERITY[cap]:
+            attack_verdict = cap
+        return max((leak_verdict, attack_verdict), key=SEVERITY.__getitem__)
+
     def mask_label(self, code: str) -> str:
         return MASK_LABELS.get(code, "SENSITIVE")

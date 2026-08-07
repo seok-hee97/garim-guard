@@ -1,0 +1,215 @@
+# 학습·평가 데이터 소스 레지스트리 — DESIGN §5.2 · §5.4.3
+#
+# 이 파일은 "예외 목록"이 아니라 **고정 소스 레지스트리**다. 로더의 순서는 셋이다:
+#   ① HuggingFace 에 있으면 HF API 를 런타임 조회해 라이선스 태그를 확인한다
+#      (문서에 적힌 문자열을 믿지 않는다 — 초안이 PolyGuardPrompts 를 ODC-BY 로
+#       잘못 적고 있었다)
+#   ② HF 소스는 전체 commit revision을 고정하고 현재 라이선스를 다시 조회한다
+#   ③ HF 밖 학습 소스는 이 레지스트리의 `sha256` 대조로만 통과한다
+#   ④ 레지스트리에도 없으면 **실패한다** (fail-closed)
+#
+# HF가 아닌 학습 소스의 `sha256: null`은 미확정이므로 로더가 통과시키지 않는다.
+# HF 소스는 단일 파일 해시 대신 `revision`을 고정한다.
+#
+# ⚠️ 허용 라이선스: Apache-2.0 / MIT / CC-BY-4.0 / CC0 / CC-BY-SA-4.0
+#    CC-BY-SA 소스 사용 시 모델 카드에 attribution/SA 보수 정책을 기록한다.
+
+allowed_licenses:
+  - Apache-2.0
+  - MIT
+  - CC-BY-4.0
+  - CC0-1.0
+  - CC-BY-SA-4.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# 금지 경로 — 라이선스가 아니라 **경로로** 막는다.
+#
+# AI-Hub 는 허용 목록에 없어서 막히는 것이 아니다(이용약관은 목록 밖이다).
+# 이용정책 제3항(국외 반출 금지) 때문에 막는다 — AI-Hub 데이터로 학습한 가중치를
+# HuggingFace(미국 소재)에 올리는 것이 반출에 해당하는지 확인하지 못했다.
+# 학습에 넣지 않으면 가중치가 파생물이 아니게 되고 국외로 나가는 것은 지표뿐이라
+# 판단이 필요 없어진다. §0 이 가중치 공개를 목표로 하는 이상 이쪽이 유일한 해다.
+#
+# 로더는 이 경로 아래 파일을 만나면 경고가 아니라 **예외를 던진다**(fail-closed).
+# ─────────────────────────────────────────────────────────────────────────
+forbidden_paths:
+  - path: data/aihub/**
+    reason: >-
+      AI-Hub 이용정책 제3항(국외 반출 금지)·제5항(제3자 제공 금지).
+      평가 하네스에서만 읽고 학습 파이프라인에는 절대 넣지 않는다. DESIGN §5.4.3.
+    enforced_by:
+      - .gitignore
+      - train/sources.yaml (this file)
+      - .github/workflows/ci.yml (path check)
+
+sources:
+  # ── 학습 ───────────────────────────────────────────────────────────────
+  - name: KDPII
+    use: train
+    hf_id: null # HF 에 없다 — Zenodo 직접 배포이므로 sha256 경로로만 통과한다
+    url: https://zenodo.org/records/16759166
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    file: PII_dataset_V3.json
+    sha256: 4017f68284596ffc357dd23363fb9ab9eb2eb730f01973af8beded54430d3e74
+    note: >-
+      대화 4,981 / 문장 53,778 / 양성 19,037. R1 주 학습. revised 판은 공식 split이
+      없다. 실제 PNE는 여권 200, 면허 200, 계좌 804, 건강보험 0이다. 대화 단위에
+      더해 정규화 식별자 연결 성분 단위로 먼저 분할한다.
+
+  - name: KLUE-NER
+    use: train # train 분할만. validation 은 T2 held-out 전용이고 교차 사용 금지.
+    hf_id: klue/klue
+    url: https://huggingface.co/datasets/klue/klue
+    license: CC-BY-SA-4.0
+    license_url: https://creativecommons.org/licenses/by-sa/4.0/
+    revision: 349481ec73fff722f88e0453ca05c77a447d967c
+    sha256: null
+    hf_config: ner
+    train_split: train
+    note: >-
+      학습 사실·출처·CC-BY-SA-4.0을 모델 카드에 기록한다. 가중치 라이선스는 공개 전
+      별도 검토하며 SA 자동 전파를 확정 법률 사실로 단정하지 않는다.
+      `PS` 만 채택(단일 문자 제외 + 한글 2~4자 필터). `LC`·`OG` 는 실측 기각(§6.1.1).
+      공개 분할은 train/validation 둘뿐 — test 라벨은 리더보드 보관이다.
+
+  - name: KLUE-NER-validation
+    use: eval
+    hf_id: klue/klue
+    url: https://huggingface.co/datasets/klue/klue
+    license: CC-BY-SA-4.0
+    license_url: https://creativecommons.org/licenses/by-sa/4.0/
+    revision: 349481ec73fff722f88e0453ca05c77a447d967c
+    sha256: null
+    hf_config: ner
+    eval_split: validation
+    note: 같은 KLUE 소스의 in-domain held-out. 독립 외부 코퍼스로 부르지 않는다.
+
+  - name: PolyGuardMix
+    use: train
+    hf_id: ToxicityPrompts/PolyGuardMix
+    url: https://huggingface.co/datasets/ToxicityPrompts/PolyGuardMix
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    revision: 5b7d93e9e9a636c6c152df071745e04130a21ff4
+    sha256: null
+    train_split: train
+    note: >-
+      R2 학습 풀. 한국어만 필터하고 프로젝트 4-way 택소노미로 다시 라벨링한다.
+      PolyGuardPrompts test와 정규화 지문/source ID 교집합이 있으면 학습 행을 제거한다.
+
+  - name: PolyGuardPrompts
+    use: eval
+    hf_id: ToxicityPrompts/PolyGuardPrompts
+    url: https://huggingface.co/datasets/ToxicityPrompts/PolyGuardPrompts
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    revision: c5b466a95b64ff121db4398246b6abb7672696ec
+    sha256: null
+    eval_split: test
+    note: >-
+      공식 test-only 벤치마크. R2 학습 금지. 한국어 subset을 프로젝트 공격 4-way로
+      수동 재라벨한 뒤 최종 1회 평가한다.
+
+  - name: bc-pii-ko
+    use: value_dictionary # ★ 값 사전 전용 — 문맥은 대체하지 않는다
+    hf_id: sehe1121/bc-pii-ko
+    url: https://huggingface.co/datasets/sehe1121/bc-pii-ko
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    revision: 327c775b68850ca59cf4ff2ad0b084fcd4916da4
+    sha256: null
+    note: >-
+      §5.3.1b 의 최대 값 소스. 카드가 스스로 "원문이 openpii 합성 번역체"라 적어
+      실무 텍스트 분포와 다르다 — 값만 쓴다. RRN 627 / BIZNO 1,071은 독립 체크섬
+      구현의 conformance 보조값으로만 쓴다. FRN 212는 기존 필터 우연통과 집계일 뿐
+      체크섬 근거로 부르거나 그 기준으로 선별하지 않는다.
+      `augmented-negative` 720행은 학습에 넣지 않고 FPR 분모의 외부 조각으로 봉인.
+
+  - name: bc-pii-ko-augmented-negative
+    use: eval
+    hf_id: sehe1121/bc-pii-ko
+    url: https://huggingface.co/datasets/sehe1121/bc-pii-ko
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    revision: 327c775b68850ca59cf4ff2ad0b084fcd4916da4
+    eval_split: train
+    sha256: null
+    note: >-
+      train 파일 안 provenance=augmented-negative인 720행만 외부 FPR 조각으로 봉인한다.
+      나머지 행과 모든 privacy_mask 양성은 이 평가 소스에서 사용하지 않는다.
+
+  - name: gretel-synthetic-pii-finance-multilingual
+    use: schema_reference
+    hf_id: gretelai/synthetic_pii_finance_multilingual
+    url: https://huggingface.co/datasets/gretelai/synthetic_pii_finance_multilingual
+    license: Apache-2.0
+    revision: 7b844d16738527a04264f50214cb426a4cea0897
+    sha256: null
+
+  - name: deepset-prompt-injections
+    use: train
+    hf_id: deepset/prompt-injections
+    url: https://huggingface.co/datasets/deepset/prompt-injections
+    # top-level card는 Apache-2.0, nested dataset_info는 CC-BY-4.0이라 보수적으로 후자 적용
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    revision: 4f61ecb038e9c3fb77e21034b22511b523772cdd
+    train_split: train
+    sha256: null
+
+  - name: deepset-prompt-injections-test
+    use: eval
+    hf_id: deepset/prompt-injections
+    url: https://huggingface.co/datasets/deepset/prompt-injections
+    license: CC-BY-4.0
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    revision: 4f61ecb038e9c3fb77e21034b22511b523772cdd
+    eval_split: test
+    sha256: null
+    note: >-
+      영어 원문 test는 번역 전에 봉인한다. 프로젝트 4-way 수동 라벨을 만든 뒤 평가에만
+      쓰며 PolyGuardPrompts와 함께 어떤 학습 파일에도 병합하지 않는다.
+
+  # ── 외부 재현율 증거 (§5.4.2) ──────────────────────────────────────────
+  - name: DART-OpenAPI-corp-outline
+    enabled: false
+    use: eval # 값 사전(법인·사업자등록번호)만. 학습에 넣지 않는다.
+    hf_id: null
+    url: https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019002
+    license: null
+    license_url: https://opendart.fss.or.kr/intro/useAgreement.do
+    sha256: null
+    note: >-
+      `jurir_no`(법인등록번호)·`bizr_no`(사업자등록번호)만 뽑는다.
+      ⚠️ `ceo_nm`·`adres`·`phn_no` 는 실존 개인정보이므로 **수집하지 않는다**.
+      공공누리라고 단정할 근거가 없어 이용약관 검토 전까지 disabled다. 승인 후에도
+      두 필드만 로컬·일시적으로 평가하고 원값은 저장소에 커밋하지 않는다.
+
+  - name: SNU-Thunder-DeID
+    enabled: false
+    use: eval
+    hf_id: thunder-research-group/SNU_Thunder-DeID-annotated_court_judgments
+    url: https://huggingface.co/datasets/thunder-research-group/SNU_Thunder-DeID-annotated_court_judgments
+    license: null # ★ 확인 실패 — gated. 승인 후 확인하고 채운다.
+    sha256: null
+    note: >-
+      논문 기준 전체 6,700 판결문 / 48,306 엔티티. 원천은 이미 익명화돼 주민번호가
+      `주민등록번호 1` placeholder이고 실제 수치 식별자는 규칙 생성 replacement다.
+      실제 RRN 체크섬 외부 증거로 쓰지 않고 문맥/placeholder 평가 후보로만 둔다.
+      라이선스와 gated 실물 확인 전까지 로더가 거부한다.
+
+  # ── 제외 (등재해 두는 이유: 실수로 다시 들어오는 것을 막기 위해) ──────
+excluded:
+  - name: smilegate-ai/korean_unsmile
+    license: CC-BY-NC-ND-4.0
+    reason: NC 가 아니라 **ND(파생물 금지)** 가 학습을 막는다. 포트폴리오여도 같다.
+  - name: ai4privacy 300k/400k/financial-pfi
+    license: 독자 제한
+    reason: 한국어가 있는 세트는 상용 개별 계약이 필요하다.
+  - name: korean-guardrail-dataset
+    license: 없음
+    reason: 저장소 라이선스 없음 = All rights reserved. 개별 원출처에서만 받는다.
+  - name: KOLD / LoL 리스트 / AssurAI / K-MHaS
+    license: 불명 또는 Restricted
+    reason: 라이선스 불명. K-MHaS 는 태그가 우리 셋과 무관하다.

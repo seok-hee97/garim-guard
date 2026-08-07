@@ -32,14 +32,50 @@ def test_long_input_tail_is_still_inspected() -> None:
     assert result.verdict == "block"
 
 
-def test_oversize_input_degrades_instead_of_raising() -> None:
-    """§3.6 — 검사기가 앱을 멈추면 사용자가 꺼버리고, 그러면 아무것도 못 막는다."""
+def test_l1_calls_are_bounded_but_l0_still_scans_everything() -> None:
+    """★ 회귀 — 청크 수에 상한이 없어 L1 이 무한정 불리던 것(§3.6).
+
+    `max_segments` 가드는 `split_text` 결과만 세고 `chunk_text` 결과를 세지 않았다.
+    10만자 입력에 L1 `infer` 가 **447회** 불리고 `degraded=False` 로 보고됐다.
+    §7.1.3 의 세그먼트당 L1 예산 160ms 를 곱하면 단일 호출이 약 71초다.
+
+    ★ 그리고 상한을 스캔 전체에 걸면 안 된다 — 위 꼬리 테스트가 잡는다.
+    L0 는 전량 돌고 L1 만 묶인다. 두 단언이 함께 있어야 어느 쪽으로도 못 무너진다.
+    """
+    from garim.api import Inspector
+    from garim.detect.l1 import L1Output
+
+    calls: list[int] = []
+
+    class Counting:
+        name = "counting"
+
+        def infer(self, text, *, normalization_delta, origin, content_type):  # noqa: ANN001
+            calls.append(len(text))
+            return L1Output()
+
+    inspector = Inspector(l1_backend=Counting())
+    cap = inspector.policy.config.limits.max_l1_chunks
+    tail = "고객 주민등록번호 900101-1234561 입니다"
+    text = "가" * (60_000 - len(tail)) + tail
+    result = inspector.check(text)
+
+    assert len(calls) <= cap, f"L1 이 상한 {cap} 을 넘겨 {len(calls)}회 불렸다"
+    assert result.degraded is True
+    assert "l1_chunk_cap" in result.degraded_reasons
+    # L0 는 멈추지 않는다 — 꼬리의 주민등록번호를 여전히 잡아야 한다.
+    assert any(finding.code == "L-KR-01" for finding in result.leaks)
+
+
+def test_oversize_input_blocks_uninspected_tail_instead_of_raising() -> None:
+    """검사하지 않은 꼬리를 warn 상태로 외부 전송할 수 없어야 한다."""
     from garim.api import Inspector
 
     inspector = Inspector()
     result = inspector.check("가" * 100_001)
     assert result.degraded is True
-    assert result.verdict == "warn"
+    assert result.verdict == "block"
+    assert "input_truncated" in result.degraded_reasons
 
 
 def test_chunks_overlap_and_keep_source_offsets() -> None:

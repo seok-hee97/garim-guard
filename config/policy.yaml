@@ -34,12 +34,16 @@ thresholds:
   l1_atk: 0.5
   l0: 0.5
   l2_escalate: [0.4, 0.6]
+  romanized_evasion: 0.5
+  honorific_social_engineering: 0.5
 
 limits:
   max_input_chars: 100000
   max_segments: 64
   chunk_size: 512
   chunk_overlap: 64
+  max_l1_chunks: 128
+  l1_timeout_ms: 1000
 
 custom_patterns:
   - code: L-CT-03
