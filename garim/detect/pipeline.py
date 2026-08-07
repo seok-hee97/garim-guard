@@ -163,7 +163,9 @@ class DetectionPipeline:
             detect_kr_pii(view.text, rrn_anchor=self.policy.config.rules.rrn_anchor)
             + detect_common_pii(view.text)
             + detect_secrets(view.text)
-            + detect_markers(view.text)
+            + detect_markers(
+                view.text, score_threshold=self.policy.config.rules.marker_score_threshold
+            )
             + detect_attacks(view.text, origin=origin)
         )
         for pattern, compiled in self.policy.custom_patterns:

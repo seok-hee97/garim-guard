@@ -1,4 +1,11 @@
-"""기밀 표식 — 단순 substring vs 위치 가중치 비교 (DESIGN.md §2.5 검증)."""
+"""기밀 표식 — 단순 substring vs 위치 가중치 비교 (DESIGN.md §2.5 검증).
+
+⚠️ 이 스크립트는 **설계 방식**을 검증한다. 배포 코드를 검증하지 않는다.
+아래 `weighted()` 는 참조 구현이고 `garim/detect/rules/markers.py` 와 별개다.
+그 둘이 갈라진 적이 있다 — 프로브가 100%/0% 로 통과하는 동안 배포 코드는
+사전 22개가 빠진 채 60%/40% 였다. 배포 코드의 회귀는 `tests/test_markers.py`
+가 잡는다. 여기서는 garim 을 import 할 수 있으면 두 구현의 일치까지 확인한다.
+"""
 import re
 MARKERS = ["대외비","기밀","영업비밀","극비","사내한","취급주의","CONFIDENTIAL","INTERNAL USE ONLY"]
 MARK_RE = re.compile("|".join(map(re.escape, MARKERS)), re.I)
@@ -29,3 +36,17 @@ if __name__ == "__main__":
     w_tp = sum(weighted(t) for t,g in CASES if g); w_fp = sum(weighted(t) for t,g in CASES if not g)
     print(f"단순 substring : 재현율 {n_tp/pos:.0%}  오탐율 {n_fp/neg:.0%}")
     print(f"위치 가중치     : 재현율 {w_tp/pos:.0%}  오탐율 {w_fp/neg:.0%}")
+
+    try:
+        from garim.detect.rules.markers import detect_markers
+    except ImportError:
+        print("배포 코드 대조  : 건너뜀 (garim 미설치 — tests/test_markers.py 가 담당)")
+    else:
+        shipped = [bool(detect_markers(t)) for t, _ in CASES]
+        s_tp = sum(h for h, (_, g) in zip(shipped, CASES) if g)
+        s_fp = sum(h for h, (_, g) in zip(shipped, CASES) if not g)
+        print(f"배포 코드      : 재현율 {s_tp/pos:.0%}  오탐율 {s_fp/neg:.0%}")
+        drift = [t for h, (t, _) in zip(shipped, CASES) if h != weighted(t)]
+        if drift:
+            raise SystemExit(f"참조 구현과 배포 코드가 갈라졌다: {drift}")
+        print("참조/배포 일치  : 전건 통과")

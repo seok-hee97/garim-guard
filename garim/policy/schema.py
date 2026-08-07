@@ -19,6 +19,9 @@ class Defaults(BaseModel):
 class RuleSwitches(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rrn_anchor: bool = True
+    # ★ §2.5 위치 가중치 임계. 실측은 표본 10건이고 그 절에서 스스로
+    #   "실제 코퍼스로 재조정해야 한다"고 적었으므로 코드에 박지 않고 정책으로 뺀다.
+    marker_score_threshold: int = Field(3, ge=1, le=8)
 
     @field_validator("rrn_anchor", mode="before")
     @classmethod

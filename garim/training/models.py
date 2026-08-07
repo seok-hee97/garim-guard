@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ModelPurpose = Literal["backbone", "teacher", "l2_candidate"]
+ModelPurpose = Literal["backbone", "teacher", "l2_candidate", "baseline"]
 ModelResolver = Callable[[str, str], tuple[str, bool, int]]
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
@@ -41,6 +41,12 @@ class ModelAsset(BaseModel):
 class ModelManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     allowed_licenses: list[str]
+    # ★ 용도별로 나눈다. §6.2.2 는 "교사 셋과 학생이 전부 Apache-2.0" 이라는 사실에
+    #   기대어 "증류 산출 가중치에 파생 조항이 걸리지 않는다" 고 결론했다. 그 보장은
+    #   backbone·teacher 에만 필요하다. §7.3 베이스라인은 돌려서 수치만 보고하고
+    #   가중치를 재배포하지 않으므로 조건이 다르다 — 전역 목록을 넓히면 그 구분이
+    #   사라지므로 별도 목록으로 둔다. 비우면 `allowed_licenses` 를 그대로 쓴다.
+    baseline_allowed_licenses: list[str] = Field(default_factory=list)
     models: list[ModelAsset]
 
 
@@ -74,6 +80,12 @@ class ModelRegistry:
         if len(self._models) != len(manifest.models):
             raise ValueError("model names must be unique")
         self._allowed = {license_value.lower() for license_value in manifest.allowed_licenses}
+        self._baseline_allowed = {
+            license_value.lower() for license_value in manifest.baseline_allowed_licenses
+        } or self._allowed
+
+    def allowed_licenses_for(self, purpose: ModelPurpose) -> set[str]:
+        return self._baseline_allowed if purpose == "baseline" else self._allowed
 
     def model(self, name: str) -> ModelAsset:
         try:
@@ -88,8 +100,10 @@ class ModelRegistry:
         if not asset.enabled:
             raise ValueError(f"{name}: model is disabled pending task-specific validation")
         license_value, gated, parameters = resolver(asset.model_id, asset.revision)
-        if license_value.lower() not in self._allowed:
-            raise ValueError(f"{name}: license {license_value!r} is not allowed")
+        if license_value.lower() not in self.allowed_licenses_for(asset.purpose):
+            raise ValueError(
+                f"{name}: license {license_value!r} is not allowed for purpose {asset.purpose!r}"
+            )
         if license_value.lower() != asset.license.lower():
             raise ValueError(f"{name}: model license drift")
         if gated != asset.gated:

@@ -47,12 +47,19 @@ def build_asset_plan(
     data_root: str | Path = "data/raw",
     include_teachers: bool = True,
     include_eval: bool = True,
+    include_baselines: bool = False,
 ) -> list[AssetPlan]:
+    purposes = {"backbone"}
+    if include_teachers:
+        purposes.add("teacher")
+    # §7.3 베이스라인은 학습 경로에 들어가지 않는다. 같은 라이선스·revision 게이트를
+    # 태우되 기본 계획에서는 빼서, 학습만 하려는 실행이 수 GB를 더 받지 않게 한다.
+    if include_baselines:
+        purposes.add("baseline")
     models = [
         asset
         for asset in model_registry.manifest.models
-        if asset.enabled
-        and asset.purpose in ({"backbone", "teacher"} if include_teachers else {"backbone"})
+        if asset.enabled and asset.purpose in purposes
     ]
     sources = [
         source

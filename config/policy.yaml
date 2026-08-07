@@ -5,6 +5,9 @@ defaults:
 
 rules:
   rrn_anchor: true
+  # §2.5 기밀 표식 위치 가중치 임계 (첫3줄 +2 / 단독·괄호 +3 / 등급표기 +3 / 조사결합 -3).
+  # 표본 10건 기준값이므로 실제 코퍼스 확보 후 재조정한다.
+  marker_score_threshold: 3
 
 codes:
   L-KR-01: block

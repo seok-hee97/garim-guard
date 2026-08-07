@@ -199,14 +199,132 @@ sources:
       실제 RRN 체크섬 외부 증거로 쓰지 않고 문맥/placeholder 평가 후보로만 둔다.
       라이선스와 gated 실물 확인 전까지 로더가 거부한다.
 
+  # ── L2 축별 공개 평가셋 ────────────────────────────────────────────────
+  # §6.4.1 의 네 축을 학습 없이 정량 평가하기 위한 셋이다. L2 는 파인튜닝하지
+  # 않으므로(§6.4) 여기 등록되는 것은 전부 `use: eval` 이다.
+
+  - name: KoreanGuardrail
+    use: eval
+    hf_id: kimchunsik03/KoreanGuardrail
+    url: https://huggingface.co/datasets/kimchunsik03/KoreanGuardrail
+    license: CC-BY-4.0
+    revision: cd4c93cbd39bd481c9e9bebd3686c56bfc2af3e4
+    hf_config: benchmark
+    eval_split: test
+    note: >-
+      축 (b) 회귀 — §6.4.6 이 지목한 셋. 5,555 행(attack 3,311 / benign 2,244).
+      technique 축이 §2.2 은닉 축과 대응한다: jamo_decompose→A-KO-01,
+      chosung→A-KO-02, break_spacing→A-KO-05, zwsp_inject→A-ENC-02.
+      tensify(된소리화)는 대응 코드가 없다. category 는 A1_injection→A-INJ-*,
+      A2_leaking→A-LEAK-01, benign_hard_negative→과방어율.
+      ⚠️ 피어리뷰 벤치가 아니다 — 개인 저자, 시드는 저자 작성 또는 Anthropic API
+      생성 후 저자 검수. 리포트에 이 사실을 병기한다.
+
+  - name: korean-guardrail-test
+    use: eval
+    hf_id: xxxjjhhh/korean_guardrail_test
+    url: https://huggingface.co/datasets/xxxjjhhh/korean_guardrail_test
+    license: CC-BY-4.0
+    revision: cd91a65d49458352795c92d047305b3c25af938b
+    eval_split: train
+    note: >-
+      축 (b) 보조 — 647 행, `is_injection` 이진 라벨. 다운로드 이력이 얇아
+      (10회 미만) 표본 검수 후에만 헤드라인에 쓴다.
+
+  - name: XL-SafetyBench
+    use: eval
+    hf_id: AIM-Intelligence/XL-SafetyBench
+    url: https://huggingface.co/datasets/AIM-Intelligence/XL-SafetyBench
+    license: CC-BY-4.0
+    revision: 9817e3b99b8b5555ecc7f45e9541b19f3d84b1f3
+    hf_config: jailbreak
+    eval_split: test
+    note: >-
+      축 (b) 보조 — 한국어 450 행(jailbreak) + 100 행(cultural). `language` 값이
+      소문자 `korean` 이다. 국가·문화 축이 있어 §2.2 은닉 축과는 성격이 다르다.
+
+  - name: TAB-echr
+    use: eval
+    hf_id: null # 정본은 GitHub 배포다. HF 미러가 있으나 원본을 고정한다.
+    url: https://github.com/NorskRegnesentral/text-anonymization-benchmark
+    license: MIT
+    revision: 558e09e26d6b36f5f78440074e6a233946d98bd9
+    file: echr_test.json
+    sha256: null # eval 은 sha256 없이 통과한다(§sources 로더). 받은 뒤 채운다.
+    eval_split: test
+    note: >-
+      축 (a) PII 문맥 — ECHR 판례. test 127 문서 / 30,541 엔티티 멘션.
+      `identifier_type` 이 DIRECT 1,612 / QUASI 19,197 / NO_MASK 9,732 로 갈려
+      "문맥 없이는 PII 인지 알 수 없는 것" 의 3분류를 그대로 준다. 문자 오프셋과
+      주석자 2명이 있어 스팬 계약·사람 간 일치도까지 잰다.
+      PERSON→L-CT-01, LOC→L-CT-02, ORG→L-CT-03.
+      ⚠️ `confidential_status` 는 GDPR 특별범주(POLITICS/ETHNIC/BELIEF/HEALTH/SEX)
+      이지 §2.5 의 기밀 표식이 아니다. 축 (c) 로 쓰지 않는다.
+      ⚠️ 영어·유럽 법원 도메인이고 한국 고유 8종이 없다.
+
+  - name: CredData
+    use: eval
+    hf_id: null
+    url: https://github.com/Samsung/CredData
+    license: Apache-2.0
+    revision: 3fadaa33cf25b9e2a5f61a3da142502c9532463b
+    sha256: null
+    note: >-
+      축 (d) 시크릿 플레이스홀더 — 라벨 73,842 줄 중 True 4,583(6%)이라
+      **음성 69,259 줄**이 가짜 값 판별의 시험대다. §2.4 가 인용한
+      detect-secrets precision 0.1416 의 출처이기도 하다.
+      ⚠️ 영어 코드 저장소 기준이다. §7.5 의 "한국어 산문 벤치가 없다" 는 그대로
+      유효하고, 이 셋은 판별 **능력** 측정용이지 한국어 성능 근거가 아니다.
+
+  - name: nym-pii-multilingual
+    enabled: false
+    use: eval
+    hf_id: Wismut/nym-pii-multilingual-data
+    url: https://huggingface.co/datasets/Wismut/nym-pii-multilingual-data
+    license: MIT
+    revision: abe23bf08c305f5824b1643dc4f079f06ccb2ad1
+    eval_split: test
+    note: >-
+      축 (a) 후보 — 805,000 행(train 724,500 / validation 40,250 / test 40,250),
+      라벨은 GIVEN_NAME/SURNAME/DATE/PHONE/CITY/STREET_ADDRESS/EMAIL/
+      ACCOUNT_NUMBER/GOVERNMENT_ID 등 문자 오프셋.
+      ★ **disabled** — 표본 500 행 검수에서 한국어가 3.6% 뿐이고(test 기준 약 1,450 행)
+      `language` 컬럼이 없어 한글 스크립트 판별로 뽑아야 한다. 더 결정적으로,
+      한국어 표본이 **기계번역 티가 난다** — 성명이 "서현 이"/"채원 황" 처럼
+      영어 어순으로 뒤집혀 있어 한국어 PII 탐지기 평가에 그대로 쓰면
+      어순 아티팩트를 재는 셈이 된다. 한글 슬라이스 전수 검수 전까지 막는다.
+
   # ── 제외 (등재해 두는 이유: 실수로 다시 들어오는 것을 막기 위해) ──────
 excluded:
   - name: smilegate-ai/korean_unsmile
     license: CC-BY-NC-ND-4.0
     reason: NC 가 아니라 **ND(파생물 금지)** 가 학습을 막는다. 포트폴리오여도 같다.
-  - name: ai4privacy 300k/400k/financial-pfi
-    license: 독자 제한
-    reason: 한국어가 있는 세트는 상용 개별 계약이 필요하다.
+  - name: ai4privacy 300k/400k/financial-pfi/open-pii-500k/openpii-1.5m
+    license: 독자 제한 (HF 태그 `other`)
+    reason: >-
+      한국어가 있는 세트는 상용 개별 계약이 필요하다. openpii-1.5m 은 한국어 포함
+      30개 언어라 축 (a)에 제일 아깝지만 같은 이유로 막힌다. pivot 전 `r6-pii-ner`
+      가 openpii 로 학습된 것이라 그 가중치도 공개 재배포 대상이 아니다.
+  - name: prismdata/guardrail-ko-11class-dataset
+    license: GPL-3.0
+    reason: 324,150 행이지만 허용 목록 밖이다. 데이터에 GPL 이 붙은 것 자체도 해석이 불확실하다.
+  - name: townboy/korean-pii-dataset
+    license: 없음
+    reason: >-
+      23,464 행에 privacy_mask + BIO 까지 갖춰 축 (a)에 가장 잘 맞았으나 라이선스
+      미명시다. 미명시 = All rights reserved 로 취급한다.
+  - name: MarkrAI/ko-jailbreak
+    license: other
+    reason: 허용 목록 밖.
+  - name: piimb/pii-masking-benchmark · lianghsun/secret-bench
+    license: CC-BY-NC-4.0
+    reason: NC 는 허용 목록에 없다.
+  - name: Necent/llm-jailbreak-prompt-injection-dataset · timtkddn/Guardrail-eval-xstest-beavertail
+    license: MIT / other
+    reason: 둘 다 gated 라 fail-closed 로더가 통과시킬 수 없다.
+  - name: sharmaarush/korean_pii · irene93/deidentification-chat-ko · Beijuka/Multilingual_PII_NER
+    license: 없음
+    reason: 라이선스 미명시. 규모도 작거나(27행) gated 다.
   - name: korean-guardrail-dataset
     license: 없음
     reason: 저장소 라이선스 없음 = All rights reserved. 개별 원출처에서만 받는다.

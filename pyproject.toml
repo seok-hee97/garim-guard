@@ -45,6 +45,9 @@ include = ["garim*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# `bench/` is an evaluation harness, not part of the shipped wheel (see packages.find),
+# so it is imported from the repo root rather than from site-packages.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

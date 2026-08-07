@@ -22,8 +22,8 @@ jobs:
         run: python -m pytest
       - name: Lint and import check
         run: |
-          ruff check garim tests tools train
-          python -m compileall -q garim tools train
+          ruff check garim bench tests tools train
+          python -m compileall -q garim bench tools train
           python train/validate_sources.py
           python train/validate_models.py
       - name: No committed checksum-valid resident number

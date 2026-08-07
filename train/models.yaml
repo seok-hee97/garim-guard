@@ -1,4 +1,9 @@
+# 학습 경로(backbone·teacher)는 Apache-2.0 만 받는다 — §6.2.2 가 증류 산출 가중치에
+# 파생 조항이 걸리지 않는 근거로 이 사실을 쓴다.
 allowed_licenses: [Apache-2.0]
+# §7.3 베이스라인은 돌려서 수치만 보고하고 가중치를 재배포하지 않으므로 조건이 다르다.
+# BY 조건은 모델 카드 attribution 으로 충족한다.
+baseline_allowed_licenses: [Apache-2.0, MIT, CC-BY-4.0]
 
 models:
   - name: l1_ax_encoder
@@ -43,6 +48,30 @@ models:
     parameters: 4411424256
     enabled: false
     note: RTP-LX는 독성 벤치다. 인젝션·PII 문맥 골드셋과 지연 게이트 전까지 비활성.
+
+  # ── §7.3 베이스라인 ────────────────────────────────────────────────────
+  # 학습 경로에 들어가지 않는다. `build_asset_plan(include_baselines=True)` 로만 계획에 든다.
+  - name: baseline_polyguard_qwen_smol
+    model_id: ToxicityPrompts/PolyGuard-Qwen-Smol
+    revision: 224f511fe2ee3e304a11f470c8071f43ee0d8f70
+    purpose: baseline
+    license: CC-BY-4.0
+    gated: false
+    parameters: 494032768
+    note: >-
+      ★ L2-fast 후보로 검토했다가 **택소노미 불일치로 기각**하고 베이스라인으로 내렸다.
+      CC-BY-4.0·한국어 포함 17개 언어·GGUF 공개까지 조건은 다 맞았지만, 재는 축이
+      S1~S14 harm 카테고리라 §6.4.1 축 (b)(인젝션·탈옥·시스템프롬프트 유출)와 겹치지
+      않는다. KoreanGuardrail 표본 120행 실측: 탐지율 0.183 / 과방어율 0.150 으로
+      판별력이 거의 없었고 A2_leaking 은 0/19 였다. 출력이
+      `Request safety violations: S7`(Privacy) 인 것이 원인을 그대로 보여준다 —
+      맞는 라벨이 택소노미에 없어 가장 가까운 것을 고른다.
+      §5.2 가 PolyGuardMix 에 대해 "source harm labels are not project attack labels"
+      라고 적은 것과 같은 이유이며, 모델이 그 택소노미를 그대로 물려받았다.
+      기성 다국어 SOTA 가드가 한국어 인젝션에서 무너지는 증거로는 값이 있다(§9-2).
+      ⚠️ CC-BY-4.0 이라 `models.yaml` 의 `allowed_licenses: [Apache-2.0]` 를 넓혀야 한다.
+      베이스라인은 가중치를 재배포하지 않고 수치만 보고하므로 BY 조건은 모델 카드
+      attribution 으로 충족한다 — 학습 백본·교사는 Apache-2.0 유지가 원칙이다(§6.2.2).
 
   - name: l2_guardrail_korean_gemma4
     model_id: FrameByFrame/guardrail-korean-gemma-4-E2B
