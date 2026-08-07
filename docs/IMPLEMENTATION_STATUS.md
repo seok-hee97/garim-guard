@@ -22,7 +22,7 @@
 | 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
 | L2 | **비활성 · 축별 평가 착수** | 후보 manifest 고정, `thorough`의 degraded 응답, 축 (b) 공개셋 실측 → [L2_EVALUATION.md](L2_EVALUATION.md) | 모델 통합·배선·활성화 |
 | §7.3 베이스라인 | **하네스 완료 / 3종 실측** | `bench/` 축 (b) 하네스, 정규화 ON/OFF 대조, PolyGuard·kanana 실측 | Presidio·detect-secrets·CredSweeper·Gemini |
-| 평가 하네스 | **H1·H2 완료** | `bench/leak_eval.py`(유형별 F1 + 세그먼트 FPR), `bench/ko_guardrail.py`, `bench/cred_data.py` | S1~S3, 마스킹 품질, latency |
+| 평가 하네스 | **H1·H2·축(a)·지연 완료** | `bench/` — leak_eval(유형별 F1 + 세그먼트 FPR) · ko_guardrail(축 b) · tab(축 a) · cred_data(축 d) · latency(§7.1.3) | S1~S3, 마스킹 응답 품질 |
 | 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부 | 실사용 검증 |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
