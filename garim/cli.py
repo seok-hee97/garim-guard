@@ -59,6 +59,22 @@ def _build_parser() -> argparse.ArgumentParser:
     scan = subparsers.add_parser("scan", help="파일 또는 디렉터리 검사")
     scan.add_argument("path")
     scan.add_argument("--json", action="store_true", dest="as_json")
+
+    # §1.1 세 번째 사용 방식 — 앱 코드를 고치지 않고 `base_url` 만 바꿔 끼운다.
+    proxy = subparsers.add_parser("proxy", help="OpenAI 호환 로컬 프록시 실행")
+    proxy.add_argument(
+        "--upstream",
+        required=True,
+        help="상류 base URL. 코드에 박힌 기본값을 두지 않는다 — 목적지는 항상 선언이다.",
+    )
+    proxy.add_argument("--host", default="127.0.0.1", help="기본값은 루프백이다")
+    proxy.add_argument("--port", type=int, default=8080)
+    proxy.add_argument(
+        "--no-forward-authorization",
+        action="store_false",
+        dest="forward_authorization",
+        help="클라이언트의 Authorization 헤더를 상류로 넘기지 않는다",
+    )
     return parser
 
 
@@ -109,6 +125,29 @@ def main(argv: list[str] | None = None) -> int:
             result = inspector.check(text, mode=args.mode)
             _print_result(result, as_json=args.as_json)
             return _exit_code(result)
+
+        if args.command == "proxy":
+            from garim.proxy import ProxyConfig, build_server
+
+            config = ProxyConfig(
+                upstream_base_url=args.upstream,
+                policy_path=args.policy,
+                mode=args.mode,
+                forward_authorization=args.forward_authorization,
+            )
+            server = build_server(config, host=args.host, port=args.port)
+            print(
+                f"garim proxy: http://{args.host}:{args.port}/v1 -> {args.upstream} "
+                f"(mode={args.mode})",
+                file=sys.stderr,
+            )
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                server.server_close()
+            return 0
 
         highest = 0
         for path in _iter_files(Path(args.path)):

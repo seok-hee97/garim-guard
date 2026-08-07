@@ -24,6 +24,7 @@ JUDGES = (
     "rules-no-normalization",
     "kanana",
     "kanana-normalized",
+    "kanana-all-streams",
     "polyguard",
 )
 
@@ -58,6 +59,8 @@ def main() -> int:
             judge = judge_module.kanana_safeguard(args.kanana_dir)
             if name == "kanana-normalized":
                 judge = judge_module.with_normalization(judge)
+            elif name == "kanana-all-streams":
+                judge = judge_module.with_all_streams(judge)
         else:
             if not args.polyguard_dir:
                 raise SystemExit("--polyguard-dir is required for the polyguard judge")

@@ -28,6 +28,11 @@ jobs:
           python train/validate_models.py
       - name: No committed checksum-valid resident number
         run: python tools/no_committed_pii.py
+      # §8.1-15b — §1 이 "유일한 이유이자 가장 중요한 성질" 이라 선언한 것의 증명.
+      # 패킷 캡처는 CI 에서 특권이 필요하므로 소켓 계층을 봉인해 더 강하게 보인다:
+      # "이번 실행에서 안 나갔다" 가 아니라 "나가려 하면 실패한다".
+      - name: Inspection path opens no sockets
+        run: python tools/no_external_calls.py
       # AI-Hub 이용정책 제5항(제3자 제공 금지) — DESIGN §5.4.3 의 강제 장치 셋 중 셋째.
       # .gitignore 가 뚫렸을 때의 최후 방어다. 공개 저장소라 한 번 들어가면 되돌릴 수 없다.
       - name: No committed AI-Hub data

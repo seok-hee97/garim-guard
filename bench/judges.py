@@ -59,6 +59,31 @@ def with_normalization(judge: Judge) -> Judge:
     return wrapped
 
 
+def with_all_streams(judge: Judge) -> Judge:
+    """파이프라인이 실제로 하는 것 — 스트림 여럿에 태우고 하나라도 걸리면 채택(§3.1).
+
+    ★ `with_normalization` 은 `norm` 하나만 본다. 그런데 §2.3 의 방어는 스트림 분리에
+    있다 — `nospace` 는 띄어쓰기 파괴를, `detensified` 는 된소리화를 각각 별도 스트림에서
+    받는다. `norm` 만 태우면 그 둘이 반영되지 않아 "정규화가 효과 없다" 는 잘못된 결론이
+    나온다(600행 ablation 에서 실제로 그렇게 나왔다).
+
+    ⚠️ 초성체는 여기서도 회복되지 않는다. 초성화는 되돌릴 수 있는 변환이 아니라
+    **서명 대조**로 잡으므로 대체 텍스트를 만들지 않는다(`normalize/chosung.py`).
+    L0 규칙은 그 경로로 잡지만, 외부 모델을 태우는 이 하네스에는 줄 텍스트가 없다.
+    """
+    from garim.normalize.chain import normalize
+
+    def wrapped(text: str) -> bool:
+        bundle = normalize(text)
+        candidates = [bundle.norm.text]
+        for extra in (bundle.detensified.text, bundle.nospace.text):
+            if extra and extra not in candidates:
+                candidates.append(extra)
+        return any(judge(candidate) for candidate in candidates)
+
+    return wrapped
+
+
 def kanana_safeguard(model_dir: str | Path, *, device: str | None = None) -> Judge:
     """`kakaocorp/kanana-safeguard-prompt-2.1b` — 단일 토큰 디코드(§6.4.3).
 

@@ -21,7 +21,10 @@
 | L1 공동 학습 | **구현 완료** | SHA-256 입력 봉인, A.X 공유 백본+4개 헤드, 4:1 샘플링, soft/aux loss, 3 seed, 이중 early stopping | optimizer를 사용하는 실제 GPU 학습 |
 | 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
 | L2 | **비활성 · 축별 평가 착수** | 후보 manifest 고정, `thorough`의 degraded 응답, 축 (b) 공개셋 실측 → [L2_EVALUATION.md](L2_EVALUATION.md) | 모델 통합·배선·활성화 |
-| §7.3 베이스라인 | **하네스 완료 / 1종 실측** | `bench/` 축 (b) 하네스, 정규화 ON/OFF 대조, PolyGuard·kanana 실측 | 나머지 베이스라인 6종 |
+| §7.3 베이스라인 | **하네스 완료 / 3종 실측** | `bench/` 축 (b) 하네스, 정규화 ON/OFF 대조, PolyGuard·kanana 실측 | Presidio·detect-secrets·CredSweeper·Gemini |
+| 평가 하네스 | **H1·H2 완료** | `bench/leak_eval.py`(유형별 F1 + 세그먼트 FPR), `bench/ko_guardrail.py`, `bench/cred_data.py` | S1~S3, 마스킹 품질, latency |
+| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부 | 실사용 검증 |
+| 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
 현재 단계는 **학습 준비 코드 완료**다. 저장소에는 L1 학습 가중치, 전체 원천 데이터,
 교사 예측 결과, 사람 검수 결과와 측정 성능값이 포함되어 있지 않다.
