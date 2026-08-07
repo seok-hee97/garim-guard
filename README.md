@@ -5,7 +5,8 @@
 외부 모델 없이 동작하는 P0(L0) 코어와 L1 다중 헤드 모델의 학습·내보내기 코드가
 구현되어 있습니다. 실제 학습 가중치는 포함하지 않습니다. 전체 기획과 평가 계획은
 [설계 문서](docs/DESIGN.md)를 기준으로 하며, 코드 완료 범위와 미실행 작업은
-[구현 현황](docs/IMPLEMENTATION_STATUS.md)에 기록합니다.
+[구현 현황](docs/IMPLEMENTATION_STATUS.md)에, 학습 전까지 실측한 수치는
+[측정 결과](docs/RESULTS.md)에 기록합니다.
 
 ## 현재 구현 범위
 

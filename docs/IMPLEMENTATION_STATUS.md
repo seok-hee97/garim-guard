@@ -192,7 +192,8 @@ garim 을 import 할 수 있으면 참조 구현과의 일치까지 확인한다
 - **15c `train/license_check.py`** 를 만들었다. 기존 `validate_*.py` 는 정적 검사이고,
   HF 런타임 조회는 `download_assets.py --execute` 안에서만 돌았다.
 
-수치와 근거는 [L2_EVALUATION.md](L2_EVALUATION.md) 에 있다.
+수치와 근거는 [L2_EVALUATION.md](L2_EVALUATION.md) 에, 학습 전 실측 전체는
+[RESULTS.md](RESULTS.md) 에 한계와 함께 모아 뒀다.
 
 ## 학습을 시작하기 전에 남은 실행
 
