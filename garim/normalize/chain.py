@@ -6,6 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+from garim.normalize.chosung import detensify
 from garim.normalize.encoding import decoded_views
 from garim.normalize.hangul import compose_jamo
 from garim.normalize.offsets import IntervalMap, identity_map
@@ -78,6 +79,10 @@ class NormalizedBundle:
     raw: NormalizedView
     norm: NormalizedView
     nospace: NormalizedView
+    # ★ 된소리·거센소리를 평음으로 내린 스트림 — A-KO-05 옆자리의 은닉 축이다.
+    #   `이쩐 찌시는 전뿌` 가 규칙에 걸리지 않던 것을 닫는다. 손실 변환이라
+    #   `nospace` 와 같은 취급을 한다(별도 스트림 + 신뢰도 감쇄).
+    detensified: NormalizedView
     decoded: list[NormalizedView] = field(default_factory=list)
     delta: dict[str, int] = field(default_factory=dict)
 
@@ -173,12 +178,17 @@ def normalize(text: str) -> NormalizedBundle:
         no_space_chars.append(character)
         no_space_map.append(interval)
 
+    # delta 에는 넣지 않는다 — L1 이 받는 8차원 계약(`NORMALIZATION_DELTA_ORDER`)이
+    # 고정이고 `normalization_delta_vector` 가 추가 키를 거부한다.
+    detensified_text, _ = detensify(current)
+
     decoded = decoded_views(current, current_map)
     delta["b64_decoded"] = len(decoded)
     return NormalizedBundle(
         raw=NormalizedView(text, raw_map, "raw"),
         norm=NormalizedView(current, current_map, "norm"),
         nospace=NormalizedView("".join(no_space_chars), no_space_map, "nospace"),
+        detensified=NormalizedView(detensified_text, current_map, "detensified"),
         decoded=[
             NormalizedView(item.text, item.interval_map, item.encoding, item.source_span)
             for item in decoded

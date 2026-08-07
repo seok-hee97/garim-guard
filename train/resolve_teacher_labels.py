@@ -21,6 +21,14 @@ def main() -> int:
     parser.add_argument("--policy", default="train/teachers.yaml")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--validation-percent", type=int, default=10)
+    parser.add_argument(
+        "--drop-review",
+        action="store_true",
+        help=(
+            "사람 검수를 하지 않는 운영에서 교사 불일치 행을 학습에서 제외한다. "
+            "§6.2.2 가 금지한 것은 NONE 흡수이지 폐기가 아니다 — 폐기 건수는 감사에 남는다."
+        ),
+    )
     args = parser.parse_args()
 
     records = load_jsonl(args.input)
@@ -44,11 +52,31 @@ def main() -> int:
             output / f"attack-teacher-accepted-{split}.jsonl",
             [record for record in accepted if record.split == split],
         )
-    write_jsonl(output / "attack-teacher-review.jsonl", review)
+    if args.drop_review:
+        # ★ 조용히 버리지 않는다. 큐 파일은 그대로 쓰고 폐기 사실을 감사에 남긴다.
+        (output / "attack-teacher-dropped.jsonl").write_text("", encoding="utf-8")
+        write_jsonl(output / "attack-teacher-dropped.jsonl", review)
+        review_path = output / "attack-teacher-dropped.jsonl"
+    else:
+        write_jsonl(output / "attack-teacher-review.jsonl", review)
+        review_path = output / "attack-teacher-review.jsonl"
     (output / "teacher-resolution-audit.json").write_text(
-        json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(
+            {
+                "human_review": not args.drop_review,
+                "accepted": len(accepted),
+                "unresolved": len(review),
+                "unresolved_path": str(review_path),
+                "rows": audit,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
     )
-    print(f"accepted={len(accepted)} review={len(review)} -> {output}")
+    disposition = "dropped" if args.drop_review else "review"
+    print(f"accepted={len(accepted)} {disposition}={len(review)} -> {output}")
     return 0
 
 

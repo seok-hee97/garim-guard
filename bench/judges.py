@@ -66,18 +66,15 @@ def kanana_safeguard(model_dir: str | Path, *, device: str | None = None) -> Jud
     이 하네스는 모델 자체를 재는 것이므로 그 비대칭을 적용하지 않고 원 판정을 낸다.
     """
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
+
+    from garim.training.compat import load_local_causal_lm
 
     directory = str(model_dir)
     resolved = device or ("mps" if torch.backends.mps.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(directory, local_files_only=True)
-    model = (
-        AutoModelForCausalLM.from_pretrained(
-            directory, local_files_only=True, dtype=torch.float16
-        )
-        .to(resolved)
-        .eval()
-    )
+    # kanana 는 decoupled head_dim 이라 transformers>=5 의 검증자에 막힌다 — compat 참고.
+    model = load_local_causal_lm(directory, dtype=torch.float16).to(resolved).eval()
 
     def judge(text: str) -> bool:
         messages = [{"role": "user", "content": text}]

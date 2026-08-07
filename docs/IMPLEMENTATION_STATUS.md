@@ -170,9 +170,26 @@ garim 을 import 할 수 있으면 참조 구현과의 일치까지 확인한다
   축 (c) 기밀 표식은 영어까지 뒤져도 공개 자산이 존재하지 않아 자체 제작이 불가피하다.
 - PolyGuard 는 L2-fast 후보로 검토했다가 **택소노미 불일치로 기각**하고 베이스라인으로
   내렸다. 라이선스·언어·GGUF 는 다 맞았지만 재는 축이 harm 카테고리다.
-- ⚠️ **`kanana-safeguard-prompt-2.1b` 가 `transformers>=5.5` 에서 로드되지 않는다.**
-  `teacher_kanana` 로 L1 증류 교사에 고정된 같은 모델이라 GPU 박스의 교사 추론이
-  같은 지점에서 실패한다. 해소 전까지 교사 실행을 시작하지 않는다.
+- ⚠️→✅ **`kanana-safeguard-prompt-2.1b` 가 `transformers>=5.5` 에서 로드되지 않았다.**
+  `head_dim` 을 명시한 decoupled 구성인데 `validate_architecture` 가 그걸 보지 않는다.
+  `teacher_kanana` 로 L1 증류 교사에 고정된 같은 모델이라 GPU 박스의 교사 추론이 같은
+  지점에서 실패했을 것이다. [`training/compat.py`](../garim/training/compat.py) 로 해소.
+
+### 은닉 축 둘과 사람 없는 운영
+
+- **A-KO-02 초성체**를 초성 서명 방식으로 구현했다. L0 사전 커버리지 안에서 난독화
+  내성이 `chosung` ~0% → **89%**, 전체 81% → **86%** 다. 기존 `_CHOSEONG` 은 연속
+  3패턴만 봐서 `ㅇㅈ ㅈㅅ는 ㅈ부` 같은 실제 형태를 전부 놓쳤다.
+- **A-KO-07 된소리화**를 신설했다(`detensified` 스트림). §2.2 에 축 자체가 없었다.
+  `tensify` 19% → **47%**.
+- **사람 검수 없는 운영**을 코드에 반영했다 — `resolve_teacher_labels.py --drop-review`
+  (`NONE` 흡수 금지는 유지, 폐기는 감사에 기록)와
+  [`external_labels.py`](../garim/training/external_labels.py)(택소노미 1:1 인 외부
+  라벨만 수용, harm 라벨은 거부). **T3 수동 골드셋은 미수행**으로 확정된다.
+- **15c `train/license_check.py`** 를 만들었다. 기존 `validate_*.py` 는 정적 검사이고,
+  HF 런타임 조회는 `download_assets.py --execute` 안에서만 돌았다.
+
+수치와 근거는 [L2_EVALUATION.md](L2_EVALUATION.md) 에 있다.
 
 ## 학습을 시작하기 전에 남은 실행
 

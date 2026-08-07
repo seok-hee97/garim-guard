@@ -126,6 +126,8 @@ def _evasion_codes(bundle: NormalizedBundle, stream: str) -> list[str]:
         codes.append("A-KO-04")
     if stream == "nospace" and bundle.delta["space"]:
         codes.append("A-KO-05")
+    if stream == "detensified":
+        codes.append("A-KO-07")
     if bundle.delta["nfkc"]:
         codes.append("A-MISC-01")
     return codes
@@ -174,7 +176,9 @@ class DetectionPipeline:
 
         mapped: list[Finding] = []
         for finding in local:
-            if stream == "nospace":
+            if stream in {"nospace", "detensified"}:
+                # 손실 스트림이다 — 체크섬 없이 형태만 맞은 식별자는 채택하지 않고,
+                # 나머지는 신뢰도를 깎는다(§2.3).
                 if finding.code in {"L-KR-01", "L-KR-02"} and finding.confidence < 1.0:
                     continue
                 finding = replace(finding, confidence=finding.confidence * 0.8)
@@ -287,6 +291,15 @@ class DetectionPipeline:
                     bundle.nospace, source_len=len(text), origin=origin, stream="nospace"
                 )
             )
+            if bundle.detensified.text != bundle.norm.text:
+                all_l0.extend(
+                    self._scan_view(
+                        bundle.detensified,
+                        source_len=len(text),
+                        origin=origin,
+                        stream="detensified",
+                    )
+                )
             for decoded in bundle.decoded:
                 all_l0.extend(
                     self._scan_view(

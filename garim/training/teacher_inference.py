@@ -48,15 +48,17 @@ class KananaBackend(TeacherBackend):
     def __init__(self, name: str, spec: TeacherSpec, model_dir: str | Path, *, device: str) -> None:
         super().__init__(name, spec)
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoTokenizer
+
+        from garim.training.compat import load_local_causal_lm
 
         self.torch = torch
         self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_dir,
-            local_files_only=True,
-            dtype="auto",
-            device_map=device,
+        # ★ kanana 는 decoupled `head_dim` 구성이라 transformers>=5 의
+        #   `validate_architecture` 에 막힌다. 우회 없이는 GPU 박스의 교사 추론이
+        #   첫 줄에서 실패한다 — `training/compat.py` 참고.
+        self.model = load_local_causal_lm(
+            model_dir, dtype="auto", device_map=device
         ).eval()
         self.label_ids: dict[str, int] = {}
         for label, token in self.LABEL_TOKENS.items():
