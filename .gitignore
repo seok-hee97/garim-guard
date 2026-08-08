@@ -13,6 +13,8 @@ __pycache__/
 # Local model/training assets retained outside Git
 models/
 train/artifacts/
+# 벤치 산출물. 수치는 docs/RESULTS.md 가 들고 있고 이쪽은 재생성 가능하다.
+artifacts/
 
 # Generated evaluation data and reports
 data/synth/

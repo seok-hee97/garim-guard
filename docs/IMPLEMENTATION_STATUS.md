@@ -21,8 +21,8 @@
 | L1 공동 학습 | **구현 완료** | SHA-256 입력 봉인, A.X 공유 백본+4개 헤드, 4:1 샘플링, soft/aux loss, 3 seed, 이중 early stopping | optimizer를 사용하는 실제 GPU 학습 |
 | 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
 | L2 | **비활성 · 축별 평가 착수** | 후보 manifest 고정, `thorough`의 degraded 응답, 축 (b) 공개셋 실측 → [L2_EVALUATION.md](L2_EVALUATION.md) | 모델 통합·배선·활성화 |
-| §7.3 베이스라인 | **하네스 완료 / 3종 실측** | `bench/` 축 (b) 하네스, 정규화 ON/OFF 대조, PolyGuard·kanana 실측 | Presidio·detect-secrets·CredSweeper·Gemini |
-| 평가 하네스 | **H1·H2·S4·8f·축(a)·지연 완료** | `bench/` — leak_eval · ko_guardrail(축 b) · tab(축 a) · cred_data(축 d) · type_eval(S4) · real_fpr(§7.2.3 경보율) · latency(§7.1.3) | 마스킹 응답 품질, attack_eval, 코퍼스 수집 확대 |
+| §7.3 베이스라인 | **하네스 완료 / 6종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana, detect-secrets·CredSweeper(축 d), **Presidio `ko`/strict/vanilla 3팔(H1)** | Gemini(키가 free tier 라 429) |
+| 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — leak_eval · ko_guardrail(축 b) · tab(축 a) · cred_data(축 d) · type_eval(S4) · real_fpr(§7.2.3 경보율) · latency(§7.1.3) · **presidio_baseline(§7.3)** · **mask_quality(§8.1-13b)** | attack_eval, 코퍼스 수집 확대, 13b 의 Gemini 팔 |
 | 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부 | 실사용 검증 |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
