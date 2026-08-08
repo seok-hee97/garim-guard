@@ -83,6 +83,25 @@ PII_LABEL_TO_CODE = {
     "ORG_ID": "L-CT-03",
 }
 
+# §6.2.2 L1 **feature 계약**. §3.2.5 의 델타 **스키마**(8차원)와 일부러 다르다.
+#
+# ★ `space` 를 뺐다. 이유가 셋인데 마지막이 결정적이다.
+#
+# 1. 비단조다. 실측하면 공백 **제거** 우회 0 / 평범한 한국어 6~8 / 공백 **삽입** 우회 20
+#    이라 평범한 글이 두 공격 방향 **사이**에 있다. 어떤 임계도 가르지 못한다.
+# 2. 이 칸만 **다른 스트림**을 기술한다. `norm` 은 공백을 보존하고(`chain.py`
+#    `_conservative_spaces`), `space` 는 `nospace` 뷰를 만들며 지운 개수다. L1 은
+#    `nospace` 를 받지 않는다(`pipeline.py` 는 `bundle.norm.text` 를 넘긴다).
+# 3. **나머지 일곱은 정규화가 지운 정보를 나른다.** 제로위드·태그문자·동형이의·자모·
+#    한자·NFKC·base64 는 `norm.text` 안에 흔적이 없으니 이 숫자가 유일한 채널이다.
+#    `space` 는 반대다 — 공백은 텍스트에 그대로 남아 토크나이저가 이미 본다. 입력의
+#    저차원 사영을 하나 더 붙이는 셈이고, 더하는 것은 정보가 아니라 중간 구간에서
+#    "무해" 와 상관되는 지름길뿐이다.
+#
+# `space` 는 §3.2.5 스키마에 그대로 남는다 — A-KO-05 배출과 `nospace` 재검사를 켜는
+# L0 신호다. 빠진 것은 **학습 feature 자격**이지 델타 자체가 아니다.
+#
+# 가중치가 아직 없어서 이 변경에 호환 부담이 0 인 시점이다.
 NORMALIZATION_DELTA_ORDER = (
     "nfkc",
     "zero_width",
@@ -90,9 +109,10 @@ NORMALIZATION_DELTA_ORDER = (
     "homoglyph",
     "jamo_composed",
     "hanja",
-    "space",
     "b64_decoded",
 )
+# 스키마에는 있으나 feature 로는 쓰지 않는 칸. 테스트가 이 관계를 고정한다.
+DELTA_KEYS_EXCLUDED_FROM_FEATURES = ("space",)
 
 
 class OnnxL1Backend:

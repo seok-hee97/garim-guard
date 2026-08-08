@@ -22,6 +22,24 @@ DELTA_KEYS = (
     "b64_decoded",
 )
 
+# ★ §2.3.1 ③ 이 *"UTS #39 confusables, **버전을 락파일에 고정**. ①과 같은 이유로
+#   버전이 바뀌면 골든 테스트가 깨진다"* 고 요구했고, §8.6.1 미결 12번이 *"Python
+#   3.11.x 와 unidata 14.0.0 은 고정했는데 **이것만 공백**"* 이라고 적어둔 칸이다.
+#
+#   여기서 닫는다. 아래 표는 **UTS #39 confusables(Unicode 14.0.0) 의 손으로 고른
+#   부분집합**이다 — 전체 파일이 아니다. 전체는 수천 항목이고 한국어 업무문서에
+#   나타나지 않는 문자까지 바꿔 오탐을 만든다. 실제로 쓰는 범위는 키릴·그리스 →
+#   라틴이라 그 축만 담았다.
+#
+#   "버전 고정" 을 두 겹으로 강제한다.
+#   (1) 이 상수 — 표가 어느 Unicode 판에 대응하는지 이름으로 남긴다.
+#   (2) `tests/test_confusables_pin.py` — 런타임 `unidata_version` 이 이 값에서 벗어나면
+#       실패한다. ① NFKC 와 ③ 이 같은 판을 쓰지 않으면 두 단계가 서로를 무효화한다.
+#
+#   ⚠️ 버전을 올릴 때 이 상수만 바꾸면 안 된다. NFKC 확장 문자 1,237자(§3.2.4)가
+#      달라지므로 구간 맵 골든 테스트를 같이 다시 떠야 한다.
+CONFUSABLES_UNICODE_VERSION = "14.0.0"
+
 _CONFUSABLE = {
     "Α": "A",
     "А": "A",
@@ -178,8 +196,10 @@ def normalize(text: str) -> NormalizedBundle:
         no_space_chars.append(character)
         no_space_map.append(interval)
 
-    # delta 에는 넣지 않는다 — L1 이 받는 8차원 계약(`NORMALIZATION_DELTA_ORDER`)이
-    # 고정이고 `normalization_delta_vector` 가 추가 키를 거부한다.
+    # delta 에는 넣지 않는다 — `DELTA_KEYS` 는 §3.2.5 가 못 박은 8칸이고
+    # `normalization_delta_vector` 가 추가 키를 거부한다. 된소리화는 별도 스트림으로
+    # 다룬다(§2.3.4). 참고: **feature 계약은 8칸이 아니라 7칸이다** — `space` 가
+    # 빠져 있고 그 이유는 `NORMALIZATION_DELTA_ORDER` 옆에 적혀 있다.
     detensified_text, _ = detensify(current)
 
     decoded = decoded_views(current, current_map)

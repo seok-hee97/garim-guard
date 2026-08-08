@@ -8,6 +8,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from garim.detect.l1 import NORMALIZATION_DELTA_ORDER  # noqa: E402
 from garim.training.engine import (  # noqa: E402
     TrainingConfig,
     build_optimizer,
@@ -30,7 +31,7 @@ def _batch(*, task: str) -> dict[str, torch.Tensor]:
     batch = {
         "input_ids": torch.randint(0, 32, (2, 6)),
         "attention_mask": torch.ones((2, 6), dtype=torch.long),
-        "normalization_delta": torch.zeros((2, 8)),
+        "normalization_delta": torch.zeros((2, len(NORMALIZATION_DELTA_ORDER))),
         "romanized_targets": torch.tensor([-1.0, -1.0]),
         "honorific_targets": torch.tensor([-1.0, -1.0]),
     }

@@ -9,6 +9,8 @@ from typing import Any, Literal
 import torch
 from torch import nn
 
+from garim.detect.l1 import NORMALIZATION_DELTA_ORDER
+
 Pooling = Literal["mean", "cls"]
 
 
@@ -43,7 +45,7 @@ class JointL1Model(nn.Module):
         hidden_size: int,
         pii_labels: int = 29,
         attack_labels: int = 4,
-        normalization_features: int = 8,
+        normalization_features: int = len(NORMALIZATION_DELTA_ORDER),
         dropout: float = 0.1,
         pooling: Pooling = "mean",
     ) -> None:

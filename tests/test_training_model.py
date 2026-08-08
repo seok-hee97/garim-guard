@@ -7,6 +7,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch.nn")
 
+from garim.detect.l1 import NORMALIZATION_DELTA_ORDER  # noqa: E402
 from garim.training.losses import compute_joint_loss  # noqa: E402
 from garim.training.model import JointL1Model  # noqa: E402
 
@@ -26,7 +27,7 @@ def test_joint_model_exposes_runtime_onnx_contract() -> None:
     output = model(
         input_ids=torch.randint(0, 32, (2, 5)),
         attention_mask=torch.ones((2, 5), dtype=torch.long),
-        normalization_delta=torch.zeros((2, 8)),
+        normalization_delta=torch.zeros((2, len(NORMALIZATION_DELTA_ORDER))),
     )
     assert output.pii_logits.shape == (2, 5, 29)
     assert output.attack_logits.shape == (2, 4)
@@ -48,7 +49,7 @@ def test_joint_model_drops_token_type_ids_for_ax_style_encoder() -> None:
     output = model(
         input_ids=torch.randint(0, 32, (2, 5)),
         attention_mask=torch.ones((2, 5), dtype=torch.long),
-        normalization_delta=torch.zeros((2, 8)),
+        normalization_delta=torch.zeros((2, len(NORMALIZATION_DELTA_ORDER))),
         token_type_ids=torch.zeros((2, 5), dtype=torch.long),
     )
     assert output.pii_logits.shape == (2, 5, 29)
@@ -59,7 +60,7 @@ def test_joint_loss_uses_binary_auxiliary_losses_and_restricted_kl() -> None:
     output = model(
         input_ids=torch.randint(0, 32, (2, 5)),
         attention_mask=torch.ones((2, 5), dtype=torch.long),
-        normalization_delta=torch.zeros((2, 8)),
+        normalization_delta=torch.zeros((2, len(NORMALIZATION_DELTA_ORDER))),
     )
     loss = compute_joint_loss(
         output,

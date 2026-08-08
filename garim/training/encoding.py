@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from garim.detect.l1 import NORMALIZATION_DELTA_ORDER
+from garim.normalize.chain import DELTA_KEYS
 from garim.training.export import PII_LABELS
 
 _LABEL_ID = {label: index for index, label in enumerate(PII_LABELS)}
@@ -27,12 +28,20 @@ class EntitySpan:
 
 
 def normalization_delta_vector(delta: dict[str, int]) -> list[float]:
-    """Match the runtime ONNX adapter's fixed order and log1p transformation."""
-    missing = set(NORMALIZATION_DELTA_ORDER) - delta.keys()
-    extra = delta.keys() - set(NORMALIZATION_DELTA_ORDER)
+    """Match the runtime ONNX adapter's fixed order and log1p transformation.
+
+    입력은 §3.2.5 **스키마 전체**(8칸)여야 하고 출력은 §6.2.2 **feature 계약**(7칸)이다.
+    두 집합이 다른 이유는 `NORMALIZATION_DELTA_ORDER` 옆에 적혀 있다 — `space` 는
+    정규화가 지우지 않는 유일한 칸이라 feature 자격이 없다.
+
+    스키마 쪽을 느슨하게 두면 안 된다. 칸이 하나 빠진 델타를 받아도 조용히 7칸을
+    만들어내면 학습과 추론이 서로 다른 것을 먹으면서 아무도 모른다.
+    """
+    missing = set(DELTA_KEYS) - delta.keys()
+    extra = delta.keys() - set(DELTA_KEYS)
     if missing or extra:
         raise ValueError(f"normalization delta keys mismatch: missing={missing}, extra={extra}")
-    if any(delta[key] < 0 for key in NORMALIZATION_DELTA_ORDER):
+    if any(delta[key] < 0 for key in DELTA_KEYS):
         raise ValueError("normalization delta counts must be non-negative")
     return [math.log1p(delta[key]) for key in NORMALIZATION_DELTA_ORDER]
 
