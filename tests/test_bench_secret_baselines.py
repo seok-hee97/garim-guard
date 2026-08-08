@@ -21,6 +21,19 @@ def test_evaluate_needs_both_arms() -> None:
         evaluate(["x"], [], lambda t: True, name="broken")
 
 
+def test_policy_verdict_and_raw_rules_are_measured_separately() -> None:
+    """★ 비교 대상 도구는 "신고하는가" 를 낸다 — 가림의 대응물은 정책 판정이다.
+
+    원시 배출로 재면 플레이스홀더 강등(§2.4 (C))이 통째로 안 보인다. 실제로 그렇게
+    재다가 오탐 0.170 이 안 내려간 것처럼 보였다.
+    """
+    from bench.secret_baselines import garim_raw_rules
+
+    placeholder = "설정에 AKIAIOSFODNN7EXAMPLE 를 넣었습니다"
+    assert garim_raw_rules()(placeholder)  # 감사에는 남는다
+    assert not garim_secrets()(placeholder)  # 판정에는 안 올라온다
+
+
 def test_garim_recall_and_false_positive_rate_on_a_tiny_slice() -> None:
     positives = ["설정에 sk-proj-AbCd1234efGH5678ijKL 를 넣었습니다"]
     negatives = ["설정에 YOUR_API_KEY 를 넣었습니다"]
@@ -34,5 +47,10 @@ def test_run_returns_a_row_per_candidate() -> None:
     positives = ["토큰은 ghp_AbCd1234efGH5678ijKLmnOPqrST12345 입니다"]
     negatives = ["토큰은 <your-token-here> 입니다"]
     scores = {score.name: score for score in run(positives, negatives)}
-    assert set(scores) == {"garim-l0", "detect-secrets", "credsweeper"}
+    assert set(scores) == {
+        "garim-l0",
+        "garim-raw-rules",
+        "detect-secrets",
+        "credsweeper",
+    }
     assert scores["garim-l0"].available

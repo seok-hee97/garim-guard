@@ -59,9 +59,23 @@ class BaselineScore:
 
 
 def garim_secrets(policy_path: str = "config/policy.yaml") -> Detector:
+    """★ **정책 판정**을 쓴다 — 원시 규칙 배출이 아니다.
+
+    비교 대상 도구들은 "이걸 시크릿이라고 신고하는가" 를 낸다. 가림의 대응물은
+    사용자가 실제로 보는 판정이지, 강등된 채 감사에만 남는 Finding 이 아니다.
+    원시 배출로 재면 플레이스홀더 강등(§2.4 (C))이 통째로 안 보인다 — 실제로
+    그렇게 재다가 0.170 이 안 내려간 것처럼 보였다.
+    """
+    from garim import Inspector
+
+    inspector = Inspector(policy_path)
+    return lambda text: bool(inspector.check(text).leaks)
+
+
+def garim_raw_rules() -> Detector:
+    """정책 이전의 원시 규칙 배출. 강등이 판정에 미치는 효과를 분리해 본다."""
     from garim.detect.rules import detect_secrets
 
-    del policy_path  # L0 규칙 자체를 잰다 — 정책 임계는 이 비교의 변수가 아니다
     return lambda text: bool(detect_secrets(text))
 
 
@@ -138,6 +152,7 @@ def run(
 ) -> list[BaselineScore]:
     candidates: list[tuple[str, Detector | None]] = [
         ("garim-l0", garim_secrets()),
+        ("garim-raw-rules", garim_raw_rules()),
         ("detect-secrets", detect_secrets_baseline()),
         ("credsweeper", credsweeper_baseline()),
     ]

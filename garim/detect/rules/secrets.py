@@ -63,6 +63,19 @@ def detect_secrets(text: str) -> list[Finding]:
     findings: list[Finding] = []
     for pattern, rule in _PREFIX_PATTERNS:
         for match in pattern.finditer(text):
+            # ★ 고정밀 prefix 도 플레이스홀더 검사를 거친다. 이 검사가 (A) 단계에
+            #   걸려 있지 않아 `AKIAIOSFODNN7EXAMPLE`(AWS 공식 문서 예제)과
+            #   `sk-proj-xxxxxxxx` 가 신뢰도 1.0 으로 나갔다 — 축 (d) 오탐 0.170 의
+            #   실체다. 같은 슬라이스에서 CredSweeper 는 0.000 이었다.
+            #
+            #   버리지 않고 **강등**한다. §2.4 의 (C) 는 "애매한 것은 차단이 아니라
+            #   사용자 확인" 이고, `sk-proj-xxxx` 는 진짜 키를 부분 가린 것일 수도
+            #   있다. 기본 임계(0.5) 아래로 내려 판정에서 빠지되 감사에는 남는다.
+            if _PLACEHOLDER.search(match.group(0)):
+                findings.append(
+                    Finding("L-SEC-01", match.span(), 0.35, "L0", f"{rule}_placeholder")
+                )
+                continue
             findings.append(Finding("L-SEC-01", match.span(), 1.0, "L0", rule))
     for match in _KOREAN_HEADER.finditer(text):
         findings.append(Finding("L-SEC-02", match.span(1), 0.95, "L0", "korean_service_header"))
