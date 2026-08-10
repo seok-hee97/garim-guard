@@ -37,7 +37,27 @@ _DATASET_PATTERNS = {
     "bc-pii-ko-augmented-negative": ["README.md", "train.jsonl"],
     "deepset-prompt-injections": ["README.md", "data/train-*.parquet"],
     "deepset-prompt-injections-test": ["README.md", "data/test-*.parquet"],
+    # ★ 아래 셋은 패턴이 비어 있어 `--execute` 가 멈췄다. 게이트가 묻는 것은
+    #   "이 저장소에서 무엇을 받을지 **사람이 봤는가**" 이므로, 파일 목록을 실제로
+    #   열어 보고 고른 근거를 함께 남긴다.
+    #
+    #   `benchmark.jsonl` 하나가 평가에 필요한 전부다(5,555행, technique 축 포함).
+    #   **`*.py` 는 일부러 뺐다** — 이 저장소는 `ko_obfuscator.py`·`build_benchmark.py`
+    #   같은 제3자 실행 코드를 함께 배포한다. 평가에 쓰지 않는 코드를 작업 트리에
+    #   내려두면 언젠가 누가 임포트하거나 실행한다. `seeds/` 도 뺀다 —
+    #   `benchmark.jsonl` 이 그것에서 파생된 산출물이고 우리가 재생성하지 않는다.
+    "KoreanGuardrail": ["README.md", "manifest.json", "benchmark.jsonl"],
+    "korean-guardrail-test": ["README.md", "main.jsonl"],
+    #   `hf_config: jailbreak` 로 등록돼 있으므로 그 config 의 데이터만 받는다.
+    #   `cultural.parquet` 과 `data/cultural/**` 는 쓰지 않는 다른 config 다.
+    "XL-SafetyBench": ["README.md", "jailbreak.parquet"],
 }
+
+# 패턴이 받아도 되는 확장자. 데이터만 받고 **실행 가능한 것은 받지 않는다** —
+# 제3자 저장소가 데이터와 스크립트를 같이 배포하는 일이 흔하다(KoreanGuardrail 이 그렇다).
+_ALLOWED_ASSET_SUFFIXES = frozenset(
+    {".md", ".json", ".jsonl", ".parquet", ".csv", ".txt", ".tsv"}
+)
 
 
 def build_asset_plan(
