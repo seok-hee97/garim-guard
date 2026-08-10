@@ -151,18 +151,24 @@ sources:
     use: train
     hf_id: deepset/prompt-injections
     url: https://huggingface.co/datasets/deepset/prompt-injections
-    # top-level card는 Apache-2.0, nested dataset_info는 CC-BY-4.0이라 보수적으로 후자 적용
     license: CC-BY-4.0
+    card_license: apache-2.0
     license_url: https://creativecommons.org/licenses/by/4.0/
     revision: 4f61ecb038e9c3fb77e21034b22511b523772cdd
     train_split: train
     sha256: null
+    note: >-
+      top-level card 는 Apache-2.0 인데 nested dataset_info 는 CC-BY-4.0 이다.
+      둘 중 **보수적으로 후자를 적용**한다 — 어느 쪽이 진짜인지 상류가 정리해 주지
+      않았고, 느슨한 쪽을 골랐다가 틀리면 되돌릴 수 없다. `card_license` 로 카드값을
+      따로 적어 두어 상류가 바뀌면 게이트가 여전히 막는다.
 
   - name: deepset-prompt-injections-test
     use: eval
     hf_id: deepset/prompt-injections
     url: https://huggingface.co/datasets/deepset/prompt-injections
     license: CC-BY-4.0
+    card_license: apache-2.0
     license_url: https://creativecommons.org/licenses/by/4.0/
     revision: 4f61ecb038e9c3fb77e21034b22511b523772cdd
     eval_split: test

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from garim.tls import https_context
 
@@ -39,7 +39,18 @@ class Source(BaseModel):
     use: Purpose
     hf_id: str | None = None
     url: str
+    # 우리가 **적용하는** 라이선스 — 받아들이는 의무다.
     license: str | None = None
+    # ★ 상류 카드가 **선언한** 라이선스. 우리가 적용하는 것과 다를 때만 적는다.
+    #
+    #   `deepset/prompt-injections` 가 그렇다 — top-level card 는 Apache-2.0 인데
+    #   nested `dataset_info` 는 CC-BY-4.0 이라 **보수적으로 후자를 적용**하기로 했다.
+    #   그런데 게이트가 "등록값 == 카드값" 만 볼 줄 알아서 이 **의도된** 불일치에
+    #   걸려 자산 다운로드가 통째로 멈췄다.
+    #
+    #   값을 카드값으로 맞춰서 넘기면 보수적 선택이 사라진다. 대신 두 값을 따로 적고
+    #   게이트가 **카드값 쪽**으로 상류 변동을 감시하게 한다 — fail-closed 는 그대로다.
+    card_license: str | None = None
     license_url: str | None = None
     revision: str | None = None
     file: str | None = None
@@ -48,6 +59,24 @@ class Source(BaseModel):
     train_split: str | None = None
     eval_split: str | None = None
     note: str = ""
+
+    @model_validator(mode="after")
+    def explain_a_deliberate_license_divergence(self) -> Source:
+        """카드값과 적용값이 다르면 **이유를 적게 강제한다.**
+
+        조용한 불일치는 다음 사람이 "낡은 매니페스트" 로 읽고 카드값에 맞춰 버린다.
+        그 순간 보수적으로 잡아둔 의무가 사라지는데 아무 경보도 안 울린다.
+        """
+        if self.card_license is None:
+            return self
+        if _license_key(self.card_license) == _license_key(self.license or ""):
+            raise ValueError("card_license is only for a deliberate divergence; drop it")
+        if not self.note.strip():
+            raise ValueError(
+                "a license divergence must carry a note explaining why the stricter "
+                "license is applied"
+            )
+        return self
 
     @field_validator("revision")
     @classmethod
@@ -82,7 +111,10 @@ class SourceManifest(BaseModel):
 @dataclass(frozen=True, slots=True)
 class Authorization:
     source: Source
+    # 적용 라이선스 — 귀속 표기와 의무는 이쪽을 따른다.
     verified_license: str
+    # 상류 카드가 선언한 것. 둘이 다르면 우리가 더 보수적으로 잡았다는 뜻이다.
+    card_license: str
     share_alike: bool
 
 
@@ -202,19 +234,36 @@ class SourceRegistry:
                         f"{name}: sha256 mismatch (expected {source.sha256}, got {actual_digest})"
                     )
 
+        # ★ 검사 셋의 **순서가 안전 성질을 만든다.**
+        #
+        # (1) 상류의 실제 라이선스가 허용 목록 안인가. 이것이 먼저여야 한다 — 그렇지
+        #     않으면 카드가 `cc-by-nc-4.0` 인 원천에 `license: CC-BY-4.0` 을 적어
+        #     "우리는 이 조건으로 쓴다" 며 통과시킬 수 있다. **상류가 안 준 권리를
+        #     스스로에게 줄 수는 없다.** 보수적 재선언은 오직 더 **좁히는** 방향만이다.
         if _license_key(actual_license) not in self._allowed:
             raise ValueError(f"{name}: license {actual_license!r} is not allowed")
-        declared_license = source.license
-        if declared_license is not None and _license_key(declared_license) != _license_key(
+        # (2) 상류 변동 감시. `card_license` 를 적어 둔 원천은 등록값과 카드값이
+        #     **일부러** 다르므로 카드 쪽으로 맞춰본다 — fail-closed 는 그대로다.
+        expected_card = source.card_license or source.license
+        if expected_card is not None and _license_key(expected_card) != _license_key(
             actual_license
         ):
             raise ValueError(
-                f"{name}: registry license {source.license!r} disagrees with {actual_license!r}"
+                f"{name}: registry license {expected_card!r} disagrees with {actual_license!r}"
             )
+        # (3) 우리가 받아들이기로 한 의무도 목록 안이어야 한다.
+        applied_license = source.license or actual_license
+        if _license_key(applied_license) not in self._allowed:
+            raise ValueError(f"{name}: applied license {applied_license!r} is not allowed")
         return Authorization(
             source=source,
-            verified_license=actual_license,
-            share_alike=_license_key(actual_license) == "cc-by-sa-4.0",
+            # 정규형으로 낸다 — 매니페스트 표기(`CC-BY-4.0`)와 API 표기(`cc-by-4.0`)가
+            # 갈리는데, 이 값을 귀속 표기에 쓰므로 한 가지로 고정해야 한다.
+            verified_license=_license_key(applied_license),
+            card_license=_license_key(actual_license),
+            # 적용 라이선스로 판정한다. 카드가 Apache 라도 우리가 CC-BY-SA 를 적용하기로
+            # 했다면 ShareAlike 의무를 져야 한다.
+            share_alike=_license_key(applied_license) == "cc-by-sa-4.0",
         )
 
 
