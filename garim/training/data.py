@@ -128,9 +128,24 @@ def validate_corpus(records: Sequence[CorpusRecord]) -> dict[str, Any]:
         for span in record.spans:
             label_counts[span.label] += 1
 
+        # ★ 지문이 분할을 넘는 것이 누수인가는 **그 행이 라벨을 지고 있느냐**에 달렸다.
+        #
+        #   공격 행은 텍스트 자체가 예측 대상(`attack_label`)이라 같은 문장이 양쪽에
+        #   있으면 그대로 암기다 — 언제나 막는다.
+        #
+        #   PII 행 중 **스팬이 없는 것**은 다르다. 정답이 "전부 O" 이고, 그건 문장을
+        #   보면 알 수 있는 다수 클래스다. KDPII 실측에서 분할을 넘는 지문 152개 중
+        #   **스팬을 가진 것이 0개**였고 전부 `"네 맞습니다."` · `"정말 감사합니다!"`
+        #   같은 일반 발화였다. 이런 발화는 어느 한국어 대화 코퍼스에나 반복해서
+        #   나타나므로, 막으려면 그것을 공유하는 대화를 전부 한 덩어리로 이어야 하고
+        #   그러면 분할이 통째로 무너진다(`"네"` 는 거의 모든 대화에 있다).
+        #
+        #   그래서 **좁게** 연다 — 라벨을 지지 않는 PII 행만. 스팬이 하나라도 있으면
+        #   막고, 공격 행은 조건 없이 막는다.
+        carries_a_target = bool(record.spans) or record.task != "pii"
         fingerprint = fingerprint_text(record.text)
         previous_split = fingerprints.setdefault(fingerprint, record.split)
-        if previous_split != record.split:
+        if carries_a_target and previous_split != record.split:
             raise ValueError(
                 f"normalized text fingerprint crosses {previous_split}/{record.split}: {record.id}"
             )

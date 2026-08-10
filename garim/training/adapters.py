@@ -174,7 +174,31 @@ def adapt_kdpii_dialogues(
         sentences = dialogue.get("sentence", [])
         if not isinstance(sentences, list):
             raise ValueError(f"KDPII dialogue {dialogue_index}: sentence must be a list")
-        dialogue_id = str(dialogue.get("id", dialogue_index))
+        # ★ 최상위 대화 객체에는 `id` 가 없다(키가 `sentence` 하나뿐이다). 그래서 예전 코드는
+        #   항상 **호출별 열거 인덱스**로 떨어졌고, `prepare_corpora` 가 분할마다 이 함수를
+        #   다시 부르면서 인덱스가 0부터 재시작했다. 결과가 둘이다.
+        #
+        #   1. **레코드 id 충돌** — `duplicate corpus id: kdpii-...`
+        #   2. **그룹이 분할을 넘는다** — `kdpii-dialogue-0` 이 train·validation·test 에
+        #      전부 생겼다. §6.3 이 막으려는 바로 그 누수이고, 한 대화의 문장들이 서로
+        #      다른 분할에 흩어지면 "본 대화, 다른 문장" 이 되어 테스트가 무의미해진다.
+        #
+        #   인덱스는 분할 구성이 바뀌면 값도 바뀌므로 봉인(SHA-256)의 기준으로도 부적합하다.
+        # 원천 문장 id 는 `Data{A}.{B}.{C}` 이고 `(A, B)` 가 대화를 가른다 — 4,981개
+        # 대화에 고유 접두 4,981개로 정확히 1:1 이다. 이것이 이 데이터의 진짜 대화 키다.
+        first_sentence_id = next(
+            (
+                sentence.get("id")
+                for sentence in sentences
+                if isinstance(sentence, Mapping) and sentence.get("id")
+            ),
+            None,
+        )
+        dialogue_id = (
+            ".".join(str(first_sentence_id).split(".")[:2])
+            if first_sentence_id
+            else f"index-{dialogue_index}"
+        )
         for sentence_index, sentence in enumerate(sentences):
             if not isinstance(sentence, Mapping):
                 raise ValueError("KDPII sentence must be an object")
@@ -211,7 +235,9 @@ def adapt_kdpii_dialogues(
             spans = _merge_adjacent_address_spans(text, spans)
             try:
                 record = CorpusRecord(
-                    id=_stable_id("kdpii", dialogue_id, sentence_index),
+                    id=_stable_id(
+                        "kdpii", sentence.get("id") or f"{dialogue_id}:{sentence_index}"
+                    ),
                     task="pii",
                     text=text,
                     spans=spans,

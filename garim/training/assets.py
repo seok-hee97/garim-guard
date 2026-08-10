@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
+import tarfile
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -151,6 +153,69 @@ def _download_hf_dataset(source: Source, destination: Path) -> None:
     )
 
 
+# GitHub 정본 배포 원천. HF 와 같은 검토 규율을 적용한다 — 저장소째 풀지 않고
+# 평가에 실제로 쓰는 파일만 받는다.
+_GITHUB_PATTERNS = {
+    # `bench/tab.py` 가 `echr_*.json` 하나를 읽는다. 학습·개발 분할은 쓰지 않는다.
+    "TAB-echr": ("echr_test.json",),
+    # `bench/cred_data.py` 가 `meta/*.csv` 만으로 라인 단위 평가를 한다. 저장소 본체는
+    # 스캔 대상 코드 파일 수만 개라 받을 이유가 없다.
+    "CredData": ("meta/",),
+}
+
+
+def _download_github_archive(source: Source, destination: Path) -> None:
+    """고정 커밋의 tarball 에서 검토된 경로만 꺼낸다.
+
+    ## 왜 sha256 없이도 되는가
+
+    **git 커밋 SHA 자체가 내용 해시다.** 커밋으로 지정해 받으면 받은 내용이 그 커밋이
+    맞는지는 SHA 가 보증한다. KDPII 처럼 평범한 URL 을 치는 원천은 내용 주소가 아니라
+    `sha256` 이 반드시 있어야 하지만, 여기서는 커밋 고정이 그 역할을 한다.
+
+    ## tar 를 그냥 풀지 않는다
+
+    아카이브 멤버 이름은 **원격이 정하는 값**이다. 절대 경로(`/etc/...`)나 상위 참조
+    (`../../`)가 들어 있으면 추출이 작업 트리 밖에 파일을 쓴다. 심볼릭 링크는 그보다
+    나쁘다 — 링크를 먼저 풀고 그 경로에 쓰면 링크가 가리키는 아무 곳이나 덮인다.
+    Python 3.11 에는 `filter="data"` 가 기본이 아니므로 직접 막는다.
+    """
+    if source.revision is None:
+        raise ValueError(f"{source.name}: GitHub source must pin a full commit")
+    owner_repo = source.url.rstrip("/").removeprefix("https://github.com/")
+    url = f"https://codeload.github.com/{owner_repo}/tar.gz/{source.revision}"
+    patterns = _GITHUB_PATTERNS[source.name]
+    destination.mkdir(parents=True, exist_ok=True)
+    request = urllib.request.Request(url, headers={"User-Agent": "garim-asset-fetch/0.1"})
+    with urllib.request.urlopen(  # noqa: S310
+        request, timeout=300, context=https_context()
+    ) as response:
+        with tarfile.open(fileobj=io.BytesIO(response.read()), mode="r:gz") as archive:
+            extracted = 0
+            for member in archive.getmembers():
+                if not member.isfile():
+                    # 디렉터리는 필요한 만큼 우리가 만든다. 링크·장치 파일은 받지 않는다.
+                    continue
+                # tarball 최상위는 `{repo}-{sha}/` 다. 그 아래 경로로 검토 패턴을 맞춘다.
+                relative = member.name.partition("/")[2]
+                if not relative or not any(
+                    relative == pattern or relative.startswith(pattern)
+                    for pattern in patterns
+                ):
+                    continue
+                target = (destination / relative).resolve()
+                if not target.is_relative_to(destination.resolve()):
+                    raise ValueError(f"{source.name}: archive escapes destination: {member.name}")
+                handle = archive.extractfile(member)
+                if handle is None:
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(handle.read())
+                extracted += 1
+    if not extracted:
+        raise ValueError(f"{source.name}: reviewed patterns {patterns} matched no file")
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -238,6 +303,9 @@ def download_assets(
             if source.hf_id is not None:
                 source_registry.authorize(item.name, purpose=source.use)
                 _download_hf_dataset(source, destination)
+            elif source.name in _GITHUB_PATTERNS:
+                _download_github_archive(source, destination)
+                source_registry.authorize(source.name, purpose=source.use)
             elif source.name == "KDPII":
                 _download_kdpii(source, destination)
                 source_registry.authorize(

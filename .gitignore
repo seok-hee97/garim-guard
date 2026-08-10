@@ -17,13 +17,14 @@ train/artifacts/
 artifacts/
 
 # Generated evaluation data and reports
-data/synth/
-data/corpus/
-data/cassettes/
-data/raw/
-data/local/
-data/asset-manifest.json
-data/training-input-manifest.json
+# ★ 하위 경로를 하나씩 적다가 뚫렸다. `train/merge_corpora.py` 가 만드는
+#   `data/merged/` 가 목록에 없어서, 체크섬 유효한 주민번호가 든 병합 코퍼스가
+#   커밋 대상으로 올라왔다 — `tools/no_committed_pii.py` 가 잡았다.
+#
+#   파이프라인이 새 출력 디렉터리를 만들 때마다 여기를 고쳐야 하는 구조는 언젠가 또
+#   뚫린다. `data/` 를 통째로 무시하고, 추적할 것이 생기면 그때 `!` 로 되살린다.
+#   (지금 `data/` 아래 추적 중인 파일은 0개다.)
+data/
 
 # AI-Hub — 재배포 금지(이용정책 제5항) · 국외 반출 금지(제3항). DESIGN §5.4.3.
 # 저장소에 들어가는 순간 제5항 위반이고, 공개 저장소이므로 되돌릴 수 없다.
