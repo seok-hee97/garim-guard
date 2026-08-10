@@ -14,6 +14,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from garim.tls import https_context
+
 Purpose = Literal["train", "eval", "value_dictionary", "schema_reference"]
 LicenseResolver = Callable[[str, str], str]
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -90,7 +92,9 @@ def resolve_huggingface_license(hf_id: str, revision: str) -> str:
         f"https://huggingface.co/api/datasets/{hf_id}/revision/{revision}",
         headers={"User-Agent": "garim-source-gate/0.1"},
     )
-    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+    with urllib.request.urlopen(  # noqa: S310
+        request, timeout=15, context=https_context()
+    ) as response:
         payload = json.load(response)
     license_value = payload.get("cardData", {}).get("license")
     if isinstance(license_value, list):

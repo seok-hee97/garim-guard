@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from garim.tls import https_context
 from garim.training.models import ModelAsset, ModelRegistry
 from garim.training.sources import Source, SourceRegistry
 
@@ -182,7 +183,9 @@ def _download_kdpii(source: Source, destination: Path) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "garim-asset-fetch/0.1"})
     try:
         with (
-            urllib.request.urlopen(request, timeout=60) as response,  # noqa: S310
+            urllib.request.urlopen(  # noqa: S310
+                request, timeout=60, context=https_context()
+            ) as response,
             temporary.open("wb") as stream,
         ):
             shutil.copyfileobj(response, stream, length=1024 * 1024)

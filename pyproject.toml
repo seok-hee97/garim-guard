@@ -18,6 +18,10 @@ dependencies = [
 l1 = ["numpy>=1.26,<3", "onnxruntime>=1.18,<2", "transformers>=5.5,<6"]
 train = [
   "accelerate>=1.10,<2",
+  # macOS 의 python.org 빌드는 시스템 루트 인증서를 안 쓴다. 라이선스 게이트 셋이
+  # 전부 HTTPS 로 나가므로 없으면 CERTIFICATE_VERIFY_FAILED 로 학습 준비가 통째로
+  # 막힌다 — 실제로 막혔다. `garim/tls.py` 가 있으면 쓰고 없으면 기본값으로 돈다.
+  "certifi>=2026.7.22",
   "datasets>=2.20,<4",
   "huggingface-hub>=0.36,<2",
   "numpy>=1.26,<3",

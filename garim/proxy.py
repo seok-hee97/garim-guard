@@ -32,6 +32,7 @@ from typing import Any
 
 from garim.api import Inspector
 from garim.models import Origin, Segment
+from garim.tls import https_context
 
 # OpenAI 역할 → §3.2.1 origin. `tool` 과 `function` 은 모델이 아니라 외부가 채운
 # 내용이라 간접 인젝션 경로다(§2.5b) — `user` 로 접지 않는다.
@@ -160,7 +161,7 @@ class ProxyService:
         )
         try:
             with urllib.request.urlopen(  # noqa: S310
-                request, timeout=self.config.timeout_seconds
+                request, timeout=self.config.timeout_seconds, context=https_context()
             ) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:

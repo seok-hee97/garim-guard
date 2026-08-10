@@ -48,7 +48,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 import time
 import urllib.error
 import urllib.request
@@ -56,6 +55,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from garim.tls import https_context
 
 Client = Callable[[str], str]
 
@@ -370,19 +371,6 @@ def load_env(path: str | Path = ".env") -> dict[str, str]:
     return values
 
 
-def _ssl_context() -> ssl.SSLContext:
-    """macOS 의 python.org 빌드는 시스템 루트 인증서를 안 쓴다 — certifi 가 있으면 쓴다.
-
-    검증을 끄는 선택지는 두지 않는다. 이 하네스는 API 키를 들고 나가므로 평문 강등이
-    가능한 경로를 만들면 안 된다.
-    """
-    try:
-        import certifi
-    except ModuleNotFoundError:
-        return ssl.create_default_context()
-    return ssl.create_default_context(cafile=certifi.where())
-
-
 def _post(
     url: str, payload: dict[str, Any], headers: dict[str, str], *, retries: int = 5
 ) -> dict[str, Any]:
@@ -395,7 +383,7 @@ def _post(
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(  # noqa: S310
-                request, timeout=90, context=_ssl_context()
+                request, timeout=90, context=https_context()
             ) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:

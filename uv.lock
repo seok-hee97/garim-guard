@@ -419,6 +419,7 @@ l1 = [
 ]
 train = [
     { name = "accelerate" },
+    { name = "certifi" },
     { name = "datasets" },
     { name = "huggingface-hub" },
     { name = "numpy" },
@@ -436,6 +437,7 @@ train = [
 requires-dist = [
     { name = "accelerate", marker = "extra == 'train'", specifier = ">=1.10,<2" },
     { name = "certifi", marker = "extra == 'bench'", specifier = ">=2026.7.22" },
+    { name = "certifi", marker = "extra == 'train'", specifier = ">=2026.7.22" },
     { name = "datasets", marker = "extra == 'train'", specifier = ">=2.20,<4" },
     { name = "huggingface-hub", marker = "extra == 'train'", specifier = ">=0.36,<2" },
     { name = "numpy", marker = "extra == 'l1'", specifier = ">=1.26,<3" },
