@@ -13,7 +13,10 @@ from pathlib import Path
 from garim.training.config import RunConfig, load_run_config
 from garim.training.data import CorpusRecord, load_jsonl
 from garim.training.provenance import verify_training_input_manifest
-from garim.training.readiness import validate_training_corpora
+from garim.training.readiness import (
+    assert_distillation_inputs_exist,
+    validate_training_corpora,
+)
 
 
 def _load_many(paths: list[str]) -> list[CorpusRecord]:
@@ -231,6 +234,13 @@ def main() -> int:
     attack_train = _load_many(args.attack_train)
     attack_validation = _load_many(args.attack_validation)
     report = _assert_ready(pii_train, pii_validation, attack_train, attack_validation)
+    # 증류 계수를 켜 두고 교사 라벨 없이 돌면 KL 항이 조용히 0 이 되어, 학습은 끝나고
+    # 지표도 나오는데 §6.2.2 의 증류가 한 번도 안 돈다. 시작 전에 막는다.
+    assert_distillation_inputs_exist(
+        attack_train,
+        hard_label_alpha=run_config.hard_label_alpha,
+        qwen_weight=run_config.qwen_weight,
+    )
     report["sealed_input_contract"] = verify_training_input_manifest(
         args.input_manifest,
         {
