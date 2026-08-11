@@ -75,3 +75,25 @@ def test_joint_loss_uses_binary_auxiliary_losses_and_restricted_kl() -> None:
     assert torch.isfinite(loss.total)
     loss.total.backward()
     assert model.attack_head.weight.grad is not None
+
+
+def test_encoder_and_heads_share_one_dtype() -> None:
+    """★ 채택 백본으로 학습이 첫 forward 에서 죽었다.
+
+    `skt/A.X-Encoder-base` 의 config 가 `"torch_dtype": "bfloat16"` 이고 transformers
+    5.x 는 그것을 **기본으로 존중한다.** 그러면 인코더 bf16 / 헤드 fp32 가 되어
+
+        RuntimeError: mat1 and mat2 must have the same dtype, but got BFloat16 and Float
+
+    가 난다. MPS 에서는 같은 원인이 Metal 어서션으로 먼저 나와 기기 문제처럼 보이지만
+    CUDA 도 같은 규칙이라 RunPod 첫 스텝에서 똑같이 터진다.
+    """
+    model = JointL1Model(FakeEncoder(12), hidden_size=12)
+    assert next(model.encoder.parameters()).dtype == model.pii_head.weight.dtype
+
+
+def test_a_dtype_divergence_is_refused_at_construction() -> None:
+    """첫 matmul 까지 기다리면 데이터 로딩을 다 지나온 뒤라 원인이 멀어 보인다."""
+    encoder = FakeEncoder(12).to(dtype=torch.bfloat16)
+    with pytest.raises(ValueError, match="does not match head dtype"):
+        JointL1Model(encoder, hidden_size=12)

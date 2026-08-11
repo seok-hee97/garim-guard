@@ -72,6 +72,17 @@ class JointL1Model(nn.Module):
         self.attack_head = nn.Linear(sequence_size, attack_labels)
         self.romanized_head = nn.Linear(sequence_size, 1)
         self.honorific_head = nn.Linear(sequence_size, 1)
+        # ★ 구성 시점에 막는다. 인코더와 헤드의 dtype 이 갈리면 첫 forward 의 matmul 에서
+        #   죽는데, 그때는 데이터 로딩·토크나이즈를 다 지나온 뒤라 원인이 멀어 보인다.
+        #   MPS 에서는 Metal 어서션으로 나와 기기 문제처럼 보이기까지 한다.
+        encoder_dtype = next(encoder.parameters(), None)
+        if encoder_dtype is not None and encoder_dtype.dtype != self.pii_head.weight.dtype:
+            raise ValueError(
+                f"encoder dtype {encoder_dtype.dtype} does not match head dtype "
+                f"{self.pii_head.weight.dtype} — pass dtype= explicitly when loading "
+                f"the encoder (checkpoints may declare bfloat16 and transformers 5.x "
+                f"honours it by default)"
+            )
 
     @classmethod
     def from_pretrained(
@@ -85,10 +96,26 @@ class JointL1Model(nn.Module):
         """Build from a local encoder by default; callers must opt in to downloads."""
         from transformers import AutoModel
 
+        # ★ dtype 을 명시한다. 채택 백본 `skt/A.X-Encoder-base` 의 config 가
+        #   `"torch_dtype": "bfloat16"` 이고 transformers 5.x 는 그것을 **기본으로
+        #   존중한다.** 그러면 인코더는 bf16, 아래에서 새로 만드는 헤드는 fp32 가 되어
+        #   첫 forward 에서 죽는다.
+        #
+        #       RuntimeError: mat1 and mat2 must have the same dtype,
+        #           but got BFloat16 and Float
+        #
+        #   MPS 에서는 같은 원인이 Metal 어서션으로 먼저 나오는데(`Destination NDArray
+        #   and Accumulator NDArray cannot have different datatype`) 기기 문제가 아니다.
+        #   CUDA 도 같은 규칙이라 RunPod 첫 스텝에서 똑같이 터진다.
+        #
+        #   학습 경로이므로 **master weight 를 fp32 로** 잡는다. 혼합 정밀도는 저장
+        #   dtype 이 조용히 정하는 것이 아니라 autocast 로 명시해서 켜는 것이 맞고,
+        #   149M 인코더에서 fp32 는 600MB 라 4090 에 부담이 아니다. 호출자가 `dtype` 을
+        #   직접 주면 그 선택을 존중한다.
         encoder = AutoModel.from_pretrained(
             model_name_or_path,
             local_files_only=local_files_only,
-            **model_kwargs,
+            **{"dtype": torch.float32, **model_kwargs},
         )
         hidden_size = int(encoder.config.hidden_size)
         return cls(encoder, hidden_size=hidden_size, pooling=pooling)
