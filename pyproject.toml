@@ -30,6 +30,12 @@ train = [
   # Without it every export raised ModuleNotFoundError at the end of the pipeline.
   "onnxscript>=0.7,<1",
   "onnxruntime>=1.18,<2",
+  # Gemma 4 E2B 는 멀티모달이라 `Gemma4Processor` 가 PIL 과 torchvision 을 요구한다.
+  # 우리는 텍스트만 쓰지만 프로세서 임포트 단계에서 막힌다 — 교사 라벨링이 이것 없이
+  # 시작조차 못 한다. 둘 다 없으면 `ModuleNotFoundError: Could not import module
+  # 'Gemma4Processor'` 로만 나와서 무엇이 빠졌는지 안 보인다.
+  "pillow>=11,<13",
+  "torchvision>=0.21,<1",
   "pyarrow>=18,<24",
   "safetensors>=0.5,<1",
   "sentencepiece>=0.2,<1",

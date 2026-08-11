@@ -67,12 +67,26 @@ class KananaBackend(TeacherBackend):
             self.label_ids[label] = ids[0]
 
     def predict(self, record: CorpusRecord) -> TeacherArtifact:
-        input_ids = self.tokenizer.apply_chat_template(
+        # ★ transformers 5.x 는 `apply_chat_template` 이 텐서가 아니라 `BatchEncoding` 을
+        #   돌려준다. 4.x 는 텐서였다.
+        #
+        #     TypeError: ones_like(): argument 'input' must be Tensor, not BatchEncoding
+        #
+        #   같은 수정이 아래 Gemma 백엔드(`return_dict=True`)에는 이미 들어가 있었고 이
+        #   자리만 남아 있었다 — 형제 클래스를 하나 고치고 나머지를 놓친 모양이다.
+        #
+        #   어텐션 마스크도 인코딩에서 받는다. `ones_like` 는 패딩이 없다고 가정하는데
+        #   그 가정을 토크나이저가 대신 보증해 줄 이유가 없다.
+        encoded = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": record.text}],
             tokenize=True,
+            return_dict=True,
             return_tensors="pt",
         ).to(self.model.device)
-        attention_mask = self.torch.ones_like(input_ids)
+        input_ids = encoded["input_ids"]
+        attention_mask = encoded.get("attention_mask")
+        if attention_mask is None:
+            attention_mask = self.torch.ones_like(input_ids)
         with self.torch.inference_mode():
             logits = self.model(input_ids=input_ids, attention_mask=attention_mask).logits[0, -1]
         labels = ("NONE", "INJECTION", "SYSTEM_LEAK")
@@ -144,14 +158,39 @@ class Qwen3GuardStreamBackend(TeacherBackend):
     def __init__(self, name: str, spec: TeacherSpec, model_dir: str | Path, *, device: str) -> None:
         super().__init__(name, spec)
         import torch
-        from transformers import AutoModel, AutoTokenizer
+        from transformers import AutoConfig, AutoModel, AutoTokenizer
 
         self.torch = torch
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_dir, local_files_only=True, trust_remote_code=True
         )
+        # ★ 이 저장소의 원격 코드가 transformers 4.x 를 가정한다.
+        #
+        #     modeling_qwen3_guard.py:346  →  config.pad_token_id
+        #     AttributeError: 'Qwen3Config' object has no attribute 'pad_token_id'
+        #
+        #   5.x 에서 `PretrainedConfig` 가 이 필드를 무조건 들고 있지 않게 바뀌었다.
+        #   우리 버그가 아니고 원격 코드를 고칠 수도 없으니, **토크나이저가 아는 값으로**
+        #   config 를 채워서 넘긴다. 패딩의 권위는 원래 토크나이저 쪽이다.
+        #
+        #   이 세션에 transformers 5.x 동작 변화에 걸린 것이 세 번째다 —
+        #   kanana `head_dim` 검증, 인코더 bf16 기본값, 그리고 이것.
+        config = AutoConfig.from_pretrained(
+            model_dir, local_files_only=True, trust_remote_code=True
+        )
+        if getattr(config, "pad_token_id", None) is None:
+            pad_id = self.tokenizer.pad_token_id
+            if pad_id is None:
+                pad_id = self.tokenizer.eos_token_id
+            if pad_id is None:
+                raise ValueError(
+                    f"{name}: neither config nor tokenizer defines a pad token; "
+                    "the pinned remote code requires config.pad_token_id"
+                )
+            config.pad_token_id = pad_id
         self.model = AutoModel.from_pretrained(
             model_dir,
+            config=config,
             local_files_only=True,
             trust_remote_code=True,
             dtype="auto",
