@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 
 from garim.models import Finding
+
+# 코드 → 판정 모드. `PolicyEngine.mode_for` 가 이 모양이다.
+ModeResolver = Callable[[str], str]
 
 _STREAM_ORDER = {"raw": 0, "norm": 1, "nospace": 2, "base64": 3, "hex": 3, "l1": 4}
 
@@ -13,14 +17,25 @@ def overlaps(left: tuple[int, int], right: tuple[int, int]) -> bool:
     return left[0] < right[1] and right[0] < left[1]
 
 
-def _severity(finding: Finding) -> int:
-    """코드의 기본 판정 심각도. 코드가 다른 스팬이 겹칠 때 길이보다 먼저 본다."""
-    from garim.policy.engine import DEFAULT_CODE_MODES, SEVERITY
+def _severity(finding: Finding, mode_for: ModeResolver) -> int:
+    """**활성 정책** 기준 판정 심각도. 코드가 다른 스팬이 겹칠 때 길이보다 먼저 본다.
 
-    return SEVERITY.get(DEFAULT_CODE_MODES.get(finding.code, "mask"), 1)
+    ★ 여기가 `DEFAULT_CODE_MODES` 를 봤다 — 하드코딩된 기본값이지 사용자 정책이
+      아니다. 그래서 사용자가 뒤집으면 **fail-open** 이 났다.
+
+          codes: {L-KR-01: allow, L-CM-03: block}
+          "주민등록번호 900101-1234567 hong@example.test"
+          → 기본값 기준으로 L-KR-01(block) 이 이겨 이메일 탐지가 사라지고 verdict=allow
+
+      사용자가 block 이라고 적은 것이 조용히 사라지는 것은 정책 엔진이 있는 이유를
+      부정한다. 겹침 해소는 **그 정책이 무엇을 더 무겁게 보는가** 를 따라야 한다.
+    """
+    from garim.policy.engine import SEVERITY
+
+    return SEVERITY.get(mode_for(finding.code), 1)
 
 
-def _preferred(left: Finding, right: Finding) -> Finding:
+def _preferred(left: Finding, right: Finding, mode_for: ModeResolver) -> Finding:
     # ★ 코드가 다르면 판정 심각도가 길이를 이긴다.
     #   초판은 길이만 봤다. 그래서 `주민등록번호 <RRN> hong@a.com` 에서
     #   norm_nospace 가 `<RRN>hong@a.com` 을 이메일 1건으로 잡아 25자 스팬을 만들면
@@ -28,8 +43,8 @@ def _preferred(left: Finding, right: Finding) -> Finding:
     #   공격자가 알아야 할 것이 "뒤에 이메일을 붙인다" 하나뿐이었다.
     #   Luhn 우연일치(1/10)로 주민번호가 카드로 마스킹되던 것도 같은 구멍이다.
     if left.code != right.code:
-        left_severity = _severity(left)
-        right_severity = _severity(right)
+        left_severity = _severity(left, mode_for)
+        right_severity = _severity(right, mode_for)
         if left_severity != right_severity:
             return left if left_severity > right_severity else right
 
@@ -46,7 +61,7 @@ def _preferred(left: Finding, right: Finding) -> Finding:
     return left if left.span[0] <= right.span[0] else right
 
 
-def deduplicate_streams(findings: list[Finding]) -> list[Finding]:
+def deduplicate_streams(findings: list[Finding], mode_for: ModeResolver) -> list[Finding]:
     """Merge equal-code overlaps, preferring raw while retaining the maximum confidence."""
     raw = [finding for finding in findings if finding.stream == "raw"]
     prepared: list[Finding] = []
@@ -70,7 +85,7 @@ def deduplicate_streams(findings: list[Finding]) -> list[Finding]:
             merged.append(finding)
             continue
         current = merged[duplicate_index]
-        selected = _preferred(current, finding)
+        selected = _preferred(current, finding, mode_for)
         merged[duplicate_index] = replace(
             selected,
             confidence=max(current.confidence, finding.confidence),
@@ -81,8 +96,12 @@ def deduplicate_streams(findings: list[Finding]) -> list[Finding]:
     return merged
 
 
-def merge_overlaps(findings: list[Finding]) -> list[Finding]:
-    """Resolve cross-layer/entity overlap by longest span, then L0."""
+def merge_overlaps(findings: list[Finding], mode_for: ModeResolver) -> list[Finding]:
+    """Resolve cross-layer/entity overlap by policy severity, then longest span, then L0.
+
+    `mode_for` 는 필수다. 기본값을 두면 넘기는 것을 잊은 호출부가 조용히 하드코딩
+    기본값으로 돌아가고, 그게 정확히 이 함수가 냈던 fail-open 이다.
+    """
     output: list[Finding] = []
     for finding in sorted(findings, key=lambda item: (item.span[0], -item.span[1], item.code)):
         index = next(
@@ -93,7 +112,7 @@ def merge_overlaps(findings: list[Finding]) -> list[Finding]:
             output.append(finding)
             continue
         current = output[index]
-        selected = _preferred(current, finding)
+        selected = _preferred(current, finding, mode_for)
         # ★ 코드가 다르면 confidence 를 옮기지 않는다.
         #   초판은 무조건 max() 라 폐기된 L-KR-01 의 1.0 이 살아남은 이메일 코드에
         #   옮겨 붙었다 — 감사 로그의 사유와 확신도가 둘 다 거짓이 됐다.

@@ -87,13 +87,40 @@ def _text_of(content: Any) -> str:
 
 
 def _with_text(content: Any, replacement: str) -> Any:
-    """마스킹 결과를 원래 모양으로 되돌려 넣는다 — 파트 배열이면 첫 텍스트 파트에."""
+    """마스킹 결과를 원래 모양으로 되돌려 넣는다.
+
+    ★ **원문 유출이 있었다.** `_text_of` 는 텍스트 파트를 **전부** 합쳐 검사에 넘기는데,
+      이 함수는 첫 파트만 교체하고 나머지를 **원문 그대로 남겼다.** 그래서 두 번째
+      파트에 이메일이 있으면 마스킹본과 원본이 **함께** 상류로 나갔다.
+
+          입력  [{"text": "안녕하세요"}, {"text": "메일은 hong@example.test 입니다"}]
+          출력  [{"text": "안녕하세요\n메일은 <EMAIL_1> 입니다"},
+                 {"text": "메일은 hong@example.test 입니다"}]   ← 원문
+
+      §1 이 "외부로 아무것도 내보내지 않는다" 를 이 프로젝트의 **유일한 이유이자 가장
+      중요한 성질** 이라고 선언했다. 프록시는 그 성질이 사용자 대신 상류를 부를 때도
+      유지되는지를 책임지는 자리다.
+
+    ## 합친 것을 다시 쪼개지 않는다
+
+    검사에 넘긴 것은 `"\n"` 으로 합친 **한 덩어리**이고 마스킹도 그 위에서 일어났다.
+    되돌릴 때 개행으로 다시 쪼개는 방법이 있지만, 스팬이 파트 경계를 넘으면 조각 수가
+    안 맞고 그때 조용히 어긋난다. **첫 텍스트 파트에 전문을 넣고 나머지 텍스트 파트는
+    지운다** — 뜻은 그대로이고 원문이 남을 자리가 없다.
+
+    텍스트가 아닌 파트(이미지 등)는 순서대로 보존한다. 검사 대상이 아니었으므로 손댈
+    이유가 없다.
+    """
     if isinstance(content, str) or not isinstance(content, list):
         return replacement
     updated: list[Any] = []
     injected = False
     for item in content:
-        if not injected and isinstance(item, dict) and item.get("type") == "text":
+        is_text = isinstance(item, dict) and item.get("type") == "text"
+        if is_text:
+            if injected:
+                # 이미 전문을 넣었다. 남겨 두면 그것이 곧 원문 유출이다.
+                continue
             updated.append({**item, "text": replacement})
             injected = True
         else:

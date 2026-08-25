@@ -150,14 +150,31 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         highest = 0
+        seen = 0
+        skipped: list[str] = []
         for path in _iter_files(Path(args.path)):
+            seen += 1
             try:
                 source = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError) as exc:
+                # ★ 조용히 넘기면 안 된다. 읽지 못한 파일은 **검사되지 않은 파일**이고,
+                #   CI 게이트가 `garim scan` 종료 코드를 보고 있으면 그대로 fail-open 이
+                #   된다. 실제로 UTF-8 이 아닌 파일 둘만 있는 디렉터리에서 아무것도
+                #   출력하지 않고 0 을 냈다.
+                skipped.append(f"{path}: {type(exc).__name__}")
                 continue
             result = inspector.check(source, mode=args.mode)
             _print_result(result, as_json=args.as_json, prefix=str(path))
             highest = max(highest, _exit_code(result))
+        for entry in skipped:
+            print(f"garim: skipped (not inspected) {entry}", file=sys.stderr)
+        if seen and seen == len(skipped):
+            # 파일은 있었는데 한 건도 검사하지 못했다 — 통과라고 말할 근거가 없다.
+            print(
+                f"garim: inspected 0 of {seen} files; refusing to report success",
+                file=sys.stderr,
+            )
+            return 4
         return highest
     except (OSError, TypeError, ValueError) as exc:
         print(f"garim: {exc}", file=sys.stderr)

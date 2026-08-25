@@ -309,7 +309,7 @@ class DetectionPipeline:
                         stream=decoded.name,
                     )
                 )
-        l0_findings = deduplicate_streams(all_l0)
+        l0_findings = deduplicate_streams(all_l0, self.policy.mode_for)
         l0_findings = [
             replace(
                 finding,
@@ -365,8 +365,15 @@ class DetectionPipeline:
                     for key_start, key_end in key_spans
                 )
             ]
-        leak_findings = merge_overlaps([finding for finding in accepted if not finding.is_attack])
-        attack_findings = merge_overlaps([finding for finding in accepted if finding.is_attack])
+        # 겹침 해소는 **활성 정책**의 심각도를 따른다. 하드코딩 기본값을 쓰면 사용자가
+        # block 이라고 적은 코드가 조용히 사라진다(fail-open).
+        mode_for = self.policy.mode_for
+        leak_findings = merge_overlaps(
+            [finding for finding in accepted if not finding.is_attack], mode_for
+        )
+        attack_findings = merge_overlaps(
+            [finding for finding in accepted if finding.is_attack], mode_for
+        )
         merged = sorted(leak_findings + attack_findings, key=lambda item: item.span)
         merged = [
             replace(

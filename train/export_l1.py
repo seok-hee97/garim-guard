@@ -18,6 +18,7 @@ def main() -> int:
     import torch
     from transformers import AutoTokenizer
 
+    from garim.detect.l1 import NORMALIZATION_DELTA_ORDER
     from garim.training.export import (
         export_joint_onnx,
         quantize_joint_onnx,
@@ -37,7 +38,8 @@ def main() -> int:
 
     input_ids = torch.zeros((1, args.sequence_length), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
-    delta = torch.zeros((1, 8), dtype=torch.float32)
+    # 폭을 손으로 적으면 모델과 갈린다 — 실제로 갈려서 검증 단계가 ValueError 를 냈다.
+    delta = torch.zeros((1, len(NORMALIZATION_DELTA_ORDER)), dtype=torch.float32)
     fp32_path = export_joint_onnx(
         model,
         output_dir / "garim_l1.fp32.onnx",

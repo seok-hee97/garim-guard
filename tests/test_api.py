@@ -262,7 +262,12 @@ def test_confidence_does_not_transfer_across_codes() -> None:
     weak = Finding(
         code="L-CM-03", span=(0, 25), confidence=0.64, layer="L0", rule="email", stream="nospace"
     )
-    merged = merge_overlaps([strong, weak])
+    # 겹침 해소는 활성 정책의 심각도를 따른다 — 기본값 해석기를 넘긴다.
+    from garim.policy.engine import DEFAULT_CODE_MODES
+
+    merged = merge_overlaps(
+        [strong, weak], lambda code: DEFAULT_CODE_MODES.get(code, "mask")
+    )
     assert len(merged) == 1
     assert merged[0].code == "L-KR-01"
     assert merged[0].confidence == 1.0

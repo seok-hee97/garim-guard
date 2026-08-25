@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from garim.detect.l1 import NORMALIZATION_DELTA_ORDER
+
 if TYPE_CHECKING:
     import torch
 
@@ -143,16 +145,11 @@ def write_l1_metadata(output_dir: str | Path) -> Path:
             {
                 "pii_labels": PII_LABELS,
                 "attack_labels": ["NONE", "INJECTION", "JAILBREAK", "SYSTEM_LEAK"],
-                "normalization_delta_order": [
-                    "nfkc",
-                    "zero_width",
-                    "tag_chars",
-                    "homoglyph",
-                    "jamo_composed",
-                    "hanja",
-                    "space",
-                    "b64_decoded",
-                ],
+                # ★ 손으로 적어 두면 계약이 갈린다. 실제로 갈렸다 — `space` 를
+                #   feature 에서 뺀 뒤에도 여기는 8칸을 적고 있었고, 런타임 어댑터는
+                #   이 파일을 읽어 입력을 만든다(`OnnxL1Backend`). 학습·내보내기·추론이
+                #   서로 다른 폭을 믿는 상태였다.
+                "normalization_delta_order": list(NORMALIZATION_DELTA_ORDER),
             },
             ensure_ascii=False,
             indent=2,

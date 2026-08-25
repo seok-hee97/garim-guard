@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from time import perf_counter
 
 from garim.detect.l1 import L1Backend
-from garim.detect.merge import merge_overlaps
+from garim.detect.merge import ModeResolver, merge_overlaps
 from garim.detect.pipeline import DetectionPipeline, PipelineResult
 from garim.mask.vault import Vault, mask_text
 from garim.models import CheckResult, ContentType, Finding, Origin, Segment
@@ -214,12 +214,17 @@ class Inspector:
                 degraded_reasons.append("l1_pipeline_error")
 
         if internal_segments > self.policy.config.limits.max_segments:
+            # ★ 사유를 안 적으면 감사 로그가 "무언가 나빠졌다" 까지만 말한다. 다른
+            #   강등 경로는 전부 사유를 남기는데(`input_truncated`·`l0_error`·
+            #   `l1_pipeline_error`) 이 자리만 비어 있어 `degraded_reasons=[]` 인 채
+            #   verdict 만 warn 으로 내려갔다 — 왜 내려갔는지 밖에서 알 방법이 없었다.
             degraded = True
             forced_warn = True
+            degraded_reasons.append("segment_cap_exceeded")
 
         # ★ origin 정책 — trust_declared 일 때만 공격 축 강등 (§2.5b)
         origins = {idx: segment.origin for idx, segment in enumerate(inputs)}
-        findings = _merge_across_chunks(findings)
+        findings = _merge_across_chunks(findings, self.policy.mode_for)
         findings = self.policy.apply_origin_policy(findings, origins)
 
         leaks = sorted((finding for finding in findings if not finding.is_attack), key=_finding_key)
@@ -309,14 +314,18 @@ def _select_l1_jobs(jobs: list[_L1Job], limit: int) -> list[_L1Job]:
     return [job for index, job in enumerate(jobs) if index in chosen]
 
 
-def _merge_across_chunks(findings: list[Finding]) -> list[Finding]:
-    """Deduplicate overlaps after all findings share original segment coordinates."""
+def _merge_across_chunks(findings: list[Finding], mode_for: ModeResolver) -> list[Finding]:
+    """Deduplicate overlaps after all findings share original segment coordinates.
+
+    청크 경계를 넘어 합칠 때도 **활성 정책**의 심각도를 따른다. 파이프라인 안쪽만
+    고치고 이 자리를 놓치면, 세그먼트가 쪼개진 입력에서만 fail-open 이 남는다.
+    """
     grouped: dict[tuple[int, bool], list[Finding]] = defaultdict(list)
     for finding in findings:
         grouped[(finding.segment_idx, finding.is_attack)].append(finding)
     merged: list[Finding] = []
     for group in grouped.values():
-        merged.extend(merge_overlaps(group))
+        merged.extend(merge_overlaps(group, mode_for))
     return sorted(merged, key=_finding_key)
 
 
