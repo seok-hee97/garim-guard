@@ -21,6 +21,7 @@
 | L1 공동 학습 | **구현 완료** | SHA-256 입력 봉인, A.X 공유 백본+4개 헤드, 4:1 샘플링, soft/aux loss, 3 seed, 이중 early stopping | optimizer를 사용하는 실제 GPU 학습 |
 | 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
 | L2 | **비활성 · 축별 평가 착수** | 후보 manifest 고정, `thorough`의 degraded 응답, 축 (b) 공개셋 실측 → [L2_EVALUATION.md](L2_EVALUATION.md) | 모델 통합·배선·활성화 |
+| RunPod 실행 | **절차 문서 완료** | `docs/RUNPOD.md` — 저장소만 올리고 코퍼스는 재생성(비트 동일 확인), 해시 대조 게이트 | Qwen 결정 · `pii_per_attack` 결정 |
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
 | §7.3 베이스라인 | **하네스 완료 / 6종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana, detect-secrets·CredSweeper(축 d), **Presidio `ko`/strict/vanilla 3팔(H1)** | Gemini(키가 free tier 라 429) |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — leak_eval · ko_guardrail(축 b) · tab(축 a) · cred_data(축 d) · type_eval(S4) · real_fpr(§7.2.3 경보율) · latency(§7.1.3) · **presidio_baseline(§7.3)** · **mask_quality(§8.1-13b)** | attack_eval, 코퍼스 수집 확대, 13b 의 Gemini 팔 |
