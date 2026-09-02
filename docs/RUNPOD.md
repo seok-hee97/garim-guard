@@ -7,7 +7,7 @@
 |---|---|---|
 | kanana 2.1b 추론 | ✅ | 4.19GB, MPS 로 돈다 |
 | gemma-4-E2B 추론 | ❌ | 10.28GB 를 16GB 에서 돌리면 스왑 — 4행에 10분 초과 |
-| Qwen3Guard-Stream | ❌ | 하드웨어 무관 — 아래 **열린 결정** 참조 |
+| Qwen3Guard-**Gen** 0.6B | ✅ | Stream 을 대체했다 — 아래 참조. 1.4GB |
 | R1/R2 gradient 학습 | ❌ | MPS 가 matmul 에서 죽는다. CUDA 가 필요하다 |
 
 ## ★ 올리는 것은 저장소뿐이다
@@ -57,7 +57,8 @@ export HF_TOKEN=...
 3  python train/merge_corpora.py  (pii train/validation, attack train/validation)
 4  ★ 해시 대조 — 위 네 값과 같은지 확인. 다르면 여기서 멈춘다
 5  python train/make_teacher_input.py      → 라벨 벗긴 1,423행 + gold 사이드카
-6  python train/run_teacher.py --execute   × 교사 3종
+6  python train/run_teacher.py --execute   × 교사 3종 (kanana · gemma4 · qwen3guard_gen)
+6b ★ python -m bench.teacher_agreement   → 동의율 ≥0.95 면 여기서 멈춘다
 7  python train/resolve_teacher_labels.py --drop-review
 8  python train/finalize_training_inputs.py
 9  python train/preflight.py --stage training  → ok: true 여야 한다
@@ -69,35 +70,38 @@ export HF_TOKEN=...
 `train/training.yaml` 까지 덮으므로 하이퍼파라미터를 바꾸면 **재봉인**이다 — 바꾸고
 안 하면 `training input path drift` 로 막힌다.
 
-## 열린 결정 하나 — Qwen3Guard-Stream
+## 교사 교체 — Stream → Gen (해소됨)
 
-`Qwen/Qwen3Guard-Stream-0.6B` 의 원격 코드가 transformers 4.x 를 벤더링한 것이라 우리 pin
-(`>=5.5,<6`)에서 안 돈다. 상류가 안 고쳤다(우리 고정본 = 현재 main, 2025-11-07 이후 변경
-없음). **하드웨어 문제가 아니라 RunPod 에서도 같다.**
+`Qwen/Qwen3Guard-Stream-0.6B` 의 원격 코드가 transformers 4.x 를 벤더링한 것이라 우리
+pin(`>=5.5,<6`)에서 안 돈다. `config.pad_token_id` 를 채워 넘겼더니 8줄 뒤
+`ROPE_INIT_FUNCTIONS['default']` 로 또 막혔고, 그 파일은 transformers 내부 14개 모듈을
+임포트한다. 상류가 안 고쳤다(고정본 = 현재 main). **하드웨어 무관이라 여기서도 같다.**
 
-그런데 **뺄 수가 없다.** `train/teachers.yaml` 을 보면:
+뺄 수는 없었다 — `minimum_votes: 2` 인데 JAILBREAK 투표자가 gemma4 와 이 교사 둘뿐이라,
+빼면 그 클래스가 정족수를 영영 못 채우고 전부 폐기된다.
+
+**`Qwen/Qwen3Guard-Gen-0.6B` 로 교체했다.** 원격 코드가 없어 표준 클래스로 로드되고,
+같은 계열·같은 택소노미라 `votes_for: [JAILBREAK]` 역할이 유지된다. 로컬에서 확인했다.
+
+확률은 kanana 와 같은 **단일 토큰 로짓**으로 얻는다 — Gen 은 판정을 텍스트로 내므로
+접두를 강제로 넣고 다음 토큰 분포를 읽는다. 후보 첫 토큰이 겹치지 않는 것을 구성 시점에
+확인하고, 겹치면 실패한다.
+
+### ⚠️ 반드시 함께 재야 하는 것 — JAILBREAK 동의율
+
+§6.2.2 가 **Gen-0.6B 의 폴란드 FPR 17.17%** 를 명시했다(Bielik Guard 실사용 측정).
+과탐이 심한 교사가 2표 중 1표를 맡으면 **거의 항상 동의해서 사실상 Gemma 단독 판정**이
+된다 — 설계가 세 번째 교사를 넣어 막으려던 바로 그 상태다.
 
 ```
-minimum_votes: 2
-kanana:  votes_for: [NONE, INJECTION, SYSTEM_LEAK]   ← JAILBREAK 없음
-gemma4:  votes_for: [NONE, INJECTION, JAILBREAK, SYSTEM_LEAK]
-qwen:    votes_for: [JAILBREAK]                       ← 전담
+python -m bench.teacher_agreement \
+  --teacher kanana=<...> --teacher gemma4=<...> --teacher qwen3guard_gen=<...> \
+  --primary gemma4 --secondary qwen3guard_gen
 ```
 
-JAILBREAK 에 투표하는 교사가 둘뿐인데 정족수가 2 다. 빼면 JAILBREAK 가 영영 정족수를
-못 채우고 `--drop-review` 에서 전부 폐기된다 — **4개 클래스 중 하나가 소멸한다.**
-
-| | JAILBREAK | 비용 |
-|---|---|---|
-| 4.x 격리 venv | 유지 | 우리 pin 과 충돌 · 상류 미유지보수 |
-| `Qwen3Guard-Gen-0.6B` 교체 | 유지 | 원격 코드 없음 · **다만 §6.2.2 가 이 모델의 폴란드 FPR 17.17% 를 명시**했다 |
-| 제거 | **소멸** | — |
-
-Gen 으로 바꾸면 §6.2.2 가 걸어 둔 방어 장치 셋(`votes_for: [JAILBREAK]` ·
-`minimum_votes: 2` · `can_flip_none: false`)이 그대로 작동해 과탐 피해가 "Gemma 가 이미
-JAILBREAK 이라 한 행에 동의" 로 제한된다. 다만 **과탐이 심하면 거의 항상 동의해서 사실상
-Gemma 단독 판정이 된다** — 설계가 막으려던 상태다. 그래서 교체한다면 **JAILBREAK 동의율을
-함께 재고**, 지나치게 높으면 교체 실패로 보고 venv 로 돌아간다.
+**동의율 ≥ 0.95 면 교체 실패로 본다.** 두 번째 표가 정보를 더하지 않는다는 뜻이고, 그때는
+4.x 격리 venv 로 되돌아간다. 같은 하네스가 **생성기 라벨과 교사 라벨의 일치도**도 낸다 —
+자작 공격 코퍼스를 외부 모델로 검증할 유일한 기회다.
 
 ## 학습 전 확인할 것 하나 — 태스크 불균형
 

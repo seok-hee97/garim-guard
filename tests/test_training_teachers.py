@@ -15,7 +15,7 @@ def test_injection_cannot_receive_a_qwen_generic_unsafe_vote() -> None:
         {
             "kanana": TeacherPrediction("INJECTION", 0.9),
             "gemma4": TeacherPrediction("NONE", 0.8),
-            "qwen3guard_stream": TeacherPrediction("INJECTION", 0.99),
+            "qwen3guard_gen": TeacherPrediction("INJECTION", 0.99),
         },
         policy,
     )
@@ -28,7 +28,7 @@ def test_jailbreak_requires_gemma_and_qwen_agreement() -> None:
     decision = resolve_teacher_label(
         {
             "gemma4": TeacherPrediction("JAILBREAK", 0.8),
-            "qwen3guard_stream": TeacherPrediction("JAILBREAK", 0.9),
+            "qwen3guard_gen": TeacherPrediction("JAILBREAK", 0.9),
         },
         policy,
     )
@@ -41,7 +41,7 @@ def test_low_confidence_vote_is_sent_to_review() -> None:
     decision = resolve_teacher_label(
         {
             "gemma4": TeacherPrediction("JAILBREAK", 0.49),
-            "qwen3guard_stream": TeacherPrediction("JAILBREAK", 0.99),
+            "qwen3guard_gen": TeacherPrediction("JAILBREAK", 0.99),
         },
         policy,
     )

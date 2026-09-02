@@ -230,6 +230,116 @@ class Qwen3GuardStreamBackend(TeacherBackend):
         )
 
 
+class Qwen3GuardGenBackend(TeacherBackend):
+    """`Qwen/Qwen3Guard-Gen-0.6B` — Stream 대체. JAILBREAK 자격만 갖는다.
+
+    ## 왜 Stream 이 아닌가
+
+    Stream 저장소의 원격 코드가 transformers 4.x 를 벤더링한 것이라 우리 pin 에서 안
+    돈다(`config.pad_token_id` · `ROPE_INIT_FUNCTIONS['default']` 로 연달아 막히고, 그
+    파일은 transformers 내부 14개 모듈을 임포트한다). 상류가 안 고쳤고 하드웨어 문제가
+    아니라 어디서 돌려도 같다.
+
+    Qwen 을 빼는 선택지는 없다 — `teachers.yaml` 의 `minimum_votes: 2` 에서 JAILBREAK
+    투표자가 gemma4 와 이 교사 둘뿐이라, 빼면 그 클래스가 정족수를 영영 못 채우고
+    `--drop-review` 에서 전부 폐기된다. **4개 클래스 중 하나가 소멸한다.**
+
+    ⚠️ §6.2.2 가 **이 모델의 폴란드 FPR 17.17%** 를 명시했다(Bielik Guard 실사용 측정).
+       그래서 §6.2.2 가 걸어 둔 방어 장치 셋이 그대로 유지되는지가 중요하다 —
+       `votes_for: [JAILBREAK]` · `minimum_votes: 2` · `can_flip_none: false`. 그 셋이
+       있으면 과탐 피해가 "Gemma 가 이미 JAILBREAK 이라 한 행에 동의" 로 제한된다.
+       다만 과탐이 심하면 거의 항상 동의해서 **사실상 Gemma 단독 판정**이 되므로,
+       `bench/teacher_agreement.py` 로 동의율을 함께 재고 판단한다.
+
+    ## 확률을 어떻게 얻는가
+
+    Gen 은 판정을 텍스트로 낸다.
+
+        Safety: Unsafe
+        Categories: Jailbreak
+
+    생성해서 문자열을 파싱하면 이진 라벨은 얻지만 **확률이 없다.** `soft_targets:
+    [JAILBREAK]` 가 요구하는 것은 확률이므로, kanana 와 같은 **단일 토큰 로짓** 방식을
+    쓴다 — 접두를 강제로 넣고 다음 토큰 분포를 읽는다.
+
+        1. `… Safety:`                     → {Safe, Unsafe, Controversial} 위 softmax
+        2. `… Safety: {티어}\nCategories:`  → 10개 카테고리 위 softmax → P(Jailbreak)
+
+    후보들의 **첫 토큰이 서로 겹치지 않는 것**이 이 방식의 전제다. 구성 시점에 확인하고
+    겹치면 실패한다 — 겹친 채로 두면 확률이 두 카테고리를 합친 값이 되어 조용히 틀린다.
+    """
+
+    _TIERS = (" Safe", " Unsafe", " Controversial")
+    _CATEGORIES = (
+        " Violent",
+        " Non-violent Illegal Acts",
+        " Sexual Content or Sexual Acts",
+        " PII",
+        " Suicide & Self-Harm",
+        " Unethical Acts",
+        " Politically Sensitive Topics",
+        " Copyright Violation",
+        " Jailbreak",
+        " None",
+    )
+
+    def __init__(self, name: str, spec: TeacherSpec, model_dir: str | Path, *, device: str) -> None:
+        super().__init__(name, spec)
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        self.torch = torch
+        self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_dir, local_files_only=True, dtype="auto", device_map=device
+        ).eval()
+        self._tier_ids = self._first_token_ids(self._TIERS)
+        self._category_ids = self._first_token_ids(self._CATEGORIES)
+        self.jailbreak_index = self._CATEGORIES.index(" Jailbreak")
+
+    def _first_token_ids(self, candidates: tuple[str, ...]) -> list[int]:
+        ids = [self.tokenizer.encode(text, add_special_tokens=False)[0] for text in candidates]
+        if len(set(ids)) != len(ids):
+            raise ValueError(
+                f"{self.name}: candidate first tokens collide; the softmax would merge them"
+            )
+        return ids
+
+    def _next_token_probabilities(self, prompt: str, token_ids: list[int]) -> list[float]:
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        with self.torch.inference_mode():
+            logits = self.model(**inputs).logits[0, -1]
+        selected = self.torch.stack([logits[index] for index in token_ids]).float()
+        return self.torch.softmax(selected, dim=-1).cpu().tolist()
+
+    def predict(self, record: CorpusRecord) -> TeacherArtifact:
+        base = self.tokenizer.apply_chat_template(
+            [{"role": "user", "content": record.text}],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        tiers = self._next_token_probabilities(f"{base}Safety:", self._tier_ids)
+        tier = self._TIERS[max(range(len(tiers)), key=tiers.__getitem__)].strip()
+        categories = self._next_token_probabilities(
+            f"{base}Safety: {tier}\nCategories:", self._category_ids
+        )
+        jailbreak = float(categories[self.jailbreak_index])
+        # `Safe` 로 판정한 글은 카테고리를 물을 이유가 없다. 그 조건부 확률을 그대로
+        # 쓰면 "안전하다고 본 글의 카테고리" 를 JAILBREAK 확률로 보고하게 된다.
+        if tier == "Safe":
+            jailbreak = 0.0
+        label = "JAILBREAK" if jailbreak >= 0.5 else "NONE"
+        return TeacherArtifact(
+            id=record.id,
+            teacher=self.name,
+            model_id=self.spec.model_id,
+            revision=self.spec.revision,
+            label=label,
+            confidence=max(jailbreak, 1.0 - jailbreak),
+            class_probabilities={"JAILBREAK": jailbreak},
+        )
+
+
 def load_teacher_backend(
     name: str, spec: TeacherSpec, model_dir: str | Path, *, device: str = "auto"
 ) -> TeacherBackend:
@@ -237,6 +347,7 @@ def load_teacher_backend(
         "kanana": KananaBackend,
         "gemma4": Gemma4Backend,
         "qwen3guard_stream": Qwen3GuardStreamBackend,
+        "qwen3guard_gen": Qwen3GuardGenBackend,
     }
     try:
         backend = backends[name]

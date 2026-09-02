@@ -14,11 +14,10 @@ from garim.training.teachers import load_teacher_policy
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--teacher",
-        required=True,
-        choices=("kanana", "gemma4", "qwen3guard_stream"),
-    )
+    # ★ 교사 목록을 손으로 적지 않는다. `teachers.yaml` 이 유일한 출처이고, 여기에
+    #   또 적으면 교사를 바꿀 때 한쪽만 고치게 된다 — 실제로 Stream → Gen 교체에서
+    #   정책은 바꿨는데 이 목록이 남아 `invalid choice` 로 막혔다.
+    parser.add_argument("--teacher", required=True)
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
@@ -29,6 +28,11 @@ def main() -> int:
     args = parser.parse_args()
 
     policy = load_teacher_policy(args.policy)
+    if args.teacher not in policy.teachers:
+        raise SystemExit(
+            f"unknown teacher {args.teacher!r}; {args.policy} defines "
+            f"{sorted(policy.teachers)}"
+        )
     spec = policy.teachers[args.teacher]
     records = load_jsonl(args.input)
     if args.limit is not None:

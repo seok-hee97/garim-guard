@@ -17,9 +17,16 @@ teachers:
     soft_targets: []
     can_flip_none: true
 
-  qwen3guard_stream:
-    model_id: Qwen/Qwen3Guard-Stream-0.6B
-    revision: 419364a715de9840d47b1457982f64ff37f90ed4
+  # ★ Stream → Gen 교체. Stream 저장소의 원격 코드가 transformers 4.x 벤더링본이라 우리
+  #   pin 에서 안 돌고 상류가 안 고쳤다(고정본 = 현재 main). 하드웨어 무관이라 RunPod
+  #   에서도 같다. Gen 은 원격 코드가 없고 같은 택소노미라 이 자리의 역할이 유지된다.
+  #
+  #   §6.2.2 가 걸어 둔 방어 장치 셋을 **그대로 둔다** — 이 교사는 JAILBREAK 한 칸만
+  #   투표하고, 정족수 2 라 Gemma 동의가 필수이며, Gemma-NONE 을 뒤집지 못한다.
+  #   §6.2.2 가 Gen-0.6B 의 폴란드 FPR 17.17% 를 명시했으므로 그 셋이 특히 중요하다.
+  qwen3guard_gen:
+    model_id: Qwen/Qwen3Guard-Gen-0.6B
+    revision: fada3b2f655b89601929198343c94cd2f64d93cc
     votes_for: [JAILBREAK]
     soft_targets: [JAILBREAK]
     can_flip_none: false

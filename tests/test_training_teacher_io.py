@@ -13,7 +13,7 @@ def _artifact(record_id: str, teacher: str, label: str) -> TeacherArtifact:
     probabilities = None
     if teacher == "kanana":
         probabilities = {"NONE": 0.05, "INJECTION": 0.9, "SYSTEM_LEAK": 0.05}
-    if teacher == "qwen3guard_stream":
+    if teacher == "qwen3guard_gen":
         probabilities = {"JAILBREAK": 0.1}
     return TeacherArtifact(
         id=record_id,
@@ -39,8 +39,8 @@ def test_teacher_artifacts_resolve_and_preserve_restricted_soft_targets() -> Non
     artifacts = {
         "kanana": {record.id: _artifact(record.id, "kanana", "INJECTION")},
         "gemma4": {record.id: _artifact(record.id, "gemma4", "INJECTION")},
-        "qwen3guard_stream": {
-            record.id: _artifact(record.id, "qwen3guard_stream", "NONE")
+        "qwen3guard_gen": {
+            record.id: _artifact(record.id, "qwen3guard_gen", "NONE")
         },
     }
     accepted, review, audit = resolve_teacher_corpus(
@@ -62,21 +62,21 @@ def test_missing_teacher_goes_to_review_instead_of_none() -> None:
         split="train",
     )
     accepted, review, audit = resolve_teacher_corpus(
-        [record], {"kanana": {}, "gemma4": {}, "qwen3guard_stream": {}}, load_teacher_policy()
+        [record], {"kanana": {}, "gemma4": {}, "qwen3guard_gen": {}}, load_teacher_policy()
     )
     assert not accepted
     assert review == [record]
     assert set(audit[0]["missing_teachers"]) == {
         "kanana",
         "gemma4",
-        "qwen3guard_stream",
+        "qwen3guard_gen",
     }
 
 
 def test_soft_target_roles_follow_the_manifest_not_the_teacher_name() -> None:
     """Renaming a teacher in teachers.yaml must not break resolution.
 
-    The resolver used to index `row_artifacts["kanana"]` / `["qwen3guard_stream"]`
+    The resolver used to index `row_artifacts["kanana"]` / `["qwen3guard_gen"]`
     directly, so a policy key rename raised KeyError mid-resolution even though the
     policy is declared configurable.
     """
@@ -84,7 +84,7 @@ def test_soft_target_roles_follow_the_manifest_not_the_teacher_name() -> None:
     renamed = policy.model_copy(
         update={
             "teachers": {
-                {"kanana": "soft_teacher", "qwen3guard_stream": "jb_teacher"}.get(
+                {"kanana": "soft_teacher", "qwen3guard_gen": "jb_teacher"}.get(
                     name, name
                 ): spec
                 for name, spec in policy.teachers.items()
@@ -150,8 +150,8 @@ def test_soft_target_contract_is_enforced_from_the_declared_classes() -> None:
             {
                 "kanana": {record.id: broken},
                 "gemma4": {record.id: _artifact(record.id, "gemma4", "INJECTION")},
-                "qwen3guard_stream": {
-                    record.id: _artifact(record.id, "qwen3guard_stream", "NONE")
+                "qwen3guard_gen": {
+                    record.id: _artifact(record.id, "qwen3guard_gen", "NONE")
                 },
             },
             policy,
@@ -178,11 +178,11 @@ def test_template_bound_rows_do_not_straddle_the_validation_cut() -> None:
             record.id: _artifact(
                 record.id,
                 teacher,
-                "NONE" if teacher == "qwen3guard_stream" else "INJECTION",
+                "NONE" if teacher == "qwen3guard_gen" else "INJECTION",
             )
             for record in records
         }
-        for teacher in ("kanana", "gemma4", "qwen3guard_stream")
+        for teacher in ("kanana", "gemma4", "qwen3guard_gen")
     }
     accepted, review, _ = resolve_teacher_corpus(
         records, artifacts, policy, validation_percent=50
@@ -205,7 +205,7 @@ def test_teacher_resolution_rejects_prediction_ids_outside_pool() -> None:
             {
                 "kanana": {"other": _artifact("other", "kanana", "NONE")},
                 "gemma4": {},
-                "qwen3guard_stream": {},
+                "qwen3guard_gen": {},
             },
             load_teacher_policy(),
         )
