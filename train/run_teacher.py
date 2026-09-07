@@ -24,6 +24,12 @@ def main() -> int:
     parser.add_argument("--policy", default="train/teachers.yaml")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="bounded inference batch (backends without batching preserve single-row semantics)",
+    )
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
 
@@ -39,6 +45,8 @@ def main() -> int:
         if args.limit < 1:
             raise ValueError("--limit must be positive")
         records = records[: args.limit]
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be positive")
     if any(record.task != "attack" or record.attack_label is not None for record in records):
         raise ValueError("teacher input must contain only unlabeled attack records")
     if not args.execute:
@@ -51,17 +59,31 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     completed = load_teacher_artifacts(output) if output.is_file() else {}
+    record_ids = {record.id for record in records}
+    extra = set(completed) - record_ids
+    if extra:
+        raise ValueError(f"existing output has {len(extra)} IDs outside the selected input")
+    for artifact in completed.values():
+        if artifact.teacher != args.teacher:
+            raise ValueError(f"{artifact.id}: existing output teacher name mismatch")
+        if artifact.model_id != spec.model_id or artifact.revision != spec.revision:
+            raise ValueError(f"{artifact.id}: existing output model/revision drift")
     backend = load_teacher_backend(args.teacher, spec, args.model_dir, device=args.device)
     mode = "a" if output.is_file() else "w"
+    pending = [record for record in records if record.id not in completed]
+    written = len(completed)
     with output.open(mode, encoding="utf-8") as stream:
-        for index, record in enumerate(records, start=1):
-            if record.id in completed:
-                continue
-            artifact = backend.predict(record)
-            stream.write(artifact.model_dump_json(exclude_none=True) + "\n")
+        for offset in range(0, len(pending), args.batch_size):
+            batch = pending[offset : offset + args.batch_size]
+            artifacts = backend.predict_many(batch)
+            if [artifact.id for artifact in artifacts] != [record.id for record in batch]:
+                raise ValueError("teacher backend returned incomplete or reordered batch IDs")
+            for artifact in artifacts:
+                stream.write(artifact.model_dump_json(exclude_none=True) + "\n")
             stream.flush()
-            if index % 100 == 0:
-                print(f"{args.teacher}: {index}/{len(records)}")
+            written += len(artifacts)
+            if written % 100 < len(artifacts) or written == len(records):
+                print(f"{args.teacher}: {written}/{len(records)}")
     print(f"{args.teacher}: predictions complete -> {output}")
     return 0
 

@@ -85,9 +85,19 @@ INVALID_COMPARISON_LABELS = {
 
 
 def _load(names: Sequence[str]) -> list[Any]:
+    import tldextract
+    import tldextract.tldextract as tldextract_module
     from presidio_analyzer import predefined_recognizers
     from presidio_analyzer.predefined_recognizers import PhoneRecognizer
 
+    # Presidio's EmailRecognizer uses the module-level extractor, whose default tries a
+    # writable user cache and may refresh the suffix list over the network.  A pinned
+    # benchmark must do neither: use tldextract's packaged snapshot deterministically.
+    extractor = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
+    # ``extract`` closes over the implementation module's global, while callers may
+    # also inspect the package-level export. Keep both references deterministic.
+    tldextract.TLD_EXTRACTOR = extractor
+    tldextract_module.TLD_EXTRACTOR = extractor
     loaded = [getattr(predefined_recognizers, name)() for name in names]
     # 전화번호는 지역을 줘야 한다. 기본값(US)으로 한국 번호를 재면 Presidio 가 아니라
     # 잘못 설정된 Presidio 를 재게 된다.

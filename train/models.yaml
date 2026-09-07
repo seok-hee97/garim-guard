@@ -38,6 +38,8 @@ models:
     license: Apache-2.0
     gated: false
     parameters: 597111296
+    enabled: false
+    note: transformers 5.x 비호환으로 폐기. 재현 기록만 남기며 기본 자산 계획에서 제외한다.
 
   # ★ Stream 대체. 원래 §6.2.2 는 `Qwen3Guard-Stream-0.6B` 를 지목했는데 그 저장소의
   #   원격 코드가 transformers 4.x 를 벤더링한 것이라 우리 pin(>=5.5,<6)에서 안 돈다.

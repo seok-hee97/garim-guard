@@ -46,6 +46,15 @@ class Inspector:
         self.policy = PolicyEngine(config)
         self.pipeline = DetectionPipeline(self.policy, l1_backend)
         self.vault = vault or Vault(scope="session")
+        backend_max_length = getattr(l1_backend, "max_length", None)
+        if (
+            isinstance(backend_max_length, int)
+            and config.limits.chunk_size > backend_max_length
+        ):
+            raise ValueError(
+                "policy chunk_size cannot exceed the L1 backend max_length "
+                f"({config.limits.chunk_size} > {backend_max_length})"
+            )
 
     def check(
         self,

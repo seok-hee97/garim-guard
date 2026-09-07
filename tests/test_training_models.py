@@ -12,6 +12,7 @@ def test_selected_models_are_pinned_and_open() -> None:
     assert backbone.license == "Apache-2.0"
     assert not backbone.gated
     assert len(backbone.revision) == 40
+    assert not registry.model("teacher_qwen3guard_stream").enabled
     assert not registry.model("l2_qwen3guard_gen_4b").enabled
 
 
@@ -66,3 +67,4 @@ def test_baselines_stay_out_of_the_default_download_plan() -> None:
     }
     assert "baseline_polyguard_qwen_smol" not in default
     assert "baseline_polyguard_qwen_smol" in widened
+    assert "teacher_qwen3guard_stream" not in default

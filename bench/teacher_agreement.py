@@ -38,28 +38,33 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from garim.training.teacher_io import TeacherArtifact
+from garim.training.teacher_io import TeacherArtifact, load_teacher_artifacts
+from garim.training.teachers import load_teacher_policy
 
 # 이 위를 넘으면 두 번째 표가 첫 번째 표를 그대로 따라 하는 셈이라 검증이 아니다.
 RUBBER_STAMP_THRESHOLD = 0.95
 
 
 def load_artifacts(path: str | Path) -> dict[str, TeacherArtifact]:
-    rows = [
-        TeacherArtifact.model_validate_json(line)
-        for line in Path(path).read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    return {row.id: row for row in rows}
+    """Compatibility wrapper using the strict loader (including duplicate-ID checks)."""
+
+    return load_teacher_artifacts(path)
 
 
 def generator_agreement(
-    artifacts: dict[str, TeacherArtifact], gold: dict[str, str]
+    artifacts: dict[str, TeacherArtifact],
+    gold: dict[str, str],
+    *,
+    eligible_labels: set[str],
 ) -> dict[str, Any]:
     """교사 라벨 vs 생성기 라벨. 교사가 투표하지 않는 클래스는 셈에서 뺀다."""
-    shared = sorted(set(artifacts) & set(gold))
+    shared = sorted(
+        key for key in set(artifacts) & set(gold) if gold[key] in eligible_labels
+    )
     if not shared:
-        raise ValueError("no overlapping ids between artifacts and the generator sidecar")
+        raise ValueError(
+            "no eligible overlapping ids between artifacts and the generator sidecar"
+        )
     matches = sum(artifacts[key].label == gold[key] for key in shared)
     confusion: Counter[tuple[str, str]] = Counter(
         (gold[key], artifacts[key].label) for key in shared
@@ -102,6 +107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--teacher", action="append", required=True, help="name=path.jsonl")
     parser.add_argument("--primary", default="gemma4")
     parser.add_argument("--secondary", default="qwen3guard_gen")
+    parser.add_argument("--policy", default="train/teachers.yaml")
     parser.add_argument("--output", default="artifacts/teacher_agreement.json")
     args = parser.parse_args(argv)
 
@@ -110,12 +116,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         name, _, path = entry.partition("=")
         if not path:
             raise SystemExit(f"--teacher expects name=path, got {entry!r}")
+        if name in loaded:
+            raise SystemExit(f"duplicate --teacher name: {name}")
         loaded[name] = load_artifacts(path)
 
     gold = json.loads(Path(args.gold).read_text(encoding="utf-8"))
+    if not isinstance(gold, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in gold.items()
+    ):
+        raise SystemExit("--gold must contain a JSON object mapping string IDs to labels")
+    policy = load_teacher_policy(args.policy)
+    unknown = set(loaded) - set(policy.teachers)
+    if unknown:
+        raise SystemExit(f"teachers not defined by {args.policy}: {sorted(unknown)}")
+    gold_ids = set(gold)
+    for name, rows in loaded.items():
+        if set(rows) != gold_ids:
+            missing = len(gold_ids - set(rows))
+            extra = len(set(rows) - gold_ids)
+            raise SystemExit(
+                f"{name}: artifact coverage differs from gold (missing={missing}, extra={extra})"
+            )
+        spec = policy.teachers[name]
+        drifted = [
+            artifact.id
+            for artifact in rows.values()
+            if artifact.teacher != name
+            or artifact.model_id != spec.model_id
+            or artifact.revision != spec.revision
+        ]
+        if drifted:
+            raise SystemExit(
+                f"{name}: {len(drifted)} artifacts have teacher/model/revision drift"
+            )
     payload: dict[str, Any] = {
         "generator_agreement": {
-            name: generator_agreement(rows, gold) for name, rows in sorted(loaded.items())
+            name: generator_agreement(
+                rows, gold, eligible_labels=set(policy.teachers[name].votes_for)
+            )
+            for name, rows in sorted(loaded.items())
         }
     }
     if args.primary in loaded and args.secondary in loaded:
@@ -142,6 +181,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     print(f"-> {args.output}")
+    if independence and (
+        independence["agreement_on_jailbreak"] is None
+        or independence["is_rubber_stamp"]
+    ):
+        return 2
     return 0
 
 

@@ -31,10 +31,11 @@ L1 ONNX 가중치와 L2 로컬 LLM은 아직 저장소에 포함하지 않습니
 기본 동작은 로컬 전용이며 `JointL1Model.from_pretrained()`도 명시적으로 변경하지 않는
 한 원격 다운로드를 허용하지 않습니다.
 
-2026-08-07 기준으로 학습 준비 코드와 `implementation` preflight는 완료되었습니다.
-전체 모델·데이터 다운로드, deepset 번역, 교사 추론·사람 검수, 실제 GPU 학습,
-ONNX 성능 측정은 아직 실행하지 않았습니다. 따라서 `assets`와 `training` preflight가
-현재 실패하는 것은 정상입니다.
+2026-09-07 기준으로 학습 준비 코드, 고정 모델·데이터 자산과 `implementation`/`assets`
+preflight는 완료되었습니다. split 코퍼스도 로컬에 생성했습니다. deepset 번역, 교사 3종
+전체 합의, 최종 평가 gold, 실제 CUDA 학습과 ONNX 성능 측정은 아직 완료되지 않았으므로
+`training` preflight는 해당 입력을 모두 전달하고 두 입력 manifest를 봉인하기 전까지
+실패하는 것이 정상입니다.
 
 ## L1 학습 준비
 
@@ -51,6 +52,9 @@ python train/download_assets.py
 
 # 검토된 revision의 모델과 데이터만 다운로드
 python train/download_assets.py --execute
+
+# 이미 snapshot_download로 받은 고정 자산은 네트워크 없이 원격 tree/LFS 해시를 검증
+python train/download_assets.py --record-existing
 
 # 공개 값 사전 + 공개 코퍼스 + 로컬 합성 코퍼스 준비
 # 체크섬 통과 난수는 실제 식별자와 우연히 일치할 수 있으므로 data/ 아래에만 둔다.
@@ -92,16 +96,21 @@ python train/run_teacher.py --teacher gemma4 \
   --model-dir models/pinned/teacher_gemma4 \
   --input data/corpus/attack-teacher-pool-train.jsonl \
   --output data/corpus/teacher-gemma4.jsonl --execute
-python train/run_teacher.py --teacher qwen3guard_stream \
-  --model-dir models/pinned/teacher_qwen3guard_stream \
+python train/run_teacher.py --teacher qwen3guard_gen \
+  --model-dir models/pinned/teacher_qwen3guard_gen \
   --input data/corpus/attack-teacher-pool-train.jsonl \
   --output data/corpus/teacher-qwen.jsonl --execute
 
+python -m bench.teacher_agreement \
+  --teacher kanana=data/corpus/teacher-kanana.jsonl \
+  --teacher gemma4=data/corpus/teacher-gemma4.jsonl \
+  --teacher qwen3guard_gen=data/corpus/teacher-qwen.jsonl
+
 python train/resolve_teacher_labels.py \
   --input data/corpus/attack-teacher-pool-train.jsonl \
-  --kanana data/corpus/teacher-kanana.jsonl \
-  --gemma4 data/corpus/teacher-gemma4.jsonl \
-  --qwen3guard-stream data/corpus/teacher-qwen.jsonl \
+  --teacher kanana=data/corpus/teacher-kanana.jsonl \
+  --teacher gemma4=data/corpus/teacher-gemma4.jsonl \
+  --teacher qwen3guard_gen=data/corpus/teacher-qwen.jsonl \
   --output-dir data/corpus/resolved
 ```
 
@@ -183,10 +192,27 @@ python train/apply_eval_labels.py \
   --input data/corpus/deepset-ko-test.jsonl \
   --labels data/local/final-attack-eval-labels.jsonl \
   --output data/corpus/attack-manual-gold-test.jsonl
+
+# 사람 검수를 생략하는 운영은 택소노미가 1:1인 deepset 이진 gold만 자동 적용한다.
+# PolyGuard harm 라벨은 프로젝트 4-way 라벨로 추측 변환하지 않는다.
+python train/apply_external_eval_labels.py \
+  --input data/corpus/deepset-ko-test.jsonl \
+  --output data/corpus/attack-external-gold-test.jsonl
+
+# optimizer를 만들기 전에 최종 test와 라벨링 근거를 해시로 봉인한다.
+python train/finalize_evaluation_inputs.py \
+  --input data/corpus/pii-synthetic-test.jsonl \
+  --input data/corpus/attack-synthetic-test.jsonl \
+  --input data/corpus/attack-manual-gold-test.jsonl \
+  --input data/corpus/kdpii-test.jsonl \
+  --input data/corpus/klue_eval-test.jsonl \
+  --input data/corpus/bc_pii_augmented_negative-test.jsonl
 ```
 
 `evaluate_l1.py`는 `split=test`뿐 아니라 번역·교사·수동 라벨 미해결 flag와 공격
-gold label 누락도 거부합니다.
+gold label 누락도 거부하고, `evaluation-input-manifest.json`의 파일 SHA-256과 봉인된
+학습 입력과의 정규화 지문 교집합을 다시 검사합니다. 이 평가 봉인은 실제 학습보다 먼저
+완료해야 하며 `train_l1.py`와 `preflight.py --stage training`도 이를 요구합니다.
 학습 후에는 `train/export_l1.py`로 FP32와 QInt8을 내보낸 다음, 봉인된 test 파일만
 `train/evaluate_l1.py`에 전달하고 `train/benchmark_l1.py`로 128/256/512토큰의
 p50/p95·파일 크기·RSS를 측정합니다. 결과 템플릿은

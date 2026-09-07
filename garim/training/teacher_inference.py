@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
 
 from garim.training.data import CorpusRecord
@@ -36,6 +37,10 @@ class TeacherBackend(ABC):
     @abstractmethod
     def predict(self, record: CorpusRecord) -> TeacherArtifact:
         raise NotImplementedError
+
+    def predict_many(self, records: Sequence[CorpusRecord]) -> list[TeacherArtifact]:
+        """Predict a bounded batch; backends may override without changing artifacts."""
+        return [self.predict(record) for record in records]
 
 
 class KananaBackend(TeacherBackend):
@@ -293,6 +298,10 @@ class Qwen3GuardGenBackend(TeacherBackend):
         self.model = AutoModelForCausalLM.from_pretrained(
             model_dir, local_files_only=True, dtype="auto", device_map=device
         ).eval()
+        if self.tokenizer.pad_token_id is None:
+            if self.tokenizer.eos_token_id is None:
+                raise ValueError(f"{name}: tokenizer has neither pad nor EOS token")
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         self._tier_ids = self._first_token_ids(self._TIERS)
         self._category_ids = self._first_token_ids(self._CATEGORIES)
         self.jailbreak_index = self._CATEGORIES.index(" Jailbreak")
@@ -306,38 +315,80 @@ class Qwen3GuardGenBackend(TeacherBackend):
         return ids
 
     def _next_token_probabilities(self, prompt: str, token_ids: list[int]) -> list[float]:
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        return self._next_token_probabilities_many([prompt], token_ids)[0]
+
+    def _next_token_probabilities_many(
+        self, prompts: Sequence[str], token_ids: list[int]
+    ) -> list[list[float]]:
+        inputs = self.tokenizer(
+            list(prompts), return_tensors="pt", padding=True
+        ).to(self.model.device)
         with self.torch.inference_mode():
-            logits = self.model(**inputs).logits[0, -1]
-        selected = self.torch.stack([logits[index] for index in token_ids]).float()
+            logits = self.model(**inputs).logits
+        attention_mask = inputs["attention_mask"]
+        positions = (
+            self.torch.arange(attention_mask.shape[1], device=attention_mask.device)
+            .unsqueeze(0)
+            .expand_as(attention_mask)
+            .masked_fill(attention_mask == 0, -1)
+            .max(dim=1)
+            .values
+        )
+        rows = self.torch.arange(logits.shape[0], device=logits.device)
+        next_token_logits = logits[rows, positions]
+        selected = next_token_logits[:, token_ids].float()
         return self.torch.softmax(selected, dim=-1).cpu().tolist()
 
     def predict(self, record: CorpusRecord) -> TeacherArtifact:
-        base = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": record.text}],
-            tokenize=False,
-            add_generation_prompt=True,
+        return self.predict_many([record])[0]
+
+    def predict_many(self, records: Sequence[CorpusRecord]) -> list[TeacherArtifact]:
+        if not records:
+            return []
+        bases = [
+            self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": record.text}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for record in records
+        ]
+        tier_probabilities = self._next_token_probabilities_many(
+            [f"{base}Safety:" for base in bases], self._tier_ids
         )
-        tiers = self._next_token_probabilities(f"{base}Safety:", self._tier_ids)
-        tier = self._TIERS[max(range(len(tiers)), key=tiers.__getitem__)].strip()
-        categories = self._next_token_probabilities(
-            f"{base}Safety: {tier}\nCategories:", self._category_ids
+        tiers = [
+            self._TIERS[max(range(len(probabilities)), key=probabilities.__getitem__)].strip()
+            for probabilities in tier_probabilities
+        ]
+        category_probabilities = self._next_token_probabilities_many(
+            [
+                f"{base}Safety: {tier}\nCategories:"
+                for base, tier in zip(bases, tiers, strict=True)
+            ],
+            self._category_ids,
         )
-        jailbreak = float(categories[self.jailbreak_index])
-        # `Safe` 로 판정한 글은 카테고리를 물을 이유가 없다. 그 조건부 확률을 그대로
-        # 쓰면 "안전하다고 본 글의 카테고리" 를 JAILBREAK 확률로 보고하게 된다.
-        if tier == "Safe":
-            jailbreak = 0.0
-        label = "JAILBREAK" if jailbreak >= 0.5 else "NONE"
-        return TeacherArtifact(
-            id=record.id,
-            teacher=self.name,
-            model_id=self.spec.model_id,
-            revision=self.spec.revision,
-            label=label,
-            confidence=max(jailbreak, 1.0 - jailbreak),
-            class_probabilities={"JAILBREAK": jailbreak},
-        )
+        artifacts: list[TeacherArtifact] = []
+        for record, tier, probabilities in zip(
+            records, tiers, category_probabilities, strict=True
+        ):
+            jailbreak = float(probabilities[self.jailbreak_index])
+            # `Safe` 로 판정한 글은 카테고리를 물을 이유가 없다. 그 조건부 확률을 그대로
+            # 쓰면 "안전하다고 본 글의 카테고리" 를 JAILBREAK 확률로 보고하게 된다.
+            if tier == "Safe":
+                jailbreak = 0.0
+            label = "JAILBREAK" if jailbreak >= 0.5 else "NONE"
+            artifacts.append(
+                TeacherArtifact(
+                    id=record.id,
+                    teacher=self.name,
+                    model_id=self.spec.model_id,
+                    revision=self.spec.revision,
+                    label=label,
+                    confidence=max(jailbreak, 1.0 - jailbreak),
+                    class_probabilities={"JAILBREAK": jailbreak},
+                )
+            )
+        return artifacts
 
 
 def load_teacher_backend(
@@ -346,7 +397,6 @@ def load_teacher_backend(
     backends = {
         "kanana": KananaBackend,
         "gemma4": Gemma4Backend,
-        "qwen3guard_stream": Qwen3GuardStreamBackend,
         "qwen3guard_gen": Qwen3GuardGenBackend,
     }
     try:

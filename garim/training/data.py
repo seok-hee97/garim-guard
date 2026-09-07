@@ -114,7 +114,8 @@ def write_jsonl(path: str | Path, records: Iterable[CorpusRecord]) -> int:
 def validate_corpus(records: Sequence[CorpusRecord]) -> dict[str, Any]:
     """Check IDs, group/template isolation, pair integrity, and exact text duplicates."""
     ids: set[str] = set()
-    fingerprints: dict[str, str] = {}
+    fingerprint_splits: dict[str, set[str]] = {}
+    target_fingerprints: dict[str, str] = {}
     owners: dict[tuple[str, str], str] = {}
     pair_owners: dict[str, set[str]] = {}
     label_counts: Counter[str] = Counter()
@@ -144,11 +145,17 @@ def validate_corpus(records: Sequence[CorpusRecord]) -> dict[str, Any]:
         #   막고, 공격 행은 조건 없이 막는다.
         carries_a_target = bool(record.spans) or record.task != "pii"
         fingerprint = fingerprint_text(record.text)
-        previous_split = fingerprints.setdefault(fingerprint, record.split)
-        if carries_a_target and previous_split != record.split:
+        previous_splits = fingerprint_splits.setdefault(fingerprint, set())
+        previous_target = target_fingerprints.get(fingerprint)
+        other_splits = previous_splits - {record.split}
+        if other_splits and (carries_a_target or previous_target is not None):
+            previous_split = sorted(other_splits)[0]
             raise ValueError(
                 f"normalized text fingerprint crosses {previous_split}/{record.split}: {record.id}"
             )
+        previous_splits.add(record.split)
+        if carries_a_target:
+            target_fingerprints.setdefault(fingerprint, record.id)
 
         for kind, value in (("group", record.group_id), ("template", record.template_id)):
             if value is None:

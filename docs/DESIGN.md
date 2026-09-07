@@ -68,7 +68,7 @@
 
 > **부록 A를 먼저 보는 것도 방법이다.** 설계 주장 8개를 스크립트로 검증했고 그중 둘은 주장을 철회·수정하게 만들었다. 스크립트는 전부 `docs/`에 있고 실행하면 수치가 재현된다.
 
-### 0.3 2026-08-07 구현 스냅샷
+### 0.3 구현 스냅샷 (2026-09-07 갱신)
 
 현재 저장소는 **P0/L0 런타임과 L1 학습 준비 코드까지 구현 완료**된 상태다.
 설계의 모든 실험이 끝났다는 뜻은 아니다. 코드 완료와 외부 자산·연산 완료를 다음처럼
@@ -78,15 +78,15 @@
 |---|---|---|
 | P0/L0 런타임 | **구현 완료** | 세그먼트·타입 판정, 가역 정규화, 규칙 탐지, 병합, 정책, 볼트, API/CLI |
 | L1 런타임 | **구현 완료** | tokenizer 기반 512/64 청킹, bounded budget, ONNX 백엔드, timeout·circuit breaker |
-| L1 데이터 준비 | **구현 완료** | 고정 manifest, checksum 자산 게이트, 공통 코퍼스 계약, 원천 어댑터, 합성 생성기, 번역·수동 gold·누수 검사, 최종 입력 SHA-256 봉인 |
-| L1 라벨링·학습 | **코드 완료 / 실행 전** | 교사 3종 추론·합의·사람 검토, A.X 공동 4-head 학습, 3 seed·이중 early stopping |
+| L1 데이터 준비 | **코드·고정 자산 완료** | exact 파일 manifest와 `assets` preflight, 공통 코퍼스 계약, 원천 어댑터, 합성 생성기, 번역·수동/외부 gold·누수 검사, 학습/최종평가 SHA-256 이중 봉인 |
+| L1 라벨링·학습 | **코드 완료 / 실행 중** | 교사 3종 추론·합의·사람 검토 또는 fail-closed 폐기, A.X 공동 4-head 학습, 3 seed·이중 early stopping |
 | 내보내기·평가 | **코드 완료 / 실행 전** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, 128/256/512 latency·RSS |
 | L2 | **비활성** | 후보만 고정했으며 `thorough`는 명시적으로 degraded 반환 |
 
-`python train/preflight.py --stage implementation`은 통과했다. 전체 자산 다운로드,
-deepset 번역, 교사 추론, 사람 검수, GPU 학습과 성능 실험은 실행하지 않았으므로 현재
-`assets`·`training` preflight가 실패하는 것이 정상이다. 실제 가중치와 측정값이 없는
-행에는 예상 성능을 기록하지 않는다.
+`python train/preflight.py --stage implementation`과 `--stage assets`는 통과했다. deepset
+번역, 교사 3종 전체 합의, 독립 최종평가 gold, GPU 학습과 성능 실험은 끝나지 않았으므로
+현재 `training` preflight는 실패하는 것이 정상이다. 실제 가중치와 측정값이 없는 행에는
+예상 성능을 기록하지 않는다.
 
 완료된 모듈별 근거, 2026-08-07 검증 기록과 학습 직전 남은 실행 순서는
 [구현 현황 문서](IMPLEMENTATION_STATUS.md)를 기준으로 한다. 이 절과 그 문서가 충돌하면
@@ -787,7 +787,7 @@ def to_source_span(norm_span, imap, src_len):
 
 #### 3.2.5 정규화 델타 스키마
 
-§2.3의 정규화 7단계에 대응한다. **8차원인 이유**: ② 단계가 제로위드 제거와 태그 문자 제거 둘을 하는데, **둘 다 고정밀이지만 별도로 세는 편이 진단에 유리**하다. 나머지 6단계는 1:1이다. **고정밀/저정밀 구분이 신호 여부를 가른다**(부록 A.2).
+§2.3의 정규화 7단계에 대응한다. **진단 스키마가 8차원인 이유**: ② 단계가 제로위드 제거와 태그 문자 제거 둘을 하는데, **둘 다 고정밀이지만 별도로 세는 편이 진단에 유리**하다. 나머지 6단계는 1:1이다. L1 feature는 이 중 비단조이고 텍스트에 이미 보이는 `space`를 제외한 **7차원**이다. **고정밀/저정밀 구분이 신호 여부를 가른다**(부록 A.2).
 
 ```python
 {
@@ -802,7 +802,7 @@ def to_source_span(norm_span, imap, src_len):
 }
 ```
 
-**고정밀 4종 중 하나라도 > 0이면 은닉 시도 신호**다. 저정밀은 신호가 아니라 재검사 수단이다. 이 8차원이 R2의 보조 feature가 된다(§6.2).
+**고정밀 4종 중 하나라도 > 0이면 은닉 시도 신호**다. 저정밀은 신호가 아니라 재검사 수단이다. 진단 스키마 8칸 중 `space`를 뺀 7칸이 R2의 보조 feature가 된다(§6.2).
 
 ##### ★ 정정 둘 — feature 는 8칸이 아니라 7칸이고, 코퍼스에 값이 없었다
 
@@ -943,7 +943,7 @@ garim/
 │   ├── l1.py              # ★ ONNX 세션 **하나**. 인코더 forward 1회 → 헤드 4개 (§6.0)
 │   │                      #   PII 29라벨 · ATK 4-way · 보조 A(로마자) · 보조 B(존댓말)
 │   ├── ner_post.py        # PII 헤드 후처리 — BIO 디코딩 · 스팬 정규화(양끝 공백 strip)
-│   ├── attack_post.py     # ATK 헤드 후처리 — 임계값 · 델타 8차원 결합
+│   ├── attack_post.py     # ATK 헤드 후처리 — 임계값 · 델타 feature 7차원 결합
 │   ├── merge.py           # ★ L0/L1 병합 + confidence 산출 (§3.2.3)
 │   ├── llm_fast.py        # L2-fast (선택, kanana 2.1b GGUF, 상시 상주)
 │   ├── llm_judge.py       # L2-judge (선택, GGUF, 온디맨드 + 축별 프롬프트)
@@ -968,11 +968,14 @@ bench/                     # ★ 평가 하네스. 배포 wheel 에 넣지 않�
 ├── tab.py                 # 축 (a) — TAB DIRECT/QUASI/NO_MASK + 주석자 일치도
 ├── cred_data.py           # 축 (d) — CredData 플레이스홀더 판별
 ├── latency.py             # §7.1.3 — 입력 길이 × 세그먼트 수 곡선 (환경 선언 강제)
-├── attack_eval.py         # (미구현) H2 자체 T4 코퍼스 — 축 (b) 는 공개셋으로 먼저 덮었다
-├── type_eval.py           # (미구현) S4 — 타입별 분리 FPR + 조건화 ON/OFF 대조 (§7.2.2)
-├── l1_latency.py          # (미구현) A.X INT8 지연 게이트 — ONNX 가중치 확보 후
-└── baselines/             # (미구현) 나머지 5종 — Presidio(ko)·vanilla·detect-secrets
-                           #   ·CredSweeper·Gemini. 정규화OFF·PolyGuard·kanana 는 실측 완료
+├── attack_eval.py         # H2 자체 T4/은닉 축 평가
+├── type_eval.py           # S4 — 타입별 분리 FPR + 조건화 ON/OFF 대조 (§7.2.2)
+├── real_fpr.py            # §7.2.3 실 한국어 경보율/FPR 입력 계약
+├── presidio_baseline.py   # Presidio(ko/strict/vanilla) 세 팔
+├── secret_baselines.py    # detect-secrets·CredSweeper 대조
+└── teacher_agreement.py   # 교사/생성기 일치도와 Qwen rubber-stamp 게이트
+
+# A.X INT8 지연은 train/benchmark_l1.py가 담당하며 실제 ONNX 가중치 확보 후 실행한다.
 
 train/
 ├── sources.yaml           # 소스·revision·라이선스·KDPII SHA-256 고정
@@ -1859,18 +1862,18 @@ query_category_map   = {Violent, Sexual Content, Self-Harm, Political,
 |---|---|---|---|---|
 | 1 | `kakaocorp/kanana-safeguard-prompt-2.1b` | **Apache-2.0** | 네이티브 한국어 학습, P 0.968, 단일 토큰 로짓 | 하드 라벨 {NONE, INJECTION, SYSTEM_LEAK} + **3클래스 제한 KL**의 소프트 원천 |
 | 2 | `google/gemma-4-E2B-it` | **Apache-2.0** | 4-way 정책 하드 라벨 | 전 클래스 CE 후보 |
-| 3 | **`Qwen/Qwen3Guard-Stream-0.6B`** | **Apache-2.0** | 명시적 `Jailbreak` 카테고리 + 로짓 | JAILBREAK에서만 Gemma와 합의, jailbreak BCE 보조 타깃. 범용 Safe/Unsafe는 투표 아님 |
+| 3 | **`Qwen/Qwen3Guard-Gen-0.6B`** | **Apache-2.0** | 명시적 `Jailbreak` 카테고리 + 다음 토큰 로짓 | JAILBREAK에서만 Gemma와 합의, jailbreak BCE 보조 타깃. 범용 Safe/Unsafe는 투표 아님 |
 
 ⚠️ **9-way 유해성 분포를 4-way에 KL로 사영할 수 없다** — 라벨 공간의 대응이 없다. 그래서 3번은 **클래스별 보조 타깃으로만** 쓴다.
 
-⚠️ 폴란드 FPR 17.17%는 `Qwen3Guard-Gen-0.6B` 측정값이며 Stream의 성능값이 아니다. 이 수치를 Stream에 전이하지 않는다. Qwen Stream은 오직 JAILBREAK 자격만 갖고 Gemma-NONE을 공격으로 뒤집지 않는다.
+⚠️ Stream 원격 코드는 고정된 transformers 5.x 환경에서 동작하지 않아 Gen으로 교체했다. 폴란드 FPR 17.17%가 Gen 측정값이므로 이 교사는 오직 JAILBREAK 자격만 갖고 Gemma-NONE을 공격으로 뒤집지 않는다. Gemma의 JAILBREAK 행에서 Gen의 동의율이 0.95 이상이면 독립 검증 효과가 없다고 보고 학습을 중단한다.
 
 | 학생 클래스 | 유효 교사 합의 |
 |---|---|
 | NONE | Kanana + Gemma |
 | INJECTION | Kanana + Gemma |
 | SYSTEM_LEAK | Kanana + Gemma |
-| JAILBREAK | Gemma + Qwen Stream |
+| JAILBREAK | Gemma + Qwen Gen |
 
 **교사 셋이 전부 Apache-2.0이다** — 브리프의 *"check the license for use"* 와 공개 산출물 방침(§0)에 정확히 맞는다.
 
@@ -1883,7 +1886,7 @@ query_category_map   = {Violent, Sexual Content, Self-Harm, Political,
    ① kanana-safeguard-prompt-2.1b  → SAFE / A1 / A2   (단일 토큰 + 로짓)
    ② Gemma 4 E2B (`google/gemma-4-E2B-it`, **Apache-2.0 · gated 아님**)  → 정책 프롬프트로 4-way 판정 (생성형)
       ★ 정책 프롬프트는 §6.2.3에 전문을 둔다 — 라벨 품질이 여기 달렸다
-   ③ Qwen3Guard-Stream-0.6B → Jailbreak posterior만 사용
+   ③ Qwen3Guard-Gen-0.6B → 강제 접두 다음 토큰 로짓에서 Jailbreak posterior만 사용
 
 3. 라벨 확정 규칙
    - 위 클래스별 유효 교사 2종 합의 → 채택
@@ -1906,7 +1909,7 @@ query_category_map   = {Violent, Sexual Content, Self-Harm, Political,
 
 5. 정규화 델타 결합 — ★ 명세
    PII: encoder token hidden [B,T,768] → Linear(29)
-   ATK/보조 A·B: masked mean pooling [B,768] ⊕ 델타 [B,8, log1p] → 각 선형 헤드
+   ATK/보조 A·B: masked mean pooling [B,768] ⊕ 델타 [B,7, log1p] → 각 선형 헤드
    ★ 문서 델타를 PII 토큰 헤드에 브로드캐스트하지 않는다
    델타는 L0가 이미 계산한 값이므로 추론 시 추가 비용 0
 
@@ -1944,7 +1947,7 @@ SYSTEM_LEAK 시스템 프롬프트·지시문·설정 자체를 출력시키려�
 
 ⚠️ 이 프롬프트는 **W6 착수 시점의 초안**이고, 검토 큐에 쌓인 불일치를 보고 한 번 개정한다. **개정 전후를 둘 다 기록**하고 어느 버전으로 만든 라벨인지 데이터에 남긴다.
 
-**교사 셋과 학생이 전부 Apache-2.0이다** — `kakaocorp/kanana-safeguard-prompt-2.1b` · `google/gemma-4-E2B-it` · `Qwen/Qwen3Guard-Stream-0.6B` · `skt/A.X-Encoder-base`. 증류 산출 가중치에 **Gemma ToU 파생 조항이 걸리지 않는다.**
+**교사 셋과 학생이 전부 Apache-2.0이다** — `kakaocorp/kanana-safeguard-prompt-2.1b` · `google/gemma-4-E2B-it` · `Qwen/Qwen3Guard-Gen-0.6B` · `skt/A.X-Encoder-base`. 증류 산출 가중치에 **Gemma ToU 파생 조항이 걸리지 않는다.**
 
 ⚠️ **초안은 여기서만 "Gemma 4는 Gemma ToU다"라고 적어 문서 다섯 곳(§4.2 표 2곳·§4.2.1·§6.2.2 표·§6.2.2 본문)과 정면으로 어긋났다.** HuggingFace `google/gemma-4-E2B-it`을 직접 조회해 **`license: apache-2.0`, gated 아님**을 확인했다. Gemma ToU가 걸리는 것은 **Gemma 인코더 파생**(`embeddinggemma-300m`·`t5gemma-2-270m-270m`, 둘 다 §4.2.1에서 기각)과 **`guardrail-korean-gemma-4-E2B`**(L2-judge 대안) 쪽이다.
 

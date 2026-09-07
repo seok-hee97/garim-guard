@@ -46,17 +46,27 @@ class Vault:
         return token
 
     def restore(self, text: str) -> str:
+        restored, _ = self.restore_with_status(text)
+        return restored
+
+    def restore_with_status(self, text: str) -> tuple[str, bool]:
+        """Restore known tokens and report whether a vault-shaped token was missing."""
+
+        missing = False
+
         def replace(match: re.Match[str]) -> str:
+            nonlocal missing
             canonical = f"<{match.group(1).upper()}_{int(match.group(2))}>"
             value = self.entries.get(canonical)
             if value is None:
+                missing = True
                 return match.group(0)
             particle = match.group(3)
             if particle:
                 particle = correct_particle(value, particle)
             return value + (particle or "")
 
-        return _TOKEN.sub(replace, text)
+        return _TOKEN.sub(replace, text), missing
 
 
 def mask_text(

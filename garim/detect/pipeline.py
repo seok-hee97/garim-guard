@@ -112,6 +112,30 @@ def _structured_key_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _is_pii_finding(finding: Finding) -> bool:
+    """Only PII identifiers are noise in a structured/code key.
+
+    Secret and attack findings must survive even when their bytes happen to occupy a
+    mapping key.  Treating ``key_exclude`` as a blanket span filter allowed API keys used
+    as dictionary keys to bypass the DLP boundary.
+    """
+
+    return finding.code.startswith(("L-KR-", "L-CM-", "L-CT-"))
+
+
+def _code_identifier_spans(text: str, allowlist: list[str]) -> list[tuple[int, int]]:
+    """Locate allow-listed assignment keys without suppressing matching values."""
+
+    names = sorted({name for name in allowlist if name}, key=len, reverse=True)
+    if not names:
+        return []
+    pattern = re.compile(
+        rf"(?m)(?<![\w])(?P<name>{'|'.join(re.escape(name) for name in names)})"
+        r"(?![\w])(?=\s*(?::|=(?!=)))"
+    )
+    return [match.span("name") for match in pattern.finditer(text)]
+
+
 def _evasion_codes(bundle: NormalizedBundle, stream: str) -> list[str]:
     codes: list[str] = []
     if stream in {"base64", "hex"}:
@@ -352,7 +376,7 @@ class DetectionPipeline:
         accepted = [
             finding
             for finding in l0_findings + l1_findings
-            if self.policy.accepts(finding, content_type)
+            if self.policy.accepts(finding, content_type, origin=origin)
         ]
         type_policy = self.policy.config.content_type_policy.get(content_type)
         if type_policy is not None and type_policy.key_exclude:
@@ -360,9 +384,26 @@ class DetectionPipeline:
             accepted = [
                 finding
                 for finding in accepted
-                if not any(
-                    finding.span[0] < key_end and key_start < finding.span[1]
-                    for key_start, key_end in key_spans
+                if not (
+                    _is_pii_finding(finding)
+                    and any(
+                        finding.span[0] < key_end and key_start < finding.span[1]
+                        for key_start, key_end in key_spans
+                    )
+                )
+            ]
+        if type_policy is not None and type_policy.identifier_allowlist:
+            identifier_spans = _code_identifier_spans(text, type_policy.identifier_allowlist)
+            accepted = [
+                finding
+                for finding in accepted
+                if not (
+                    _is_pii_finding(finding)
+                    and any(
+                        finding.span[0] < identifier_end
+                        and identifier_start < finding.span[1]
+                        for identifier_start, identifier_end in identifier_spans
+                    )
                 )
             ]
         # 겹침 해소는 **활성 정책**의 심각도를 따른다. 하드코딩 기본값을 쓰면 사용자가

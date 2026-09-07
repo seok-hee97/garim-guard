@@ -10,6 +10,7 @@ from bench.teacher_agreement import (
     RUBBER_STAMP_THRESHOLD,
     generator_agreement,
     jailbreak_independence,
+    main,
 )
 from garim.training.teacher_io import TeacherArtifact
 from garim.training.teachers import load_teacher_policy
@@ -58,17 +59,25 @@ def test_no_stale_reference_to_the_unusable_stream_model() -> None:
         load_teacher_backend("qwen3guard_stream_typo", policy.teachers["kanana"], ".")
 
 
-def test_generator_agreement_counts_only_shared_ids() -> None:
+def test_generator_agreement_counts_only_eligible_shared_ids() -> None:
     artifacts = {"a": _artifact("a", "INJECTION"), "b": _artifact("b", "NONE")}
-    report = generator_agreement(artifacts, {"a": "INJECTION", "b": "JAILBREAK", "c": "NONE"})
-    assert report["rows"] == 2
-    assert report["agreement"] == 0.5
-    assert report["confusion"]["JAILBREAK->NONE"] == 1
+    report = generator_agreement(
+        artifacts,
+        {"a": "INJECTION", "b": "JAILBREAK", "c": "NONE"},
+        eligible_labels={"INJECTION"},
+    )
+    assert report["rows"] == 1
+    assert report["agreement"] == 1.0
+    assert "JAILBREAK->NONE" not in report["confusion"]
 
 
 def test_generator_agreement_refuses_a_disjoint_pair() -> None:
-    with pytest.raises(ValueError, match="no overlapping ids"):
-        generator_agreement({"a": _artifact("a", "NONE")}, {"z": "NONE"})
+    with pytest.raises(ValueError, match="no eligible overlapping ids"):
+        generator_agreement(
+            {"a": _artifact("a", "NONE")},
+            {"z": "NONE"},
+            eligible_labels={"NONE"},
+        )
 
 
 def test_rubber_stamp_is_flagged() -> None:
@@ -96,6 +105,47 @@ def test_independence_is_none_when_the_primary_never_says_jailbreak() -> None:
     report = jailbreak_independence(primary, {"a": _artifact("a", "JAILBREAK")})
     assert report["agreement_on_jailbreak"] is None
     assert not report["is_rubber_stamp"]
+
+
+def test_cli_returns_nonzero_when_the_substitute_is_a_rubber_stamp(tmp_path) -> None:
+    gold = {str(index): "JAILBREAK" for index in range(20)}
+    gold_path = tmp_path / "gold.json"
+    gold_path.write_text(json.dumps(gold), encoding="utf-8")
+    teacher_paths = {}
+    policy = load_teacher_policy("train/teachers.yaml")
+    for name in ("gemma4", "qwen3guard_gen"):
+        spec = policy.teachers[name]
+        path = tmp_path / f"{name}.jsonl"
+        path.write_text(
+            "\n".join(
+                _artifact(identifier, "JAILBREAK")
+                .model_copy(
+                    update={
+                        "teacher": name,
+                        "model_id": spec.model_id,
+                        "revision": spec.revision,
+                    }
+                )
+                .model_dump_json()
+                for identifier in gold
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        teacher_paths[name] = path
+    status = main(
+        [
+            "--gold",
+            str(gold_path),
+            "--teacher",
+            f"gemma4={teacher_paths['gemma4']}",
+            "--teacher",
+            f"qwen3guard_gen={teacher_paths['qwen3guard_gen']}",
+            "--output",
+            str(tmp_path / "report.json"),
+        ]
+    )
+    assert status == 2
 
 
 def test_gold_sidecar_is_not_part_of_the_teacher_input() -> None:

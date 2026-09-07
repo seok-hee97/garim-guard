@@ -12,6 +12,7 @@ from pathlib import Path
 
 from garim.training.config import RunConfig, load_run_config
 from garim.training.data import CorpusRecord, load_jsonl
+from garim.training.evaluation_seal import verify_evaluation_input_manifest
 from garim.training.provenance import verify_training_input_manifest
 from garim.training.readiness import (
     assert_distillation_inputs_exist,
@@ -206,6 +207,9 @@ def main() -> int:
     parser.add_argument(
         "--input-manifest", default="data/training-input-manifest.json"
     )
+    parser.add_argument(
+        "--evaluation-manifest", default="data/evaluation-input-manifest.json"
+    )
     parser.add_argument("--output-dir", default="train/artifacts/l1")
     parser.add_argument("--seeds")
     parser.add_argument("--epochs", type=int)
@@ -255,6 +259,11 @@ def main() -> int:
             "sources_manifest": args.sources_manifest,
             "training_config": args.config,
         },
+    )
+    # The final test corpus must be frozen before optimizer creation.  Otherwise a
+    # disappointing result can be followed by an unnoticed test-set edit.
+    report["sealed_evaluation_contract"] = verify_evaluation_input_manifest(
+        args.evaluation_manifest
     )
     encoder_dir = Path(args.encoder_dir)
     if not encoder_dir.is_dir():

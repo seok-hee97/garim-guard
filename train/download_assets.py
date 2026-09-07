@@ -6,7 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 
-from garim.training.assets import build_asset_plan, download_assets, inspect_asset_plan
+from garim.training.assets import (
+    build_asset_plan,
+    download_assets,
+    inspect_asset_plan,
+    record_existing_assets,
+)
 from garim.training.models import load_model_registry
 from garim.training.sources import load_source_registry
 
@@ -24,6 +29,11 @@ def main() -> int:
         action="store_true",
         help="perform network downloads; without this flag the command is read-only",
     )
+    parser.add_argument(
+        "--record-existing",
+        action="store_true",
+        help="verify cached pinned revisions and refresh the manifest without network access",
+    )
     args = parser.parse_args()
 
     models = load_model_registry(args.models_manifest)
@@ -36,9 +46,15 @@ def main() -> int:
         include_teachers=not args.without_teachers,
         include_eval=not args.without_eval,
     )
-    if not args.execute:
+    if args.execute and args.record_existing:
+        parser.error("--execute and --record-existing are mutually exclusive")
+    if not args.execute and not args.record_existing:
         print(json.dumps(inspect_asset_plan(plan), ensure_ascii=False, indent=2))
         print("dry-run only; pass --execute to download pinned assets")
+        return 0
+    if args.record_existing:
+        output = record_existing_assets(models, sources, plan)
+        print(f"verified and recorded {len(plan)} existing assets in {output}")
         return 0
     output = download_assets(models, sources, plan)
     print(f"downloaded and recorded {len(plan)} assets in {output}")

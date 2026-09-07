@@ -13,6 +13,7 @@ from typing import Any
 
 from garim.training.assets import build_asset_plan, verify_asset_manifest
 from garim.training.data import load_jsonl
+from garim.training.evaluation_seal import verify_evaluation_input_manifest
 from garim.training.models import load_model_registry
 from garim.training.provenance import verify_training_input_manifest
 from garim.training.readiness import validate_training_corpora
@@ -48,6 +49,9 @@ def main() -> int:
     parser.add_argument(
         "--input-manifest", default="data/training-input-manifest.json"
     )
+    parser.add_argument(
+        "--evaluation-manifest", default="data/evaluation-input-manifest.json"
+    )
     args = parser.parse_args()
 
     results = [
@@ -67,7 +71,9 @@ def main() -> int:
         "train/apply_review_labels.py",
         "train/create_labeling_queue.py",
         "train/apply_eval_labels.py",
+        "train/apply_external_eval_labels.py",
         "train/finalize_training_inputs.py",
+        "train/finalize_evaluation_inputs.py",
         "train/merge_corpora.py",
         "train/train_l1.py",
         "train/export_l1.py",
@@ -153,6 +159,15 @@ def main() -> int:
             results.append(_check("sealed-training-inputs", True, sealed_contract))
         except (OSError, ValueError) as exc:
             results.append(_check("sealed-training-inputs", False, str(exc)))
+        try:
+            evaluation_contract = verify_evaluation_input_manifest(
+                args.evaluation_manifest
+            )
+            results.append(
+                _check("sealed-evaluation-inputs", True, evaluation_contract)
+            )
+        except (OSError, ValueError) as exc:
+            results.append(_check("sealed-evaluation-inputs", False, str(exc)))
 
     ok = all(result["ok"] for result in results)
     print(

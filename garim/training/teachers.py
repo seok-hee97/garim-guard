@@ -13,7 +13,7 @@ AttackLabel = Literal["NONE", "INJECTION", "JAILBREAK", "SYSTEM_LEAK"]
 ATTACK_LABELS = ("NONE", "INJECTION", "JAILBREAK", "SYSTEM_LEAK")
 
 # ★ 증류 역할은 **soft_targets 내용**으로 정한다 — 교사 이름으로 정하지 않는다.
-#   `teacher_io` 가 `row_artifacts["kanana"]` / `["qwen3guard_stream"]` 로 이름을 네 군데
+#   `teacher_io` 가 `row_artifacts["kanana"]` / `["qwen3guard_gen"]` 로 이름을 네 군데
 #   박아 두어, `teachers.yaml` 에서 키만 바꿔도 로드가 아니라 해석 도중 KeyError 였다.
 #   정책이 설정 가능하다고 선언했으면 코드도 설정을 따라야 한다.
 SOFT_TARGET_CLASSES = ("NONE", "INJECTION", "SYSTEM_LEAK")

@@ -32,6 +32,7 @@ from typing import Any
 
 from garim.api import Inspector
 from garim.models import Origin, Segment
+from garim.policy.schema import load_policy
 from garim.tls import https_context
 
 # OpenAI 역할 → §3.2.1 origin. `tool` 과 `function` 은 모델이 아니라 외부가 채운
@@ -175,7 +176,14 @@ class ProxyService:
         if inspector is not None:
             self._inspector_factory = lambda: inspector
         else:
-            self._inspector_factory = lambda: Inspector(config.policy_path)
+            def trusted_inspector() -> Inspector:
+                policy = load_policy(config.policy_path)
+                # Unlike the library API, the proxy parsed the protocol-level role itself.
+                # This is the one place where DESIGN §2.5b allows origin trust.
+                policy.origin_policy.trust_declared = True
+                return Inspector(policy)
+
+            self._inspector_factory = trusted_inspector
         self._sender = sender or self._send_upstream
 
     def _send_upstream(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
@@ -226,27 +234,38 @@ class ProxyService:
 
         upstream = self._sender("/chat/completions", outbound, headers)
         if result.vault is not None:
-            upstream = _restore_choices(upstream, result.vault)
+            upstream, restore_missing = _restore_choices(upstream, result.vault)
+            if restore_missing:
+                response_headers["X-Garim-Verdict"] = "warn"
+                response_headers["X-Garim-Degraded"] = "true"
+                existing = response_headers.get("X-Garim-Degraded-Reasons")
+                reasons = [reason for reason in (existing or "").split(",") if reason]
+                if "vault_restore_miss" not in reasons:
+                    reasons.append("vault_restore_miss")
+                response_headers["X-Garim-Degraded-Reasons"] = ",".join(reasons)
         return 200, upstream, response_headers
 
 
-def _restore_choices(response: Any, vault: Any) -> Any:
+def _restore_choices(response: Any, vault: Any) -> tuple[Any, bool]:
     """응답 본문의 볼트 토큰을 원문으로 되돌린다 — §3.3 의 돌아오는 길."""
     if not isinstance(response, dict):
-        return response
+        return response, False
     choices = response.get("choices")
     if not isinstance(choices, list):
-        return response
+        return response, False
     restored = []
+    missing = False
     for choice in choices:
         message = choice.get("message") if isinstance(choice, dict) else None
         if isinstance(message, dict) and isinstance(message.get("content"), str):
+            content, content_missing = vault.restore_with_status(message["content"])
+            missing = missing or content_missing
             restored.append(
-                {**choice, "message": {**message, "content": vault.restore(message["content"])}}
+                {**choice, "message": {**message, "content": content}}
             )
         else:
             restored.append(choice)
-    return {**response, "choices": restored}
+    return {**response, "choices": restored}, missing
 
 
 class _Handler(BaseHTTPRequestHandler):

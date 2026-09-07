@@ -19,3 +19,8 @@ def test_invalid_policy_fails_closed(tmp_path: Path) -> None:
     policy.write_text("version: 1\nunknown: true\n", encoding="utf-8")
     with pytest.raises(ValidationError):
         Inspector(policy)
+
+
+def test_chunk_overlap_must_be_smaller_than_chunk_size() -> None:
+    with pytest.raises(ValidationError, match="chunk_overlap"):
+        PolicyConfig(limits={"chunk_size": 64, "chunk_overlap": 64})

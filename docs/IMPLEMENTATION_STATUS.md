@@ -1,7 +1,7 @@
 # 가림 구현 현황
 
-> 기준일: 2026-08-07  
-> 범위: 실제 모델 다운로드와 GPU 학습을 시작하기 전까지의 구현 상태
+> 기준일: 2026-09-07
+> 범위: 고정 자산 준비와 로컬 교사 추론을 포함한 현재 구현·실행 상태
 
 이 문서는 [DESIGN.md](DESIGN.md)의 기획을 현재 저장소 코드에 대응시킨 실행 현황이다.
 여기서 **구현 완료**는 코드·설정·검증 경로가 준비됐다는 뜻이며, 모델 가중치 다운로드,
@@ -13,23 +13,23 @@
 |---|---|---|---|
 | P0/L0 런타임 | **구현 완료** | 세그먼트, 가역 정규화, 규칙 탐지, 병합, 정책, 볼트, API/CLI | 실 운영 트래픽 성능 측정 |
 | L1 런타임 계약 | **구현 완료** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드 | 학습된 ONNX 가중치 연결 |
-| 모델·데이터 고정 | **구현 완료** | 모델 7개(용도별 라이선스 게이트), 데이터 소스 18개 revision/라이선스 레지스트리, exact 파일 manifest, `uv.lock` | 전체 자산 다운로드 및 파일별 manifest 생성 |
-| 코퍼스 준비 | **구현 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단 | 원천 데이터를 내려받아 실제 코퍼스 파일 생성 |
-| 합성 PII/공격 데이터 | **구현 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 생성 결과를 `data/corpus/`에 영속화 |
+| 모델·데이터 고정 | **구현·로컬 검증 완료** | 활성 자산 18개, revision/라이선스 레지스트리, 원격 tree/LFS 검증, exact 파일 manifest, `uv.lock` | 새 머신에서 동일 자산 재현 |
+| 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | deepset 번역본 적용 |
+| 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
 | 번역 | **인터페이스 완료** | split 봉인, ID 완전성 검사, 원문 해시 보존 | deepset train/test 한국어 번역 작성·적용 |
-| 교사·수동 라벨링 | **파이프라인 완료** | 교사 3종 로컬 추론, 클래스별 합의, metadata-free 블라인드 큐, train/test exact-coverage 적용 | 교사 모델 실행과 사람 블라인드 검수 |
+| 교사·수동 라벨링 | **파이프라인 완료 / 실행 중** | 교사 3종 로컬 추론, 배치·재개 검증, 클래스별 합의, metadata-free 블라인드 큐, train/test exact-coverage 적용 | 세 교사 전체 산출물과 합의 게이트 완료 |
 | L1 공동 학습 | **구현 완료** | SHA-256 입력 봉인, A.X 공유 백본+4개 헤드, 4:1 샘플링, soft/aux loss, 3 seed, 이중 early stopping | optimizer를 사용하는 실제 GPU 학습 |
 | 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
 | L2 | **비활성 · 축별 평가 착수** | 후보 manifest 고정, `thorough`의 degraded 응답, 축 (b) 공개셋 실측 → [L2_EVALUATION.md](L2_EVALUATION.md) | 모델 통합·배선·활성화 |
-| RunPod 실행 | **절차 문서 완료** | `docs/RUNPOD.md` — 저장소만 올리고 코퍼스는 재생성(비트 동일 확인), 해시 대조 게이트 | Qwen 결정 · `pii_per_attack` 결정 |
+| RunPod 실행 | **절차 문서 완료** | `docs/RUNPOD.md` — 저장소만 올리고 코퍼스는 재생성(비트 동일 확인), 해시 대조 게이트 | Gemma 교사·CUDA 학습 실행, `pii_per_attack` 실측 결정 |
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
 | §7.3 베이스라인 | **하네스 완료 / 6종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana, detect-secrets·CredSweeper(축 d), **Presidio `ko`/strict/vanilla 3팔(H1)** | Gemini(키가 free tier 라 429) |
-| 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — leak_eval · ko_guardrail(축 b) · tab(축 a) · cred_data(축 d) · type_eval(S4) · real_fpr(§7.2.3 경보율) · latency(§7.1.3) · **presidio_baseline(§7.3)** · **mask_quality(§8.1-13b)** | attack_eval, 코퍼스 수집 확대, 13b 의 Gemini 팔 |
+| 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
 | 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부 | 실사용 검증 |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
-현재 단계는 **학습 준비 코드 완료**다. 저장소에는 L1 학습 가중치, 전체 원천 데이터,
-교사 예측 결과, 사람 검수 결과와 측정 성능값이 포함되어 있지 않다.
+현재 단계는 **학습 준비 코드와 로컬 고정 자산·코퍼스 준비 완료**다. 배포 가능한 L1
+가중치, 교사 3종 합의 결과, 최종 평가 gold와 학습 후 성능값은 아직 없다.
 
 ## 구현된 구성요소
 
@@ -199,21 +199,23 @@ garim 을 import 할 수 있으면 참조 구현과의 일치까지 확인한다
 
 ## 학습을 시작하기 전에 남은 실행
 
-아래는 미구현 작업이 아니라 외부 자산·연산·사람 판정이 필요한 실행 단계다.
+아래는 외부 연산·번역 또는 독립 판정이 필요한 실행 단계다. 2026-09-07 로컬 상태를
+함께 표시한다.
 
-1. `uv sync --extra train --extra dev`로 학습 환경을 동기화한다.
-2. `python train/download_assets.py --execute`로 고정 자산을 다운로드하고 체크섬을 기록한다.
-3. `python train/prepare_corpora.py --ack-sensitive-synthetic-identifiers`로 split 코퍼스를 생성한다.
-4. deepset train/test를 별도로 번역하고 ID 완전성 게이트를 통과시킨다.
-5. 공격 학습 풀에 교사 3종을 실행하고 합의 라벨과 사람 검토 큐를 만든다.
-6. metadata-free 블라인드 큐로 교사 불일치와 최종 공격 test를 수동 검수한다.
-7. 수동 검수 결과를 train/validation과 봉인 test에 exact ID coverage로 적용한다.
-8. `finalize_training_inputs.py`로 네 코퍼스 그룹과 모든 provenance 파일을 봉인한다.
-9. `preflight.py --stage training`으로 로컬 인코더, 봉인 manifest와 학습 패키지를 확인한다.
-10. `train_l1.py`의 단일 forward dry-run 후 승인된 실행에서만 `--execute`로 학습한다.
+1. ✅ `.venv` 학습 환경과 전체 고정 자산 18개를 준비하고 exact manifest를 검증했다.
+2. ✅ 공개 원천과 합성 split 코퍼스를 생성하고 누수·span 계약을 검사했다.
+3. deepset train/test를 별도로 번역하고 ID 완전성 게이트를 통과시킨다.
+4. 공격 학습 풀에 교사 3종을 실행한다. Qwen Gen은 로컬 MPS 배치·재개 경로를 검증했다.
+5. `bench.teacher_agreement`의 생성기 일치도와 JAILBREAK rubber-stamp 게이트를 통과시킨다.
+6. 교사 불일치는 블라인드 검수하거나 `--drop-review`로 감사 기록과 함께 학습에서 뺀다.
+7. 최종 공격 test는 블라인드 수동 gold를 적용하거나 deepset의 1:1 외부 이진 gold만 쓴다.
+8. `finalize_training_inputs.py`와 `finalize_evaluation_inputs.py`로 학습·최종 test를 모두 봉인한다.
+9. 실제 입력 인자를 준 `preflight.py --stage training`과 `train_l1.py` dry-run을 통과시킨다.
+10. CUDA에서 3 seed 학습 후 FP32/QInt8 export·평가·지연/RSS 측정을 수행한다.
 
 구체 명령과 파일 연결 순서는 [README의 L1 학습 준비](../README.md#l1-학습-준비)를 따른다.
-`assets`와 `training` preflight는 위 자산이 없는 현재 상태에서는 실패하는 것이 정상이다.
+`assets` preflight는 통과한다. `training` preflight는 3~8번 산출물과 실제 입력 인자가
+없으면 fail-closed로 실패하는 것이 정상이다.
 
 ## 학습 후에만 채울 항목
 

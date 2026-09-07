@@ -15,9 +15,12 @@ from garim.training.teachers import load_teacher_policy
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="unlabeled Korean attack JSONL")
-    parser.add_argument("--kanana", required=True)
-    parser.add_argument("--gemma4", required=True)
-    parser.add_argument("--qwen3guard-stream", required=True)
+    parser.add_argument(
+        "--teacher",
+        action="append",
+        required=True,
+        help="teacher-name=predictions.jsonl; repeat once for every policy teacher",
+    )
     parser.add_argument("--policy", default="train/teachers.yaml")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--validation-percent", type=int, default=10)
@@ -33,10 +36,23 @@ def main() -> int:
 
     records = load_jsonl(args.input)
     policy = load_teacher_policy(args.policy)
+    artifact_paths: dict[str, str] = {}
+    for entry in args.teacher:
+        name, separator, path = entry.partition("=")
+        if not separator or not name or not path:
+            raise ValueError(f"--teacher expects name=path, got {entry!r}")
+        if name in artifact_paths:
+            raise ValueError(f"duplicate teacher artifact: {name}")
+        artifact_paths[name] = path
+    expected = set(policy.teachers)
+    if set(artifact_paths) != expected:
+        raise ValueError(
+            "teacher artifacts must match policy exactly; "
+            f"missing={sorted(expected - set(artifact_paths))}, "
+            f"extra={sorted(set(artifact_paths) - expected)}"
+        )
     artifacts = {
-        "kanana": load_teacher_artifacts(args.kanana),
-        "gemma4": load_teacher_artifacts(args.gemma4),
-        "qwen3guard_stream": load_teacher_artifacts(args.qwen3guard_stream),
+        name: load_teacher_artifacts(path) for name, path in artifact_paths.items()
     }
     accepted, review, audit = resolve_teacher_corpus(
         records,

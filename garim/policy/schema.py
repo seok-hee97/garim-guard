@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Mode = Literal["allow", "mask", "warn", "block"]
 
@@ -100,6 +100,12 @@ class Limits(BaseModel):
     #   초판은 동기 호출 + except 뿐이라 1.5초 걸리는 백엔드에 1.51초 블로킹하고
     #   degraded=False 를 냈다. §7.1.3 의 세그먼트당 L1 예산이 160ms 다.
     l1_timeout_ms: int = Field(1_000, ge=1)
+
+    @model_validator(mode="after")
+    def validate_chunk_window(self) -> Limits:
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+        return self
 
 
 class CustomPattern(BaseModel):

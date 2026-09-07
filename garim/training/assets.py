@@ -235,6 +235,53 @@ def asset_file_manifest(destination: Path) -> dict[str, dict[str, object]]:
     }
 
 
+def _git_blob_sha1(path: Path) -> str:
+    content = path.read_bytes()
+    return hashlib.sha1(  # noqa: S324 - Git object identity, not cryptographic security
+        f"blob {len(content)}\0".encode() + content
+    ).hexdigest()
+
+
+def verify_cached_hf_snapshot(destination: Path, revision: str) -> None:
+    """Prove existing local files came from a pinned Hugging Face snapshot.
+
+    ``snapshot_download(local_dir=...)`` stores the remote tree and per-file LFS hashes
+    below ``.cache/huggingface``.  This lets an offline GPU host add an already downloaded
+    asset to the project manifest without contacting the network or trusting arbitrary
+    bytes merely because they occupy the expected directory.
+    """
+
+    tree_path = destination / ".cache" / "huggingface" / "trees" / f"{revision}.json"
+    try:
+        tree = json.loads(tree_path.read_text(encoding="utf-8"))["files"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(
+            f"{destination}: no cached Hugging Face tree for revision {revision}"
+        ) from exc
+    local_files = [
+        path
+        for path in destination.rglob("*")
+        if path.is_file() and ".cache" not in path.relative_to(destination).parts
+    ]
+    if not local_files:
+        raise ValueError(f"{destination}: cached snapshot contains no local files")
+    for path in local_files:
+        relative = path.relative_to(destination).as_posix()
+        metadata = tree.get(relative) if isinstance(tree, dict) else None
+        if not isinstance(metadata, dict):
+            raise ValueError(f"{destination}: {relative} is absent from the pinned remote tree")
+        expected_size = metadata.get("lfs_size", metadata.get("size"))
+        if path.stat().st_size != expected_size:
+            raise ValueError(f"{destination}: cached size mismatch for {relative}")
+        lfs_sha256 = metadata.get("lfs_sha256")
+        if isinstance(lfs_sha256, str):
+            actual = _sha256(path)
+            if actual != lfs_sha256:
+                raise ValueError(f"{destination}: cached LFS hash mismatch for {relative}")
+        elif _git_blob_sha1(path) != metadata.get("blob_id"):
+            raise ValueError(f"{destination}: cached Git blob mismatch for {relative}")
+
+
 def asset_manifest_drift(
     destination: Path, expected: object
 ) -> dict[str, list[str]]:
@@ -334,6 +381,84 @@ def download_assets(
     return output
 
 
+def record_existing_assets(
+    model_registry: ModelRegistry,
+    source_registry: SourceRegistry,
+    plan: list[AssetPlan],
+    *,
+    manifest_path: str | Path = "data/asset-manifest.json",
+) -> Path:
+    """Refresh a manifest from pinned, locally verifiable assets without downloading."""
+
+    output = Path(manifest_path)
+    try:
+        previous_payload = json.loads(output.read_text(encoding="utf-8"))
+        previous = {item["name"]: item for item in previous_payload["assets"]}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        previous = {}
+
+    completed: list[dict[str, object]] = []
+    for item in plan:
+        destination = Path(item.destination)
+        existing = previous.get(item.name)
+        existing_is_valid = bool(
+            isinstance(existing, dict)
+            and all(existing.get(field) == value for field, value in asdict(item).items())
+            and isinstance(existing.get("files"), dict)
+            and not any(asset_manifest_drift(destination, existing["files"]).values())
+        )
+        source: Source | None = None
+        if item.kind == "model":
+            model_registry.verify(item.name)
+        else:
+            source = source_registry.source(item.name)
+            if source.name == "KDPII" and source.file is not None:
+                source_registry.authorize(
+                    source.name,
+                    purpose=source.use,
+                    local_file=destination / source.file,
+                )
+            else:
+                source_registry.authorize(source.name, purpose=source.use)
+        if not existing_is_valid:
+            if item.revision is None:
+                if source is None or source.name != "KDPII" or source.file is None:
+                    raise ValueError(
+                        f"{item.name}: cannot verify an unrecorded non-HF asset offline"
+                    )
+                source_registry.authorize(
+                    source.name,
+                    purpose=source.use,
+                    local_file=destination / source.file,
+                )
+            else:
+                verify_cached_hf_snapshot(destination, item.revision)
+                if item.kind == "model":
+                    asset = model_registry.model(item.name)
+                    if not asset.enabled:
+                        raise ValueError(f"{item.name}: disabled model cannot be recorded")
+                else:
+                    source = source_registry.source(item.name)
+                    if source.hf_id is None:
+                        raise ValueError(
+                            f"{item.name}: unrecorded GitHub asset needs an existing seal"
+                        )
+                    source_registry.authorize(item.name, purpose=source.use)
+        completed.append({**asdict(item), "files": asset_file_manifest(destination)})
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(
+            {"created_at": datetime.now(UTC).isoformat(), "assets": completed},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return output
+
+
 def inspect_asset_plan(plan: list[AssetPlan]) -> list[dict[str, object]]:
     status: list[dict[str, object]] = []
     for item in plan:
@@ -367,8 +492,7 @@ def verify_asset_manifest(
             continue
         destination = Path(planned.destination)
         ok = (
-            item.get("revision") == planned.revision
-            and item.get("destination") == planned.destination
+            all(item.get(field) == value for field, value in asdict(planned).items())
             and isinstance(item.get("files"), dict)
             and bool(item["files"])
         )

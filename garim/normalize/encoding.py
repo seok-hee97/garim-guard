@@ -39,10 +39,14 @@ def decoded_views(text: str, interval_map: IntervalMap) -> list[DecodedView]:
                 encoding = "hex"
             except ValueError:
                 decoded = None
-        if decoded is None and (len(token) % 4 == 0 or "=" in token):
+        # URL-safe base64 commonly omits trailing ``=`` padding.  A payload whose
+        # length is 2 or 3 modulo 4 is still decodable after restoring that padding;
+        # only modulo 1 is structurally impossible.  Requiring padding to be present
+        # opened a trivial bypass for every encoded detector input.
+        if decoded is None and len(token) % 4 != 1:
             try:
                 padding = "=" * (-len(token) % 4)
-                decoded = base64.urlsafe_b64decode(token + padding)
+                decoded = base64.b64decode(token + padding, altchars=b"-_", validate=True)
                 encoding = "base64"
             except (ValueError, base64.binascii.Error):
                 decoded = None

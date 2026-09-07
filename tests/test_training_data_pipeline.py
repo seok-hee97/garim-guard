@@ -229,3 +229,26 @@ def test_final_evaluation_rejects_unlabeled_attack_rows() -> None:
     )
     with pytest.raises(ValueError, match="no manual gold label"):
         validate_sealed_evaluation_corpus([record])
+
+
+@pytest.mark.parametrize("positive_first", [True, False])
+def test_target_bearing_pii_duplicate_never_crosses_splits(positive_first: bool) -> None:
+    text = "홍길동 고객입니다"
+    positive = CorpusRecord(
+        id="positive",
+        task="pii",
+        text=text,
+        source="fixture",
+        split="train",
+        spans=[CorpusSpan(start=0, end=3, label="PERSON")],
+    )
+    negative = CorpusRecord(
+        id="negative",
+        task="pii",
+        text=text,
+        source="fixture",
+        split="validation",
+    )
+    rows = [positive, negative] if positive_first else [negative, positive]
+    with pytest.raises(ValueError, match="fingerprint crosses"):
+        validate_corpus(rows)

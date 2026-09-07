@@ -60,11 +60,31 @@ export HF_TOKEN=...
 6  python train/run_teacher.py --execute   × 교사 3종 (kanana · gemma4 · qwen3guard_gen)
 6b ★ python -m bench.teacher_agreement   → 동의율 ≥0.95 면 여기서 멈춘다
 7  python train/resolve_teacher_labels.py --drop-review
-8  python train/finalize_training_inputs.py
-9  python train/preflight.py --stage training  → ok: true 여야 한다
+8  python train/finalize_training_inputs.py     ← 학습 입력 봉인
+8b python train/finalize_evaluation_inputs.py   ← **평가 입력 봉인** (아래 참조)
+9  python train/preflight.py --stage training  → ok: true 여야 한다 (36/36)
 10 python train/train_l1.py --execute
 11 python train/export_l1.py
 ```
+
+### 8b — 평가 봉인은 왜 따로인가
+
+학습 입력만 봉인하면 "무엇으로 학습했는가" 는 고정되지만 **"무엇으로 평가했는가" 는
+열려 있다.** 평가 코퍼스를 나중에 바꾸면 지표가 조용히 달라지고, 더 나쁘게는 학습에
+쓴 행이 평가로 새어 들어와도 아무도 모른다.
+
+`finalize_evaluation_inputs.py` 는 봉인하기 전에 **학습 매니페스트의 해시를 먼저
+재검증**하고(schema 2 · 내용 drift · 레코드 수 drift), 그 다음 **정규화 지문 교집합이
+∅ 인지** 확인한다. 낡거나 손댄 학습 매니페스트로는 통과할 수 없다.
+
+실제로 강제되는 것을 확인했다 — 학습 20행을 `split=test` 로 바꿔 평가로 봉인하려 하니
+위반 id 를 짚어 거부했다.
+
+    ValueError: evaluation text fingerprints overlap training inputs:
+        ['syn-attack-0056', 'syn-attack-0099', ...]
+
+봉인 대상은 넷이다 — 합성 PII test · 합성 공격 test · **T4 2,800** · **T4′ 400**
+(총 5,872행).
 
 ⚠️ **8번(봉인)이 5~7번 뒤에 온다.** 교사 라벨이 붙은 코퍼스를 봉인해야 한다. 봉인은
 `train/training.yaml` 까지 덮으므로 하이퍼파라미터를 바꾸면 **재봉인**이다 — 바꾸고

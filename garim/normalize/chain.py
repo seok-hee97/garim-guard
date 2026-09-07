@@ -131,7 +131,12 @@ def _drop_controls(text: str, source_map: IntervalMap) -> tuple[str, IntervalMap
         if 0xE0000 <= code <= 0xE007F:
             tag_chars += 1
             continue
-        if 0x200B <= code <= 0x200F or code == 0xFEFF or 0x2060 <= code <= 0x2064:
+        if (
+            0x200B <= code <= 0x200F
+            or 0x202A <= code <= 0x202E
+            or 0x2060 <= code <= 0x206F
+            or code == 0xFEFF
+        ):
             zero_width += 1
             continue
         output.append(character)

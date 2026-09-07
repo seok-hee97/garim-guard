@@ -69,7 +69,9 @@ class PolicyEngine:
             return "warn"
         return DEFAULT_CODE_MODES.get(code, self.config.defaults.verdict)
 
-    def threshold_for(self, finding: Finding, content_type: str) -> float:
+    def threshold_for(
+        self, finding: Finding, content_type: str, *, origin: str | None = None
+    ) -> float:
         if finding.layer == "L1":
             base = (
                 self.config.thresholds.l1_atk
@@ -86,13 +88,24 @@ class PolicyEngine:
                 base += policy.secret_threshold_delta
             else:
                 base += policy.pii_threshold_delta
+        origin_policy = self.config.origin_policy
+        if (
+            origin_policy.trust_declared
+            and origin == "system"
+            and finding.code.startswith("L-SEC-")
+        ):
+            base += origin_policy.system_secret_threshold_delta
         return min(1.0, max(0.0, base))
 
-    def accepts(self, finding: Finding, content_type: str) -> bool:
+    def accepts(
+        self, finding: Finding, content_type: str, *, origin: str | None = None
+    ) -> bool:
         policy = self.config.content_type_policy.get(content_type)
         if policy is not None and finding.code in policy.suppress:
             return False
-        return finding.confidence >= self.threshold_for(finding, content_type)
+        return finding.confidence >= self.threshold_for(
+            finding, content_type, origin=origin
+        )
 
     def apply_origin_policy(
         self, findings: list[Finding], origins: dict[int, str]

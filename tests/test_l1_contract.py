@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from garim import Inspector
 from garim.detect.l1 import L1Entity, L1Output
+from garim.policy.schema import Limits, PolicyConfig
 
 
 class FakeBackend:
@@ -54,3 +57,16 @@ def test_l1_entity_boundary_does_not_absorb_trailing_whitespace() -> None:
     person = next(finding for finding in result.leaks if finding.code == "L-CT-01")
     assert person.span == (0, 3)
     assert result.masked_text == "<PERSON_1> 요청"
+
+
+def test_policy_chunk_size_cannot_exceed_backend_limit() -> None:
+    class BoundedBackend:
+        name = "bounded"
+        max_length = 512
+
+        def infer(self, text: str, **_: object) -> L1Output:
+            return L1Output()
+
+    config = PolicyConfig(limits=Limits(chunk_size=1024, chunk_overlap=64))
+    with pytest.raises(ValueError, match="cannot exceed"):
+        Inspector(config, l1_backend=BoundedBackend())

@@ -224,6 +224,45 @@ def test_structured_keys_are_excluded_but_values_are_scanned() -> None:
     assert value.masked_text == '{"email": "<EMAIL_1>"}'
 
 
+def test_structured_key_exclusion_never_hides_a_secret() -> None:
+    token = "sk-proj-AbCd1234efGH5678ijKL"
+    result = Inspector().check(f'{{"{token}": "credential key"}}')
+    assert result.verdict == "block"
+    assert any(finding.code == "L-SEC-01" for finding in result.leaks)
+
+
+def test_code_identifier_allowlist_applies_only_to_assignment_keys() -> None:
+    from garim.detect.l1 import L1Entity, L1Output
+
+    class IdentifierBackend:
+        name = "identifier"
+
+        def infer(self, text, **kwargs):  # noqa: ANN001
+            del kwargs
+            start = text.index("email")
+            return L1Output(entities=[L1Entity("PERSON", (start, start + 5), 0.99)])
+
+    inspector = Inspector(l1_backend=IdentifierBackend())
+    key = inspector.check([Segment("email = value", content_type="code")])
+    value = inspector.check([Segment('value = "email"', content_type="code")])
+    assert not any(finding.code == "L-CT-01" for finding in key.leaks)
+    assert any(finding.code == "L-CT-01" for finding in value.leaks)
+
+
+def test_trusted_system_origin_strengthens_secret_detection() -> None:
+    from garim.policy.schema import PolicyConfig
+
+    config = PolicyConfig(
+        thresholds={"l0": 0.75},
+        origin_policy={"trust_declared": True, "system_secret_threshold_delta": -0.1},
+    )
+    text = "api_key: AbCd1234EfGh5678IjKl9012"
+    user = Inspector(config).check([Segment(text, origin="user")])
+    system = Inspector(config).check([Segment(text, origin="system")])
+    assert not any(finding.code == "L-SEC-05" for finding in user.leaks)
+    assert any(finding.code == "L-SEC-05" for finding in system.leaks)
+
+
 def test_log_policy_suppresses_network_addresses() -> None:
     source = "2026-01-01 ERROR peer 192.0.2.1\n2026-01-01 INFO retry"
     result = Inspector().check(source)
