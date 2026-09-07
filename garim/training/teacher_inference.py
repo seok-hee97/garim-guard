@@ -64,6 +64,10 @@ class KananaBackend(TeacherBackend):
         self.model = load_local_causal_lm(
             model_dir, dtype="auto", device_map=device
         ).eval()
+        if self.tokenizer.pad_token_id is None:
+            if self.tokenizer.eos_token_id is None:
+                raise ValueError(f"{name}: tokenizer has neither pad nor EOS token")
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         self.label_ids: dict[str, int] = {}
         for label, token in self.LABEL_TOKENS.items():
             ids = self.tokenizer.encode(token, add_special_tokens=False)
@@ -82,9 +86,21 @@ class KananaBackend(TeacherBackend):
         #
         #   어텐션 마스크도 인코딩에서 받는다. `ones_like` 는 패딩이 없다고 가정하는데
         #   그 가정을 토크나이저가 대신 보증해 줄 이유가 없다.
-        encoded = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": record.text}],
-            tokenize=True,
+        return self.predict_many([record])[0]
+
+    def predict_many(self, records: Sequence[CorpusRecord]) -> list[TeacherArtifact]:
+        if not records:
+            return []
+        rendered = [
+            self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": record.text}], tokenize=False
+            )
+            for record in records
+        ]
+        encoded = self.tokenizer(
+            rendered,
+            add_special_tokens=False,
+            padding=True,
             return_dict=True,
             return_tensors="pt",
         ).to(self.model.device)
@@ -93,20 +109,32 @@ class KananaBackend(TeacherBackend):
         if attention_mask is None:
             attention_mask = self.torch.ones_like(input_ids)
         with self.torch.inference_mode():
-            logits = self.model(input_ids=input_ids, attention_mask=attention_mask).logits[0, -1]
-        labels = ("NONE", "INJECTION", "SYSTEM_LEAK")
-        selected = self.torch.stack([logits[self.label_ids[label]] for label in labels])
-        probabilities = self.torch.softmax(selected.float(), dim=-1).cpu().tolist()
-        best = max(range(len(labels)), key=probabilities.__getitem__)
-        return TeacherArtifact(
-            id=record.id,
-            teacher=self.name,
-            model_id=self.spec.model_id,
-            revision=self.spec.revision,
-            label=labels[best],  # type: ignore[arg-type]
-            confidence=probabilities[best],
-            class_probabilities=dict(zip(labels, probabilities, strict=True)),
+            logits = self.model(input_ids=input_ids, attention_mask=attention_mask).logits
+        positions = (
+            self.torch.arange(attention_mask.shape[1], device=attention_mask.device)
+            .unsqueeze(0)
+            .expand_as(attention_mask)
+            .masked_fill(attention_mask == 0, -1)
+            .max(dim=1)
+            .values
         )
+        rows = self.torch.arange(logits.shape[0], device=logits.device)
+        next_token_logits = logits[rows, positions]
+        labels = ("NONE", "INJECTION", "SYSTEM_LEAK")
+        selected = next_token_logits[:, [self.label_ids[label] for label in labels]]
+        probabilities = self.torch.softmax(selected.float(), dim=-1).cpu().tolist()
+        return [
+            TeacherArtifact(
+                id=record.id,
+                teacher=self.name,
+                model_id=self.spec.model_id,
+                revision=self.spec.revision,
+                label=labels[max(range(len(labels)), key=probs.__getitem__)],  # type: ignore[arg-type]
+                confidence=max(probs),
+                class_probabilities=dict(zip(labels, probs, strict=True)),
+            )
+            for record, probs in zip(records, probabilities, strict=True)
+        ]
 
 
 class Gemma4Backend(TeacherBackend):

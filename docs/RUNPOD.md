@@ -54,18 +54,45 @@ export HF_TOKEN=...
 ```
 1  python train/download_assets.py --execute
 2  python train/prepare_corpora.py --ack-sensitive-synthetic-identifiers
+                                   --polyguard-limit 20000
 3  python train/merge_corpora.py  (pii train/validation, attack train/validation)
-4  ★ 해시 대조 — 위 네 값과 같은지 확인. 다르면 여기서 멈춘다
-5  python train/make_teacher_input.py      → 라벨 벗긴 1,423행 + gold 사이드카
-6  python train/run_teacher.py --execute   × 교사 3종 (kanana · gemma4 · qwen3guard_gen)
+4  ★ 해시 대조 — 아래 값과 다르면 여기서 멈춘다
+5  python train/make_teacher_input.py   × train·validation
+5b python train/merge_corpora.py --task attack --split train
+       --input data/corpus/attack-unlabeled-train.jsonl
+       --input data/corpus/polyguard_train-train.jsonl
+       --blocked-eval data/corpus/polyguard_eval-test.jsonl
+       --output data/corpus/attack-teacher-pool-train.jsonl
+6  python train/run_teacher.py --execute --device cuda   × 3 (kanana·gemma4·qwen3guard_gen)
+       입력은 **동일한 pool 파일** 하나여야 한다 — ID 집합이 갈리면 합의가 성립하지 않는다
 6b ★ python -m bench.teacher_agreement   → 동의율 ≥0.95 면 여기서 멈춘다
 7  python train/resolve_teacher_labels.py --drop-review
 8  python train/finalize_training_inputs.py     ← 학습 입력 봉인
-8b python train/finalize_evaluation_inputs.py   ← **평가 입력 봉인** (아래 참조)
-9  python train/preflight.py --stage training  → ok: true 여야 한다 (36/36)
-10 python train/train_l1.py --execute
-11 python train/export_l1.py
+8b python train/finalize_evaluation_inputs.py   ← 평가 입력 봉인
+9  python train/preflight.py --stage training  → ok: true
+10 python train/train_l1.py --execute --device cuda   (시드 3개)
+11 python train/export_l1.py  →  python train/benchmark_l1.py
 ```
+
+### 공격 교사 풀 — PolyGuardMix 샘플링
+
+어댑터가 언어를 `"ko"` 로 걸러서 **PolyGuard 한국어를 한 행도 수확하지 못하고 있었다**
+(상류는 `"Korean"` 이라고 적는다). 92,740행이 통째로 버려졌고, 그것이 공격 학습 풀을
+1,238행으로 묶어 둔 원인이었다.
+
+전량을 쓰면 교사 3종 추론이 278k forward 라 §6 의 R2 추정(~1,920)을 크게 넘는다.
+**20,000행을 결정적으로 샘플링**한다 — 레코드 id 의 안정 해시 순위로 뽑으므로 parquet
+glob 순서가 달라져도 같은 집합이 나오고, 원천이 커져도 대부분 유지된다.
+
+    PolyGuardMix 한국어   92,710  (평가 지문 중복 30 제거 후)
+    → 20,000 샘플         merge 에서 중복 2,727 제거
+    → 최종 교사 풀        18,511  (PolyGuard 17,273 + 합성 1,238)
+
+    PII 108,588 : 공격 18,511 = 5.9:1   (고치기 전 88:1)
+    pii_per_attack=4 기준 업샘플 1.5배   (이전 21.7배)
+
+**`pii_per_attack` 결정이 이것으로 해소됐다.** 공격 1행을 5에폭에 109번 보던 것이
+5~6번이 된다.
 
 ### 8b — 평가 봉인은 왜 따로인가
 
@@ -123,7 +150,12 @@ python -m bench.teacher_agreement \
 4.x 격리 venv 로 되돌아간다. 같은 하네스가 **생성기 라벨과 교사 라벨의 일치도**도 낸다 —
 자작 공격 코퍼스를 외부 모델로 검증할 유일한 기회다.
 
-## 학습 전 확인할 것 하나 — 태스크 불균형
+## 학습 전 확인할 것 — 해소됨
+
+이전 판은 여기에 `pii_per_attack` 결정을 남겨 뒀다. PolyGuard 어댑터를 고치면서
+불균형이 88:1 → 5.9:1 이 되어 **결정할 것이 없어졌다.** 아래는 기록으로 남긴다.
+
+
 
 ```
 PII 108,588 : 공격 1,238 = 88:1   (§6 추정은 54:1)

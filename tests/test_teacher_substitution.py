@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -148,11 +149,34 @@ def test_cli_returns_nonzero_when_the_substitute_is_a_rubber_stamp(tmp_path) -> 
     assert status == 2
 
 
-def test_gold_sidecar_is_not_part_of_the_teacher_input() -> None:
-    """정답을 교사에게 보여 주면 일치도가 아니라 정답 복사를 재게 된다."""
+@pytest.mark.parametrize("split", ["train", "validation"])
+def test_gold_sidecar_is_not_part_of_the_teacher_input(split: str) -> None:
+    """정답을 교사에게 보여 주면 일치도가 아니라 정답 복사를 재게 된다.
+
+    분할별로 나눠 둔 이유 — 교사 풀은 `train` 만 PolyGuard 와 합쳐지고 `validation` 은
+    합성만 쓴다. 한 파일에 섞어 두면 `merge_corpora` 가 분할 불일치로 거부한다.
+    """
     from garim.training.data import load_jsonl
 
-    rows = load_jsonl("data/corpus/attack-unlabeled.jsonl")
+    rows = load_jsonl(f"data/corpus/attack-unlabeled-{split}.jsonl")
     assert rows and all(record.attack_label is None for record in rows)
-    gold = json.loads(open("data/corpus/attack-generator-gold.json", encoding="utf-8").read())
+    gold = json.loads(
+        Path(f"data/corpus/attack-generator-gold-{split}.json").read_text(encoding="utf-8")
+    )
     assert set(gold) == {record.id for record in rows}
+
+
+def test_the_teacher_pool_carries_no_labels() -> None:
+    """★ 교사가 붙일 자리를 비워 둬야 한다.
+
+    PolyGuardMix 는 원천 유해성 라벨(`prompt_harm_label`)을 갖고 있지만 그것은 우리
+    4-way 가 아니다(§6.2.1). 어댑터가 `attack_label` 을 비우고
+    `requires_teacher_label` 만 남기는 이유다.
+    """
+    from garim.training.data import load_jsonl
+
+    rows = load_jsonl("data/corpus/attack-teacher-pool-train.jsonl")
+    assert len(rows) > 10_000, "PolyGuard 가 합쳐지지 않았다"
+    assert all(record.attack_label is None for record in rows)
+    sources = {record.source for record in rows}
+    assert sources == {"PolyGuardMix", "garim-synthetic-attack"}, sources

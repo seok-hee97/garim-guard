@@ -1136,7 +1136,7 @@ custom_patterns:                  # L-CT-03 사용자 정의
 |---|---|---|
 | **판별 (토큰 분류·시퀀스 분류)** | **BERT 계열 인코더** | **양방향 어텐션**이 필수다. NER은 뒤 문맥을 봐야 경계를 정한다(`이상무가` — 인명인가 직책인가). 디코더의 인과 마스크는 구조적으로 불리하다. 그리고 소형(0.1~0.3B)이라 CPU에서 예측 가능하다 |
 | **생성·판정 (자유 서술)** | **Gemma 4** | 정책을 프롬프트로 주고 판정시키는 자리. Apache 2.0이고 Google 모델이라 브리프 요건을 정면으로 충족한다 |
-| **교사 (의사라벨 생성)** | **Gemma 4 + Kanana + Qwen3Guard Stream** | 일반 3자 투표가 아니라 클래스별 2자 합의. INJECTION/LEAK은 Kanana+Gemma, JAILBREAK는 Gemma+Qwen |
+| **교사 (의사라벨 생성)** | **Gemma 4 + Kanana + Qwen3Guard Gen** | 일반 3자 투표가 아니라 클래스별 2자 합의. INJECTION/LEAK은 Kanana+Gemma, JAILBREAK는 Gemma+Qwen |
 
 이 원칙이 §4.1의 충돌을 해소한다. **Gemma 4가 분류 헤드가 없는 것은 결함이 아니라 설계 의도**다 — 생성 모델이니까. 판별에는 판별용 아키텍처를 쓰고, Gemma는 생성이 필요한 자리에 쓴다.
 
@@ -1150,7 +1150,7 @@ custom_patterns:                  # L-CT-03 사용자 정의
 | **L1-ATK (공격 분류)** | **`skt/A.X-Encoder-base`** (같은 백본, 헤드만 다름 — §6.0) | Apache 2.0 | 백본을 공유하면 메모리가 절반이다. 참조 구현 `robustintelligence/pi-t5gemma-2-1b-v5.0`(인코더 전용 + mean-pooling + 선형 헤드, FPR 0.5%에서 F1 89)의 레시피를 이식 |
 | **L2-fast (선택)** | **`kakaocorp/kanana-safeguard-prompt-2.1b`** — 상시 상주(`ttl:0`) | Apache 2.0 | 공격 의도 전담. 단일 토큰 디코드라 밀리초급. **P 0.968**이라 `UNSAFE`만 신뢰하고 `SAFE`는 확정 근거로 쓰지 않는다(§7.1.2) |
 | **L2-judge (선택)** | `Qwen/Qwen3Guard-Gen-4B` / `FrameByFrame/guardrail-korean-gemma-4-E2B` — 둘 다 **검증 후보** | Apache 2.0 / Gemma ToU | RTP-LX 85.7은 독성 데이터·Qwen 자체 측정이라 인젝션/PII 문맥 성능 근거가 아니다. 전용 골드셋과 지연 게이트 통과 전 기본값 없음 |
-| **R2 교사** | Kanana + **Gemma 4 E2B** + Qwen3Guard Stream | Apache 2.0 | 클래스별 자격표 적용. 범용 `Unsafe`는 INJECTION/LEAK 표로 세지 않는다 |
+| **R2 교사** | Kanana + **Gemma 4 E2B** + Qwen3Guard Gen | Apache 2.0 | 클래스별 자격표 적용. 범용 `Unsafe`는 INJECTION/LEAK 표로 세지 않는다 |
 
 #### 4.2.1 ★ 백본을 단독 확정한다 — 비교를 접는다
 

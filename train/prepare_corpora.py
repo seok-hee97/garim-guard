@@ -20,6 +20,7 @@ from garim.training.adapters import (
 )
 from garim.training.assets import asset_manifest_drift
 from garim.training.data import CorpusRecord, validate_corpus, write_jsonl
+from garim.training.sampling import deterministic_subset
 from garim.training.sources import load_source_registry
 from garim.training.split import fingerprint_text, split_kdpii_dialogues
 from garim.training.synthetic import generate_attack_corpus, generate_pii_corpus
@@ -91,7 +92,7 @@ def _write_split_files(output: Path, prefix: str, records: list[CorpusRecord]) -
 
 
 def _public_corpora(
-    *, asset_manifest: Path, sources_manifest: str
+    *, asset_manifest: Path, sources_manifest: str, polyguard_limit: int | None
 ) -> tuple[dict[str, list[CorpusRecord]], list[dict[str, Any]], dict[str, list[str]]]:
     registry = load_source_registry(sources_manifest)
     assets = _load_asset_manifest(asset_manifest)
@@ -168,8 +169,30 @@ def _public_corpora(
         if fingerprint_text(record.text) not in eval_fingerprints
         and str(record.meta.get("source_id")) not in eval_source_ids
     ]
-    corpora["polyguard_train"] = poly_train
+    # ★ 평가셋과 갈라낸 **뒤에** 뽑는다. 순서가 반대면 평가와 겹치는 행이 표본에
+    #   들어갔다가 나중에 빠져 표본 크기가 요청보다 작아진다.
+    #
+    #   전량은 92,710행이다. §6 이 R2 풀을 ~1,920 으로 추정했으므로 전량은 설계 의도를
+    #   크게 넘고 교사 3종 추론이 278k forward 가 된다. 기본값 20,000 은 합성 1,238 과
+    #   합쳐 PII:공격 을 약 5:1 로 만들어 `pii_per_attack=4` 와 자연스럽게 맞물린다
+    #   (고치기 전에는 88:1 이라 공격 1행을 5에폭에 109번 봤다).
+    poly_selected = deterministic_subset(
+        poly_train,
+        polyguard_limit,
+        key=lambda record: record.id,
+        salt="polyguard-train",
+    )
+    corpora["polyguard_train"] = poly_selected
     corpora["polyguard_eval"] = poly_eval
+    reports.append(
+        {
+            "sampling": "polyguard_train",
+            "available": len(poly_train),
+            "selected": len(poly_selected),
+            "limit": polyguard_limit,
+            "method": "stable sha256 rank over record id, order-independent",
+        }
+    )
 
     deep_train_source = registry.source("deepset-prompt-injections")
     deep_train_root = _assert_pinned_asset(
@@ -212,6 +235,12 @@ def main() -> int:
     parser.add_argument("--sources-manifest", default="train/sources.yaml")
     parser.add_argument("--output-dir", default="data/corpus")
     parser.add_argument("--synthetic-count", type=int, default=50_000)
+    parser.add_argument(
+        "--polyguard-limit",
+        type=int,
+        default=20_000,
+        help="PolyGuardMix 한국어 학습 표본 크기. 0 이면 전량(92,710).",
+    )
     parser.add_argument("--seed", type=int, default=20260807)
     parser.add_argument("--skip-public", action="store_true")
     parser.add_argument(
@@ -234,6 +263,7 @@ def main() -> int:
         public, adapter_reports, value_pools = _public_corpora(
             asset_manifest=Path(args.asset_manifest),
             sources_manifest=args.sources_manifest,
+            polyguard_limit=args.polyguard_limit or None,
         )
     pii_synthetic = generate_pii_corpus(
         count=args.synthetic_count,

@@ -318,12 +318,33 @@ def adapt_klue_ner(
     return output, report
 
 
+# ★ PolyGuard 계열은 언어를 **영어 전체 이름**으로 적는다 — `"Korean"` 이지 `"ko"` 가
+#   아니다. 두 어댑터가 `!= "ko"` 로 걸러서 **한 행도 수확하지 못했다.**
+#
+#       PolyGuardMix     한국어 92,740행 → 0행
+#       PolyGuardPrompts 한국어  1,725행 → 0행
+#
+#   조용히 0을 내는 필터라 아무도 안 봤다. §5.4 가 R2 교사 라벨링 풀의 **첫 원천**으로
+#   PolyGuardMix 한국어를 지목했으므로, 이 구멍이 공격 학습 풀을 1,238행으로 묶어 둔
+#   직접 원인이다(§6 추정 대비 88:1 불균형).
+#
+#   값을 하나 더 받는 대신 **정규화해서 비교**한다. 상류가 표기를 바꿔도(ISO 코드로
+#   옮기든, 대소문자를 바꾸든) 다시 0이 되지 않는다.
+_KOREAN_LANGUAGE_NAMES = frozenset({"ko", "kor", "korean", "ko-kr"})
+
+
+def _is_korean(value: object) -> bool:
+    return isinstance(value, str) and value.strip().lower().replace("_", "-") in (
+        _KOREAN_LANGUAGE_NAMES
+    )
+
+
 def adapt_polyguard_mix(rows: Iterable[Mapping[str, Any]]) -> Iterator[CorpusRecord]:
     """Yield only Korean prompts; source harm labels are not project attack labels."""
     for index, row in enumerate(rows):
         metadata = row.get("metadata")
         language = metadata.get("language") if isinstance(metadata, Mapping) else None
-        if language != "ko":
+        if not _is_korean(language):
             continue
         text = row.get("prompt")
         if not isinstance(text, str) or not text.strip():
@@ -346,7 +367,7 @@ def adapt_polyguard_mix(rows: Iterable[Mapping[str, Any]]) -> Iterator[CorpusRec
 
 def adapt_polyguard_prompts(rows: Iterable[Mapping[str, Any]]) -> Iterator[CorpusRecord]:
     for index, row in enumerate(rows):
-        if row.get("language") != "ko":
+        if not _is_korean(row.get("language")):
             continue
         text = row.get("prompt")
         if not isinstance(text, str) or not text.strip():
