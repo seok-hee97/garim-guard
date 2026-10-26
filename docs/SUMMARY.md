@@ -90,7 +90,7 @@ SHA-256 manifest 로 검증한다. 학습 경로는 Apache-2.0 만 허용한다.
 |---|---|
 | 손실 | 예제별 태스크 마스킹, PII O-라벨 가중 0.25, 공격 = 하드 라벨 0.5 + kanana 소프트 타깃(KL, T=2) + Qwen JAILBREAK 보조 0.25 |
 | 샘플링 | PII:공격 4:1 |
-| 하이퍼파라미터 | lr 3e-5, batch 32, max len 512 / stride 64, 5 epoch, seed 13·37·73 |
+| 하이퍼파라미터 | lr 3e-5, batch 32(16행 × 2 기울기 누적), max len 512 / stride 64, 5 epoch, seed 13·37·73, CUDA bf16 autocast |
 | 조기 중단 | PII char-recall 과 공격 macro-recall **둘 다** 정체될 때 |
 | 내보내기 | ONNX FP32 → dynamic per-channel QInt8, opset 18 |
 
@@ -145,12 +145,12 @@ L1 전담이다. 이 공백을 L1 이 메워야 하며, 그래서 L1 학습이 �
 
 | 구분 | 상태 |
 |---|---|
-| L0 런타임, 정책, 볼트, CLI, 프록시 | 완료 — 테스트 547개 통과, 외부통신 0 소켓 봉인 게이트 |
+| L0 런타임, 정책, 볼트, CLI, 프록시 | 완료 — 테스트 552개 통과, 외부통신 0 소켓 봉인 게이트 |
 | L1 학습·내보내기·런타임 연결 코드 | 완료 — 학습 가중치 없음 |
 | L2 Gemma 4 판정기 | 완료 — 온디바이스 실측 |
-| 데이터 준비 | 완료 — 교사 입력 19,195행 확정, 최종 평가셋과 겹치는 학습 문장 제거 |
+| 데이터 준비 | 완료 — 교사 입력 19,157행 확정(2,048토큰 초과 38행 제외), 최종 평가셋과 겹치는 학습 문장 제거 |
 | RunPod 배선 | **리허설 통과** — `train/runpod_pipeline.py --rehearse` 로 교사 대역을 써서 3~10단계 전체(봉인·preflight·학습 dry-run)를 GPU 없이 검증 |
-| **교사 3종 라벨링 → 재봉인 → 3-seed 학습 → ONNX 평가** | **남음 — GPU(RunPod) 필요.** `python train/runpod_pipeline.py --device cuda --train` 한 명령 ([RUNPOD.md](RUNPOD.md)) |
+| **교사 3종 라벨링 → 재봉인 → 3-seed 학습 → ONNX 평가** | **남음 — GPU(RunPod, RTX 3090/4090 24GB 가능) 필요.** `python train/runpod_pipeline.py --device cuda --train` 한 명령 ([RUNPOD.md](RUNPOD.md)) |
 | 프록시 전 구간 실모델 검증 | 완료 — 로컬 Gemma 를 상류로 두고 상류가 **토큰만** 받았음을 확인(`bench/proxy_e2e.py`) |
 | Gemini 측정(마스킹 품질·베이스라인·프록시 상류) | **남음 — 유료 키 필요.** 현 키는 Free Tier(모델당 일 20회). 명령 세 개는 준비됨 |
 | 수동 골드셋(T3) · Cohen's κ | 사람 검수 없는 운영으로 미수행 |

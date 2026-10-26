@@ -35,7 +35,7 @@
 ```
 15bca7d41d9df1ab9cd15826a21316c46b64ef9b47a7c14814d7d0a3cad56994  data/merged/pii-train.jsonl
 c5f09f32fd61e4e1c538f0c74bd5e2272646732d2e90a5002b46d0c21b38a57a  data/merged/pii-validation.jsonl
-5877a7d5c76689cfd1533daa1b32f19a587c4f4612633999977fc12f3d8e0840  data/corpus/attack-teacher-input.jsonl
+fc305d710e93efbd4dd59b49e1d8b792de6f1b2f1782f19fb468c62c456f4b9d  data/corpus/attack-teacher-input.jsonl
 34f9d7ac891fe1fb96476345bff8818d1b81899bf0768ae868c2f05dcaa4e48c  data/corpus/t4-test.jsonl
 1cd1d529f5ab6b4abd2a1d18770fe5f1c1921ee176f4b0bafca12bf84bef40db  data/corpus/t4-prime-test.jsonl
 ```
@@ -58,6 +58,16 @@ c5f09f32fd61e4e1c538f0c74bd5e2272646732d2e90a5002b46d0c21b38a57a  data/merged/pi
   휠이고 CUDA 13 런타임(`nvidia-*-cu13`)을 끌고 온다. pod 의 `nvidia-smi` 가 `CUDA Version`
   13.0 이상을 보여야 한다. RunPod 생성 화면의 CUDA 버전 필터로 고른다. 아니면 torch 가 GPU 를
   못 보고, `runpod_pipeline.py` 의 0단계(CUDA 확인)가 바로 멈춘다.
+- **GPU — RTX 3090 / 4090(24GB) 둘 다 된다.** 둘 다 bf16 과 CUDA 13(Ampere sm_86 · Ada sm_89)을
+  지원한다. 4090 이 bf16 처리량이 더 커서 빠르고, 3090 도 결과는 같다. 24GB 에 맞추려고 고친 것:
+  - **교사 로짓** — 배치 전체 위치의 로짓(배치 × 길이 × 어휘)을 만들던 것을 마지막 실토큰
+    위치에만 걸도록 바꿨다. 실제 Qwen 에서 값이 같은 것을 확인했다(max|Δlogit| 0).
+  - **교사 입력 길이 상한 2,048토큰** — 최장 행이 약 4만 토큰이었다. kanana 문맥(8,192)을 넘는 행이
+    있었고, 그 행이 든 배치는 어떤 GPU 에서도 죽는다. 38행(0.2%)을 감사 파일로 뺀다.
+  - **학습** — 논리 배치 32 는 그대로, 16행씩 두 번 기울기를 쌓고(`micro_batch_size: 16`) CUDA 에서
+    bf16 autocast(`precision: bf16`, master weight fp32). fp32 · 32행 그대로였다면 24GB 근거가 없었다.
+  - **0b 메모리 프로브** — 교사보다 먼저 학습 최악 배치(32행 전부 512토큰)를 GPU 에서 돌려 최대
+    메모리를 잰다. VRAM 의 85% 를 넘으면 `micro_batch_size` 를 줄이라고 하고 멈춘다.
 - **디스크 60GB 이상** — 고정 자산 약 17GB(교사 3종 15GB · 원천 데이터 2.5GB) + venv(torch·CUDA
   라이브러리) + 코퍼스·체크포인트·ONNX.
 - `HF_TOKEN` 이 필요하다(gated 아닌 저장소도 rate limit 때문에 있는 편이 낫다).
@@ -92,9 +102,10 @@ nvidia-smi        # CUDA Version >= 13.0 인지 확인
 
 | 단계 | 내용 |
 |---|---|
+| 0·0b | CUDA 확인 → 학습 최악 배치 GPU 메모리 프로브(85% 넘으면 멈춤) |
 | 3 | PII 병합 — **최종 평가셋 지문을 학습에서 뺀다**. 해시 출력 → 위 표와 대조 |
 | 5·5a | 생성기 라벨 분리(사이드카 보관), deepset 번역 적용(`train/translations/`), 외부 이진 gold |
-| 5b·5c | 공격 교사 풀 — 평가셋 지문과 **PII 학습 문장**을 뺀다. train+validation 을 한 입력으로(19,195행) |
+| 5b·5c | 공격 교사 풀 — 평가셋 지문과 **PII 학습 문장**을 뺀다. train+validation 을 한 입력으로, kanana 기준 2,048토큰 초과 행은 `attack-teacher-overlength.jsonl` 로 뺀다 |
 | 6 | 교사 3종 — `run_teacher.py` 가 이어 돌기를 지원하므로 끊기면 같은 명령을 다시 부른다 |
 | 6b | 일치도·JAILBREAK 독립성 — 동의율 ≥ 0.95 면 멈춘다(`--accept-rubber-stamp` 로만 진행) |
 | 7 | 합의(`--drop-review`) — 합의된 행 전체에서 **성분 단위**로 검증 10% 를 떼어 낸다 |
@@ -121,10 +132,11 @@ python train/benchmark_l1.py --model-dir train/artifacts/l1-onnx --output train/
 
 `evaluate_l1.py` 의 `--input` 은 8b 에서 봉인한 여덟 파일 **전부**여야 한다 — 봉인과 다르면 거부한다.
 
-**학습이 GPU 메모리 부족(OOM)으로 죽으면** `train/training.yaml` 의 `batch_size` 를 줄이고 같은
-명령을 다시 부른다. 교사 단계는 이어 돌기라 이미 끝난 행을 건너뛰고, 봉인(8·8b)은 바뀐 설정으로
-다시 만들어진다. batch 32 × 512토큰 fp32 의 VRAM 은 재지 못했다(이 Mac 은 swap 이 거의 차서 RSS
-측정이 무의미했다) — 첫 epoch 시작 직후 `nvidia-smi` 로 확인한다.
+**0b 프로브가 멈추거나 학습이 OOM 으로 죽으면** `train/training.yaml` 의 `micro_batch_size` 를
+절반으로 줄이고 같은 명령을 다시 부른다. `batch_size`(논리 배치 32)는 줄이지 않는다 — 그건 학습
+설정을 바꾸는 일이다. 교사 단계는 이어 돌기라 이미 끝난 행을 건너뛰고, 봉인(8·8b)은 바뀐 설정으로
+다시 만들어진다. 학습 VRAM 은 로컬에서 잴 수 없어서(Mac 은 CUDA 가 없고 swap 이 거의 차 RSS 도
+무의미했다) 0b 가 pod 에서 교사보다 먼저 잰다.
 `benchmark_l1.py` 의 지연은 pod CPU 값이라 §7.1.3 의 노트북 기준과 다르다. 지연은 로컬에서
 다시 잰다.
 

@@ -2540,7 +2540,7 @@ unknown         0.xxx      0.xxx         69   ← prose 폴백 경로 검증
 | 11 | **base64 스팬 역매핑 왕복 미확인** — 구간 맵에 흡수된다는 것이 논증뿐이다(부록 A.6) | W1 |
 | 12 | ~~**UTS #39 confusables 버전**~~ — **해소.** `CONFUSABLES_UNICODE_VERSION = "14.0.0"` 으로 ①과 같은 판에 맞췄고, `tests/test_confusables_pin.py` 가 런타임 `unidata_version` 이 벗어나면 실패한다. 표는 전체 confusables.txt가 아니라 **키릴·그리스→라틴 손선별 부분집합**이라는 사실도 같이 못 박았다(전체는 한국어 업무문서에 없는 문자까지 바꿔 오탐을 만든다) | ✅ |
 | 13 | **`mixed` 문서의 평균 세그먼트 수** — §7.2.1의 세그먼트 분모가 여기 달렸다 | W4 |
-| 14 | `kimchunsik03/KoreanGuardrail` 라이선스 — §9-2의 근거로 쓰므로 확인 필요 | W0 |
+| ~~14~~ | ✅ **닫혔다(2026-10-26)** — `kimchunsik03/KoreanGuardrail` 데이터는 **CC-BY-4.0**, 동봉 코드는 Apache-2.0(데이터셋 README 메타데이터·라이선스 절). `train/sources.yaml` 에 같은 값으로 등록돼 있다. 결과를 인용할 때 출처를 표기한다. 피어리뷰 벤치가 아니라는 단서는 그대로다(RESULTS §1) | ~~W0~~ |
 | 15 | AI-Hub는 금융 보조평가 접근 문제만 남는다. DART는 이용조건 확인 전 disabled, Thunder-DeID 승인은 placeholder 문맥 평가 선택사항이며 둘 다 실 RRN 증거를 제공하지 않는다 | **W0** |
 
 ### 8.6 W0 — 착수 전에 반드시 끝내야 하는 것
