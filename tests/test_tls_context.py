@@ -18,7 +18,9 @@ OUTBOUND = (
     "garim/training/sources.py",  # 원천 라이선스 게이트
     "garim/training/assets.py",  # KDPII 내려받기
     "bench/mask_quality.py",  # §8.1-13b 하네스
+    "train/translate_with_gemini.py",  # deepset 번역 — 공개 데이터만
 )
+# L2 판정기(`garim/detect/l2.py`)는 목록에 없다 — 루프백만 받고(생성 시점 거부) TLS 가 없다.
 _URLOPEN = re.compile(r"urlopen\(")
 _WITH_CONTEXT = re.compile(r"urlopen\((?:[^()]|\([^()]*\))*context=https_context\(\)", re.S)
 

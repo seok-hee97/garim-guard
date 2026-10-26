@@ -12,3 +12,9 @@ Copyright 2026 Garim contributors
 Apache-2.0을 택한 이유는 특허 조항과, CredSweeper(MIT)·ONNX Runtime(MIT)·
 skt/A.X-Encoder-base(Apache-2.0) 임포트 결합이 전부 문제없기 때문이다.
 설계 근거는 docs/DESIGN.md §8.6.2에 있다.
+
+── 데이터 고지 ────────────────────────────────────────────
+`train/translations/deepset-*-ko.jsonl` 은 deepset/prompt-injections(CC-BY-4.0,
+https://huggingface.co/datasets/deepset/prompt-injections)의 한국어 번역이다.
+원 데이터의 라이선스(CC-BY-4.0)를 따르며, 행마다 `method` 필드에 번역 방법을 적었다
+(Gemini 3.8 Flash 50행 · Claude 612행). 원문은 저장소에 포함하지 않는다.
