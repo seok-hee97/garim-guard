@@ -104,7 +104,8 @@ nvidia-smi        # CUDA Version >= 13.0 인지 확인
 |---|---|
 | 0·0b | CUDA 확인 → 학습 최악 배치 GPU 메모리 프로브(85% 넘으면 멈춤) |
 | 3 | PII 병합 — **최종 평가셋 지문을 학습에서 뺀다**. 해시 출력 → 위 표와 대조 |
-| 5·5a | 생성기 라벨 분리(사이드카 보관), deepset 번역 적용(`train/translations/`), 외부 이진 gold |
+| 2b·2c | T4·T4′ 생성, deepset 번역 적용(`train/translations/`)·외부 이진 gold — 3단계 차단 목록이 이 파일들을 읽는다 |
+| 5 | 생성기 라벨 분리(사이드카 보관) |
 | 5b·5c | 공격 교사 풀 — 평가셋 지문과 **PII 학습 문장**을 뺀다. train+validation 을 한 입력으로, kanana 기준 2,048토큰 초과 행은 `attack-teacher-overlength.jsonl` 로 뺀다 |
 | 6 | 교사 3종 — `run_teacher.py` 가 이어 돌기를 지원하므로 끊기면 같은 명령을 다시 부른다 |
 | 6b | 일치도·JAILBREAK 독립성 — 동의율 ≥ 0.95 면 멈춘다(`--accept-rubber-stamp` 로만 진행) |

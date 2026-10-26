@@ -123,6 +123,35 @@ def materialize_t4() -> None:
         print(f"\n== 2b {name} {len(records)}행  sha256 {_digest(CORPUS / name)}")
 
 
+def apply_deepset() -> None:
+    """2c — deepset 번역 적용과 외부 이진 gold. 3단계보다 **먼저** 와야 한다.
+
+    ★ 회귀 — 이 단계가 5a(교사 풀 직전)에 있었는데, 3단계(PII 병합)의 평가 차단 목록이
+    `attack-external-gold-test.jsonl` 을 읽는다. 로컬 리허설은 이전 실행이 남긴 파일 덕에
+    통과했고, **새 pod 첫 실행에서 3단계가 `FileNotFoundError` 로 멈췄다.** 이제 리허설은
+    파생 파일을 지운 상태에서도 돌려 본다.
+    """
+    deepset = (("train", "deepset_train_queue-train"), ("test", "deepset_eval_queue-test"))
+    for split, queue in deepset:
+        _require(
+            f"2c deepset 번역 적용 ({split})",
+            _python(
+                "train/apply_translations.py",
+                "--queue", str(CORPUS / f"{queue}.jsonl"),
+                "--translations", f"train/translations/deepset-{split}-ko.jsonl",
+                "--output", str(CORPUS / f"deepset-ko-{split}.jsonl"),
+            ),
+        )
+    _require(
+        "2c deepset 외부 이진 gold",
+        _python(
+            "train/apply_external_eval_labels.py",
+            "--input", str(CORPUS / "deepset-ko-test.jsonl"),
+            "--output", str(CORPUS / "attack-external-gold-test.jsonl"),
+        ),
+    )
+
+
 def merge_pii() -> None:
     """3 — PII 병합. 최종 평가셋과 겹치는 문장을 **학습 쪽에서** 뺀다.
 
@@ -159,25 +188,6 @@ def build_pool() -> Path:
                 "--gold", str(CORPUS / f"attack-generator-gold-{split}.json"),
             ),
         )
-    deepset = (("train", "deepset_train_queue-train"), ("test", "deepset_eval_queue-test"))
-    for split, queue in deepset:
-        _require(
-            f"5a deepset 번역 적용 ({split})",
-            _python(
-                "train/apply_translations.py",
-                "--queue", str(CORPUS / f"{queue}.jsonl"),
-                "--translations", f"train/translations/deepset-{split}-ko.jsonl",
-                "--output", str(CORPUS / f"deepset-ko-{split}.jsonl"),
-            ),
-        )
-    _require(
-        "5a deepset 외부 이진 gold",
-        _python(
-            "train/apply_external_eval_labels.py",
-            "--input", str(CORPUS / "deepset-ko-test.jsonl"),
-            "--output", str(CORPUS / "attack-external-gold-test.jsonl"),
-        ),
-    )
     evaluation = (*EVALUATION_INPUTS, *EXTRA_BLOCKED)
     blocked = [
         *(arg for path in evaluation for arg in ("--blocked-eval", str(path))),
@@ -310,6 +320,7 @@ def main() -> int:
         check_cuda()
         probe_gpu_memory()
     materialize_t4()
+    apply_deepset()
     merge_pii()
     teacher_input = build_pool()
     if args.rehearse:
