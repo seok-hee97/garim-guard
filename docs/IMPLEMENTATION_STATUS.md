@@ -1,6 +1,6 @@
 # 가림 구현 현황
 
-> 기준일: 2026-09-07
+> 기준일: 2026-10-26 (이전 판 2026-09-07)
 > 범위: 고정 자산 준비와 로컬 교사 추론을 포함한 현재 구현·실행 상태
 
 이 문서는 [DESIGN.md](DESIGN.md)의 기획을 현재 저장소 코드에 대응시킨 실행 현황이다.
@@ -12,20 +12,20 @@
 | 영역 | 상태 | 현재 산출물 | 아직 실행하지 않은 것 |
 |---|---|---|---|
 | P0/L0 런타임 | **구현 완료** | 세그먼트, 가역 정규화, 규칙 탐지, 병합, 정책, 볼트, API/CLI | 실 운영 트래픽 성능 측정 |
-| L1 런타임 계약 | **구현 완료** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드 | 학습된 ONNX 가중치 연결 |
+| L1 런타임 계약 | **구현 완료 · CLI/프록시 연결** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드, `--l1-model-dir`, 프록시 스레드 간 공유(토크나이저 직렬화·스레드별 취소) | 학습된 가중치 |
 | 모델·데이터 고정 | **구현·로컬 검증 완료** | 활성 자산 18개, revision/라이선스 레지스트리, 원격 tree/LFS 검증, exact 파일 manifest, `uv.lock` | 새 머신에서 동일 자산 재현 |
 | 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | deepset 번역본 적용 |
 | 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
-| 번역 | **인터페이스 완료** | split 봉인, ID 완전성 검사, 원문 해시 보존 | deepset train/test 한국어 번역 작성·적용 |
-| 교사·수동 라벨링 | **파이프라인 완료 / 실행 중** | 교사 3종 로컬 추론, 배치·재개 검증, 클래스별 합의, metadata-free 블라인드 큐, train/test exact-coverage 적용 | 세 교사 전체 산출물과 합의 게이트 완료 |
+| 번역 | **완료** | deepset 662행 — Gemini 3.8 Flash 50 + Claude 612(한도 초과로 전환, 행별 `method`), `train/translations/`, `deepset-ko-{train,test}` 적용 | — |
+| 교사·수동 라벨링 | **입력 확정 · 리허설 통과 / 실행은 RunPod** | 교사 풀 19,010행, 교사 입력 19,195행(train+validation), `train/runpod_pipeline.py` 3~10단계 리허설 통과, deepset 외부 이진 gold 116행 | 교사 3종 실행(Gemma 4 는 GPU 필요). 로컬 두 교사만으로는 정족수상 합의 불가 |
 | L1 공동 학습 | **구현 완료** | SHA-256 입력 봉인, A.X 공유 백본+4개 헤드, 4:1 샘플링, soft/aux loss, 3 seed, 이중 early stopping | optimizer를 사용하는 실제 GPU 학습 |
 | 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
-| L2 | **비활성 · 축별 평가 착수** | 후보 manifest 고정, `thorough`의 degraded 응답, 축 (b) 공개셋 실측 → [L2_EVALUATION.md](L2_EVALUATION.md) | 모델 통합·배선·활성화 |
+| L2 | **구현 · Gemma 4 E2B 판정기 연결** | `garim/detect/l2.py` — 루프백 llama-server, 교사와 같은 정책 프롬프트, 3-스트림 분리, 파싱 실패 warn+degraded. 고정 revision → Q8_0 → Q4_K_M GGUF | interactive 에스컬레이션(§6.4.6 W1 게이트), kanana L2-fast |
 | RunPod 실행 | **절차 문서 완료** | `docs/RUNPOD.md` — 저장소만 올리고 코퍼스는 재생성(비트 동일 확인), 해시 대조 게이트 | Gemma 교사·CUDA 학습 실행, `pii_per_attack` 실측 결정 |
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
-| §7.3 베이스라인 | **하네스 완료 / 6종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana, detect-secrets·CredSweeper(축 d), **Presidio `ko`/strict/vanilla 3팔(H1)** | Gemini(키가 free tier 라 429) |
+| §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 키가 Free Tier(모델당 일 20회)로 확정, 유료 키 필요 |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
-| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부 | 실사용 검증 |
+| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부, **`tool_calls` 인자 검사·복원**, 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
 현재 단계는 **학습 준비 코드와 로컬 고정 자산·코퍼스 준비 완료**다. 배포 가능한 L1
@@ -197,25 +197,181 @@ garim 을 import 할 수 있으면 참조 구현과의 일치까지 확인한다
 수치와 근거는 [L2_EVALUATION.md](L2_EVALUATION.md) 에, 학습 전 실측 전체는
 [RESULTS.md](RESULTS.md) 에 한계와 함께 모아 뒀다.
 
+## 2026-10-26 갱신 — 다이어그램 경로를 실제 입력으로 돌려 본 결과
+
+앱 → 검사(L0·L1·판정) → Gemini/OpenAI → 복원 → 앱 경로를 실제 입력으로 돌려 점검했다.
+L0·판정·마스킹·복원은 동작했고, 아래를 고쳤다. 테스트 503 → **547개 통과**, ruff·외부통신
+봉인·커밋 PII 검사 통과.
+
+### 1. 프록시가 함수 호출 인자를 원문 그대로 상류로 보냈다
+
+`segments_from_messages` 는 `content` 만 읽는다. 함수 호출 대화는 매 요청에 이전 턴의
+assistant `tool_calls` 를 함께 보내는데, 그 인자가 검사 없이 나갔다. 같은 요청에서 `tool`
+메시지의 이메일은 `<EMAIL_1>` 로 가려지고 바로 앞 `tool_calls` 의 같은 이메일은 원문이었다.
+응답 쪽은 `content` 만 복원해서 앱의 도구가 `{"to": "<PHONE_1>"}` 을 받았다.
+
+- 요청: `tool_calls[].function.arguments`·`function_call.arguments` 를 `structured` 세그먼트로
+  검사한다. `\uXXXX` 이스케이프를 풀어 검사하고, 마스킹 후 JSON 이 깨지면 보내지 않는다.
+- 응답: 인자의 문자열 리프만 복원해 다시 직렬화한다(따옴표가 든 값이 인자를 깨지 않게).
+- 같은 값은 `content` 와 인자에서 같은 토큰으로 묶인다(볼트 공유).
+- 상류 오류 본문을 `detail` 로 넘긴다(429·503 구분), `--upstream-timeout` 추가.
+
+### 2. L1 은 학습이 끝나도 꽂을 자리가 없었다
+
+`l1_backend=` 는 라이브러리 API 에만 있었다. CLI·프록시에 `--l1-model-dir` 를 넣었다.
+프록시는 요청마다 Inspector(볼트 격리)를 만들고 백엔드는 공유하는데, 공유를 견디려면 둘이
+필요했다.
+
+- **토크나이저 직렬화.** 런타임이 fast tokenizer 를 두 설정(청킹은 무절단, 추론은 절단)으로
+  번갈아 부른다. 락을 빼고 8스레드 400회를 돌리면 **`RuntimeError: Already borrowed`** 로
+  죽는 것을 재현했다(청킹 경로라 try 밖 — 프록시 500). 락으로 해소, 회귀 테스트 고정.
+- **스레드별 취소.** RunOptions 슬롯이 하나라 요청 A 의 타임아웃이 요청 B 의 추론을 끊을 수
+  있었다. 워커 스레드 id 로 추적한다.
+
+### 3. 조사 교정이 실제로 가리는 값에 한 번도 안 걸렸다
+
+교정이 한글로 끝나는 값에만 걸렸는데 L0 가 가리는 값은 전부 숫자로 끝난다
+(`010-1234-5678를`). 끝자리 숫자의 한자어 읽기로 교정한다. 토큰 뒤 서술격 `이에요` 는
+건드리지 않는다(`김철수가에요` 방지). DESIGN 부록 A.4 에 반영.
+
+### 4. L2 판정기 — Gemma 4 E2B 를 온디바이스로 연결했다
+
+`garim/detect/l2.py`. 루프백 OpenAI 호환 서버(llama-server·Ollama)에만 붙고 비루프백은
+생성 시점에 거부한다(`tools/no_external_calls.py` 에도 경계 검사 추가). 정책 프롬프트는
+교사와 한 출처다. 설계 결정은 DESIGN §6.4.7.
+
+- 자산: `google/gemma-4-E2B-it@3e22461` → llama.cpp `620d2225c` 변환기 → Q8_0
+  (sha256 `354c1c55…`, 4.95GB) → Q4_K_M 재양자화(sha256 `b44e5586…`, 3.4GB).
+  `models/derived/` — Git 밖.
+- 축 (b) KoreanGuardrail 600: 단독 **0.633 / 0.017**, 스트림 분리 **0.810 / 0.057**,
+  행당 1.17초 / 2.46초(M1). 상세는 [L2_EVALUATION.md](L2_EVALUATION.md).
+- 실제 CLI 왕복: `garim --mode thorough --l2-endpoint … check` 가 유출·탈옥·된소리 변형을
+  잡고 정상 요약 요청은 통과, degraded 없음.
+
+### 5. L1 데이터 — 번역을 끝내고 교사 입력을 확정했다
+
+- deepset 662행 번역: Gemini 3.8 Flash 50행 + Claude 612행. Gemini 키가 하루 한도에 걸려
+  나머지를 옮겼고, 그 사실이 행마다 `method` 에 남는다. 번역본은 `train/translations/` 에
+  저장소와 함께 둔다(LLM 번역은 재생성이 비트 단위로 같지 않다. 고지는 NOTICE).
+- 교사 풀은 처음 19,025행(기존 18,511 + deepset 514)이었고, 아래 8번의 차단 목록이 들어가
+  **19,010행**(평가 지문 18 · PII 학습 문장 20 제거), 교사 입력 **19,195행**이 됐다.
+  deepset 외부 이진 gold 116행 생성.
+- **교사 실행은 RunPod 으로 넘긴다.** 정족수 2표에서 kanana 는 NONE/INJECTION/SYSTEM_LEAK,
+  Qwen 은 JAILBREAK 만 투표하므로 Gemma 없이 로컬 두 교사만으로는 어떤 행도 합의되지 않는다.
+  Gemma 교사는 bf16 transformers 라 GPU 가 필요하다(GGUF 로 돌리면 교사 provenance 가 바뀐다).
+
+### 6. 학습 봉인은 낡았다 — 교사 라벨 뒤에 다시 봉인한다
+
+`data/training-input-manifest.json`(9068012)은 해시가 맞지만 PolyGuard 언어 필터 수정
+**이전** 것이라 공격 학습이 합성 1,238행뿐이다. `train_l1.py` 의 증류 게이트(교사 라벨
+0행이면 거부)가 그대로 학습하는 것을 막는다. RUNPOD.md 6~8b 단계에서 다시 봉인한다.
+
+### 7. 외부 API — 오늘은 둘 다 쓸 수 없었다
+
+- **Gemini 키는 Free Tier 로 확정됐다.** 오류 본문:
+  `generate_content_free_tier_requests, limit: 20`(모델당 하루 20회). 마스킹 품질(204회)과
+  프록시 실호출(3.8-flash 는 503·240초 타임아웃)을 끝내지 못했다. 유료 키가 필요하다.
+- **OpenAI 키는 크레딧이 0** 이다(`credit_balance_exhausted`).
+- ⚠️ 한도를 확인하기 전에 합성 프롬프트 일부와 공개 deepset 10행이 Free Tier 로 나갔다.
+  §7.4(유료 tier 만)를 어겼다. 실제 개인정보는 없었다.
+
+### 7b. 프록시 전 구간을 실제 모델로 — 통과
+
+`bench/proxy_e2e.py` 가 실제 `garim proxy` 서버를 루프백 임의 포트에 띄우고 합성 PII 를
+OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 바꿔 한 번, 그대로 한 번 옮겨 적게
+해서 **상류가 무엇을 받았는지 상류의 입으로** 확인한다(프록시는 `<…>` 만 복원하므로).
+
+로컬 Gemma 4 llama-server 를 상류로 둔 결과 — 첫 줄 `연락처 [PHONE_1], 메일 [EMAIL_1]`
+(상류는 토큰만 받았다), 둘째 줄은 원문으로 복원, `X-Garim-Verdict: mask`, degraded 없음.
+다이어그램의 "마스킹된 채로 → LLM API → 복원" 구간을 실모델로 처음 끝까지 돌렸다. 같은
+명령에 상류만 바꾸면 Gemini 로 잰다(아래 유료 키 목록).
+
+### 8. RunPod 리허설 — 교사 실행 뒤 단계에서 결함 다섯을 찾았다
+
+교사 라벨링 이후 단계(6b~10)는 실제 코퍼스로 끝까지 돈 적이 없었다. GPU 교사를 다 돌린
+뒤에 배선 결함을 찾으면 그 시간이 버려진다. 교사 대역(형식·ID·투표 구조만 같은 지어낸
+라벨)으로 실제 CLI 를 돌리는 리허설을 만들어 돌렸고, 다섯이 나왔다. 상세 표는
+[RUNPOD.md](RUNPOD.md#리허설이-찾은-것--교사-실행-뒤-단계의-결함-다섯-2026-10-26).
+
+1. **6b 일치도 하네스** — 기본 gold 경로가 25a3528 이전 이름이었고, 교사 산출물이 gold 와
+   정확히 같은 ID 이기를 요구해 풀이 커진 뒤 `extra=17,787` 로 멈추게 돼 있었다.
+2. **7단계 분할** — `group or template` 한 키로 버킷을 정해 합성 template 300개 전부가 갈릴
+   수 있었다. union-find 성분 단위로 바꿨다(교사 합의분·사람 검수분 공통).
+3. **PolyGuard group** — `metadata.source`(하위 데이터셋 이름)를 행 ID 로 읽어 17,273행이 group
+   둘로 뭉쳤다. 검증 분할에 PolyGuard 가 0행이었고, 해시가 반대였다면 공격 데이터 84% 가
+   검증으로 빠졌다. 행 단위 group 으로 고치고 기존 코퍼스에 같은 규칙을 적용했다(ID·표본
+   불변, load→write 왕복이 바이트 동일함을 먼저 확인).
+4. **8단계 교차 태스크 중복** — `네, 맞습니다.` 류가 KDPII 와 PolyGuard 에 같이 있었다.
+   `merge_corpora --blocked-other-task` 로 공격 풀에서 PII 학습 문장을 뺀다.
+5. **8b 평가 지문 중복** — PII 병합에 평가 차단 목록이 없었다(KDPII test 일반 발화, 상류
+   KLUE 의 라벨까지 같은 train·validation 문장). 학습 쪽에서 뺀다 — 평가셋과 봉인 규칙은
+   그대로다. PII 학습 108,588 → 108,499, 검증 7,734 → 7,702.
+
+리허설 통과 후 `train/runpod_pipeline.py` 를 단계의 유일한 출처로 삼았다 — README 의 수동
+명령은 PII 파일을 평가 차단 없이 넣고, 합성 공격을 생성기 라벨과 교사 라벨로 **두 번**
+넣는 조합이라 그대로 따랐다면 봉인에서 멈췄을 것이다. 정리했다.
+
+⚠️ 리허설은 결정적 코퍼스 단계(PII 병합·교사 풀)를 RunPod 과 똑같이 다시 만든다. 그래서
+`data/training-input-manifest.json`(9068012) 은 이제 검증에 실패한다 — 원래 다시 봉인할
+대상이었다.
+
+### 9. RunPod 전 정확성 검토 — "새 pod 에서 저장소만으로 도는가"
+
+로컬에서 돈 것이 아니라 **clone 한 저장소만으로 새 머신에서 도는가**를 기준으로 다시 봤다.
+
+| 항목 | 결과 |
+|---|---|
+| 작업 브랜치가 원격에 있는가 | ❌ **없다.** 원격에는 `main`(구 프로젝트)뿐이고 가림 커밋 전부와 미커밋 변경이 이 Mac 에만 있다. 푸시 전에는 RunPod 이 받을 것이 없다 |
+| RUNPOD.md clone 명령 | ❌ → 고침. `git clone <repo> && cd safeagent-kr` 는 기본 브랜치(구 프로젝트)를 받고 디렉터리 이름도 틀렸다 |
+| T4·T4′ 생성 단계 | ❌ → 고침. 커밋된 생성 스크립트가 없었다(ba8f6d9 에서 한 번 손으로 씀). 새 pod 에선 3단계가 파일을 못 찾는다. 오케스트레이터 2b 단계로 넣었고 재생성본이 로컬본과 바이트 동일 |
+| 코퍼스 재현 | ✅ `prepare_corpora` 를 원자산에서 다시 돌려 16개 전부 바이트 동일 — PolyGuard `group_id` 제자리 수정이 고친 어댑터 출력과 같다는 증명 |
+| 실제 A.X 로 학습 루프 | ✅ CPU 미니 학습(64+32행, 3 seed × 1 epoch, 128토큰) — 학습·체크포인트·seed 보고서 정상, 최대 메모리 3.2GB |
+| **실제 그래프 양자화** | ❌ → 고침. `quant_pre_process` 의 symbolic shape inference 가 ModernBERT 의 동적 `Range` 에서 죽었다. 대역 인코더엔 `Range` 가 없어 테스트가 통과했다 — **학습을 다 마친 뒤 11단계에서 드러날 자리**. 익스포터의 stale `value_info` 를 비우고 symbolic 패스를 끈다. 재현 테스트 추가(고치기 전 코드에서 실패 확인) |
+| 내보내기 → 평가 → 벤치 → 런타임 | ✅ FP32 595MB · INT8 152MB(설계 예측 ~149MB), FP32 대비 공격 확률 차 ≤ 0.03, 봉인 입력 평가·FP32 기준 대비 저하 보고, `garim --l1-model-dir` 에서 L1 동작(degraded 없음) |
+| CUDA | ⚠️ torch 2.13 휠이 CUDA 13 런타임 — 드라이버가 CUDA 13 을 지원하는 pod 필요. 오케스트레이터 0단계에서 먼저 확인하고 멈춘다 |
+| seed 선택 | ⚠️ 자동 아님 — RUNPOD.md 11단계에 기준과 명령, pod 종료 전 회수 목록을 적었다 |
+
+**첫 INT8 지연 실측(실제 A.X 그래프) — 판정용 아님.** 미니 학습 체크포인트를 내보낸 INT8(그래프·크기는
+본 학습과 같다)을 이 Mac 에서 쟀다: 128토큰 p50 233ms / 256토큰 587ms / 512토큰 942ms, 로드 후 RSS
+653MB. ⚠️ 다른 실험이 CPU 를 쓰는 중(load ≈ 12)에 `nice 15` · 3스레드로 잰 값이라 §7.1.3 예산(L1
+160ms)과 비교할 수 없다. 그래도 §4.4 의 "INT8 50~150ms" 가정과 0.15GB 메모리 예산이 크게 낙관적일
+수 있다는 신호다. **지연은 학습과 무관하므로** 기계가 한가할 때
+`python train/benchmark_l1.py --model-dir train/artifacts/smoke/onnx --output …` 로 다시 재면
+§8.5-1(W1 게이트)이 RunPod 없이 판정된다.
+
 ## 학습을 시작하기 전에 남은 실행
 
-아래는 외부 연산·번역 또는 독립 판정이 필요한 실행 단계다. 2026-09-07 로컬 상태를
-함께 표시한다.
+아래는 외부 연산·번역 또는 독립 판정이 필요한 실행 단계다. 2026-10-26 로컬 상태를
+함께 표시한다. 4번부터는 RunPod 에서 한다([RUNPOD.md](RUNPOD.md)).
 
 1. ✅ `.venv` 학습 환경과 전체 고정 자산 18개를 준비하고 exact manifest를 검증했다.
 2. ✅ 공개 원천과 합성 split 코퍼스를 생성하고 누수·span 계약을 검사했다.
-3. deepset train/test를 별도로 번역하고 ID 완전성 게이트를 통과시킨다.
-4. 공격 학습 풀에 교사 3종을 실행한다. Qwen Gen은 로컬 MPS 배치·재개 경로를 검증했다.
+3. ✅ deepset train/test를 번역하고 ID 완전성 게이트를 통과시켰다. 교사 입력 19,195행을 확정했고,
+   `python train/runpod_pipeline.py --rehearse` 로 3~10단계 배선을 교사 대역으로 끝까지 돌렸다.
+4. 교사 입력에 교사 3종을 실행한다(CUDA). 로컬에서는 kanana 280행만 시험 실행됐다 — 재개 가능하다.
 5. `bench.teacher_agreement`의 생성기 일치도와 JAILBREAK rubber-stamp 게이트를 통과시킨다.
 6. 교사 불일치는 블라인드 검수하거나 `--drop-review`로 감사 기록과 함께 학습에서 뺀다.
-7. 최종 공격 test는 블라인드 수동 gold를 적용하거나 deepset의 1:1 외부 이진 gold만 쓴다.
+7. ✅ 최종 공격 test는 deepset의 1:1 외부 이진 gold를 만들었다(`attack-external-gold-test.jsonl`, 116행).
 8. `finalize_training_inputs.py`와 `finalize_evaluation_inputs.py`로 학습·최종 test를 모두 봉인한다.
 9. 실제 입력 인자를 준 `preflight.py --stage training`과 `train_l1.py` dry-run을 통과시킨다.
 10. CUDA에서 3 seed 학습 후 FP32/QInt8 export·평가·지연/RSS 측정을 수행한다.
 
-구체 명령과 파일 연결 순서는 [README의 L1 학습 준비](../README.md#l1-학습-준비)를 따른다.
-`assets` preflight는 통과한다. `training` preflight는 3~8번 산출물과 실제 입력 인자가
-없으면 fail-closed로 실패하는 것이 정상이다.
+4~10번은 `python train/runpod_pipeline.py --device cuda --train` 한 명령이다. RunPod 을 켜기
+전에 `--rehearse` 로 같은 경로를 교사 대역으로 먼저 돌린다(2026-10-26 통과). 단계표는
+[RUNPOD.md](RUNPOD.md).
+
+### 외부 API — 유료 키가 생기면 (DESIGN §7.4)
+
+현 Gemini 키는 Free Tier(모델당 하루 20회)라 아래를 끝낼 수 없다. 전부 합성·공개 데이터다.
+
+| 측정 | 명령 | 호출 수 |
+|---|---|---|
+| 마스킹 응답 품질 Gemini 팔(§8.1-13b) | `python -m bench.mask_quality --provider gemini --output artifacts/mask_quality_gemini.json` | 204 |
+| 프록시 전 구간 — Gemini 상류 | `python -m bench.proxy_e2e --upstream https://generativelanguage.googleapis.com/v1beta/openai --model gemini-3.8-flash --api-key-env GEMINI_API_KEY` | 1 |
+| 축 (b) Gemini 베이스라인(§7.3) | `python -m bench.run_axis_b --benchmark <KoreanGuardrail>/benchmark.jsonl --sample 600 --judge gemini --judge gemini-all-streams` | 약 2,000 |
+
+축 (b) 의 Gemini judge 는 온디바이스 Gemma 4 L2·교사와 **같은 정책 프롬프트**를 쓴다 —
+같은 질문을 클라우드와 온디바이스에 던진 비교가 된다.
 
 ## 학습 후에만 채울 항목
 
