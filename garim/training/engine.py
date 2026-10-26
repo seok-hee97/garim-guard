@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,32 @@ class TrainingConfig:
     qwen_weight: float = 0.25
     auxiliary_weight: float = 0.25
     pii_o_weight: float = 0.25
+    # ★ 24GB 카드(RTX 3090/4090)에서 batch 32 × 512토큰 fp32 가 들어간다는 근거가 없었다.
+    #   논리 배치(옵티마이저 한 스텝 = 한 태스크의 batch_size 행)는 그대로 두고, 메모리만
+    #   줄이는 두 손잡이다. 청크마다 기울기를 쌓고 한 번 스텝하므로 학습 의미는 같다.
+    micro_batch_size: int | None = None
+    # "bf16" 은 CUDA 에서만 autocast 를 켠다(master weight 는 fp32 그대로). 다른 장치는 fp32.
+    precision: str = "fp32"
+
+
+def uses_bf16(config: TrainingConfig, device: torch.device) -> bool:
+    if config.precision not in {"fp32", "bf16"}:
+        raise ValueError(f"precision must be fp32 or bf16, got {config.precision!r}")
+    return config.precision == "bf16" and device.type == "cuda"
+
+
+def _split_batch(batch: dict[str, Any], size: int | None) -> list[dict[str, Any]]:
+    """논리 배치를 행 단위 청크로 나눈다. 텐서와 행 단위 리스트를 같은 자리에서 자른다."""
+    rows = int(batch["input_ids"].shape[0])
+    if size is None or size >= rows:
+        return [batch]
+    return [
+        {
+            key: value[start : start + size] if isinstance(value, torch.Tensor | list) else value
+            for key, value in batch.items()
+        }
+        for start in range(0, rows, size)
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,38 +105,50 @@ def train_epoch(
         "honorific": 0.0,
     }
     steps = 0
+    bf16 = uses_bf16(config, device)
     for raw_batch in batches:
-        batch = {key: _device_value(value, device) for key, value in raw_batch.items()}
+        rows = int(raw_batch["input_ids"].shape[0])
         optimizer.zero_grad(set_to_none=True)
-        output = model(
-            batch["input_ids"],
-            batch["attention_mask"],
-            batch["normalization_delta"],
-            batch.get("token_type_ids"),
-        )
-        loss: JointLoss = compute_joint_loss(
-            output,
-            pii_labels=batch.get("pii_labels"),
-            attack_labels=batch.get("attack_labels"),
-            kanana_probabilities=batch.get("kanana_probabilities"),
-            kanana_mask=batch.get("kanana_mask"),
-            qwen_jailbreak_targets=batch.get("qwen_jailbreak_targets"),
-            romanized_targets=batch.get("romanized_targets"),
-            honorific_targets=batch.get("honorific_targets"),
-            task_lambda=config.task_lambda,
-            hard_label_alpha=config.hard_label_alpha,
-            temperature=config.temperature,
-            qwen_weight=config.qwen_weight,
-            auxiliary_weight=config.auxiliary_weight,
-            pii_o_weight=config.pii_o_weight,
-        )
-        loss.total.backward()
+        for chunk in _split_batch(raw_batch, config.micro_batch_size):
+            batch = {key: _device_value(value, device) for key, value in chunk.items()}
+            # 청크 손실을 행 비율로 가중한다 — 청크 평균의 가중합이 배치 평균과 통계적으로
+            # 같다(토큰 수가 청크마다 다를 때 비트 동일은 아니다).
+            weight = int(batch["input_ids"].shape[0]) / rows
+            autocast = (
+                torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+                if bf16
+                else contextlib.nullcontext()
+            )
+            with autocast:
+                output = model(
+                    batch["input_ids"],
+                    batch["attention_mask"],
+                    batch["normalization_delta"],
+                    batch.get("token_type_ids"),
+                )
+                loss: JointLoss = compute_joint_loss(
+                    output,
+                    pii_labels=batch.get("pii_labels"),
+                    attack_labels=batch.get("attack_labels"),
+                    kanana_probabilities=batch.get("kanana_probabilities"),
+                    kanana_mask=batch.get("kanana_mask"),
+                    qwen_jailbreak_targets=batch.get("qwen_jailbreak_targets"),
+                    romanized_targets=batch.get("romanized_targets"),
+                    honorific_targets=batch.get("honorific_targets"),
+                    task_lambda=config.task_lambda,
+                    hard_label_alpha=config.hard_label_alpha,
+                    temperature=config.temperature,
+                    qwen_weight=config.qwen_weight,
+                    auxiliary_weight=config.auxiliary_weight,
+                    pii_o_weight=config.pii_o_weight,
+                )
+            (loss.total * weight).backward()
+            for key in totals:
+                totals[key] += float(getattr(loss, key).detach().float().cpu()) * weight
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip)
         optimizer.step()
         if scheduler is not None:
             scheduler.step()
-        for key in totals:
-            totals[key] += float(getattr(loss, key).detach().cpu())
         steps += 1
     if steps == 0:
         raise ValueError("training DataLoader yielded no batches")

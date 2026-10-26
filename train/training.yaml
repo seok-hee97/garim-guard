@@ -16,3 +16,8 @@ qwen_weight: 0.25
 auxiliary_weight: 0.25
 pii_o_weight: 0.25
 early_stopping_patience: 2
+# 메모리 — RTX 3090/4090(24GB) 기준. 논리 배치는 batch_size(32) 그대로이고 한 스텝이 한 태스크의
+# 32행이다. 16행씩 두 번 기울기를 쌓아 한 번 스텝한다. bf16 은 CUDA autocast(master weight fp32)다.
+# `runpod_pipeline.py` 0b 단계가 이 설정으로 최악 배치(512토큰 꽉 참)를 GPU 에서 먼저 돌려 본다.
+micro_batch_size: 16
+precision: bf16

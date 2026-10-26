@@ -70,6 +70,7 @@ def main() -> int:
         "train/translations/deepset-test-ko.jsonl",
         "train/make_teacher_input.py",
         "train/runpod_pipeline.py",
+        "train/probe_gpu_memory.py",
         "train/run_teacher.py",
         "train/resolve_teacher_labels.py",
         "train/apply_review_labels.py",

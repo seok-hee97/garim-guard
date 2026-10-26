@@ -314,3 +314,20 @@ def test_quantization_survives_a_dynamic_range_in_the_graph(tmp_path: Path) -> N
         content_type="prose",
     )
     output.validate(len(text))
+
+
+def test_memory_probe_builds_full_length_batches_and_steps(tmp_path: Path) -> None:
+    """0b 프로브가 실제 데이터셋·콜레이터 모양의 최악 배치로 학습 스텝을 끝까지 돈다(CPU)."""
+    from transformers import AutoTokenizer
+
+    from garim.training.config import RunConfig
+    from garim.training.memory_probe import probe
+
+    _write_fast_tokenizer(tmp_path)
+    tokenizer = AutoTokenizer.from_pretrained(tmp_path, local_files_only=True)
+    config = RunConfig(seeds=[1, 2, 3], batch_size=4, micro_batch_size=2, max_length=16, stride=4)
+    model = JointL1Model(TinyEncoder(), hidden_size=HIDDEN, dropout=0.0)
+    report = probe(model, tokenizer, config, torch.device("cpu"))
+    assert report["precision"] == "fp32"
+    assert report["peak_bytes"] is None  # CUDA 가 아니면 재지 않는다
+    assert report["max_length"] == 16

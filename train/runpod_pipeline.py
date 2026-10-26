@@ -52,6 +52,11 @@ EVALUATION_INPUTS = (
     CORPUS / "klue_eval-test.jsonl",
     CORPUS / "bc_pii_augmented_negative-test.jsonl",
 )
+# 교사 입력 길이 상한(kanana 토크나이저 기준). 근거 셋 — kanana 의 문맥이 8,192 라 그보다 긴
+# 행은 읽지도 못한다(4행). 학생 L1 은 512토큰 창으로 보므로 2천 토큰이 넘는 문서 행의 문서 단위
+# 라벨을 모든 창에 복사하면 라벨이 시끄러워진다. 이 위로는 38행(0.2%)이고 전부 PolyGuardMix 의
+# 강의 녹취·논문류다. 빼고 감사 파일에 남긴다.
+TEACHER_MAX_TOKENS = 2048
 # 평가 봉인에는 안 들어가지만 공격 풀과 겹치면 안 되는 원천 test.
 EXTRA_BLOCKED = (CORPUS / "polyguard_eval-test.jsonl", CORPUS / "deepset-ko-test.jsonl")
 
@@ -92,6 +97,11 @@ def check_cuda() -> None:
             "sys.exit(0 if ok else 'CUDA 를 못 본다 — 드라이버가 CUDA 13 을 지원하는 pod 인가')",
         ),
     )
+
+
+def probe_gpu_memory() -> None:
+    """0b — 학습 최악 배치를 교사보다 먼저 GPU 에서 돌려 본다(`train/probe_gpu_memory.py`)."""
+    _require("0b GPU 메모리 프로브 (학습 최악 배치)", _python("train/probe_gpu_memory.py"))
 
 
 def materialize_t4() -> None:
@@ -186,12 +196,22 @@ def build_pool() -> Path:
             _python("train/merge_corpora.py", "--task", "attack", "--split", split, *sources,
                     *blocked, "--output", str(CORPUS / f"attack-teacher-pool-{split}.jsonl")),
         )
+    from garim.training.compat import load_local_tokenizer
+    from garim.training.data import load_jsonl, write_jsonl
+
+    tokenizer = load_local_tokenizer(ROOT / "models/pinned/teacher_kanana")
+    kept, overlong = [], []
+    for part in ("attack-teacher-pool-train.jsonl", "attack-teacher-pool-validation.jsonl"):
+        for record in load_jsonl(ROOT / CORPUS / part):
+            tokens = len(tokenizer(record.text)["input_ids"])
+            (kept if tokens <= TEACHER_MAX_TOKENS else overlong).append(record)
     teacher_input = CORPUS / "attack-teacher-input.jsonl"
-    with (ROOT / teacher_input).open("wb") as output:
-        for part in ("attack-teacher-pool-train.jsonl", "attack-teacher-pool-validation.jsonl"):
-            output.write((ROOT / CORPUS / part).read_bytes())
-    rows = sum(1 for _ in (ROOT / teacher_input).open(encoding="utf-8"))
-    print(f"\n== 5c 교사 입력 {rows}행  sha256 {_digest(teacher_input)}")
+    write_jsonl(ROOT / teacher_input, kept)
+    write_jsonl(ROOT / CORPUS / "attack-teacher-overlength.jsonl", overlong)
+    print(
+        f"\n== 5c 교사 입력 {len(kept)}행 (>{TEACHER_MAX_TOKENS}토큰 {len(overlong)}행 제외 → "
+        f"attack-teacher-overlength.jsonl)  sha256 {_digest(teacher_input)}"
+    )
     return teacher_input
 
 
@@ -288,6 +308,7 @@ def main() -> int:
 
     if not args.rehearse:
         check_cuda()
+        probe_gpu_memory()
     materialize_t4()
     merge_pii()
     teacher_input = build_pool()

@@ -70,7 +70,7 @@ def _train_seed(
     from transformers import AutoTokenizer
 
     from garim.training.dataset import EncodedCorpusDataset, JointBatchCollator
-    from garim.training.engine import TrainingConfig, build_optimizer, train_epoch
+    from garim.training.engine import TrainingConfig, build_optimizer, train_epoch, uses_bf16
     from garim.training.evaluation import evaluate_joint_model
     from garim.training.model import JointL1Model
     from garim.training.sampling import interleave_task_batches
@@ -128,6 +128,8 @@ def _train_seed(
         qwen_weight=run_config.qwen_weight,
         auxiliary_weight=run_config.auxiliary_weight,
         pii_o_weight=run_config.pii_o_weight,
+        micro_batch_size=run_config.micro_batch_size,
+        precision=run_config.precision,
     )
     optimizer = build_optimizer(model, config)
     steps_per_epoch = len(pii_loader) + math.ceil(
@@ -184,6 +186,10 @@ def _train_seed(
     result = {
         "seed": seed,
         "device": str(device),
+        # 실제로 쓴 정밀도 — bf16 은 CUDA 에서만 켜진다.
+        "precision": "bf16" if uses_bf16(config, device) else "fp32",
+        "batch_size": batch_size,
+        "micro_batch_size": run_config.micro_batch_size,
         "best_joint_recall_hmean": best_score,
         "history": history,
     }

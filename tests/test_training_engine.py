@@ -95,3 +95,45 @@ def test_train_epoch_rejects_an_empty_loader() -> None:
             device=torch.device("cpu"),
             config=config,
         )
+
+
+@pytest.mark.parametrize("task", ["pii", "attack"])
+def test_micro_batches_take_the_same_step_as_the_full_batch(task: str) -> None:
+    """메모리 손잡이 — 청크로 나눠 기울기를 쌓아도 한 번의 스텝은 전체 배치와 같아야 한다.
+
+    청크마다 유효 토큰 수가 같은 배치라 행 비율 가중이 정확히 전체 평균이 된다.
+    """
+    import copy
+
+    torch.manual_seed(3)
+    batch = _batch(task=task)
+    doubled = {
+        key: torch.cat([value, value.flip(0)]) if isinstance(value, torch.Tensor) else value
+        for key, value in batch.items()
+    }
+    base = JointL1Model(FakeEncoder(12), hidden_size=12, dropout=0.0)
+    results = []
+    for micro in (None, 2):
+        model = copy.deepcopy(base)
+        # SGD 는 기울기에 선형이다 — AdamW 는 크기에 거의 불변이라 청크 가중이 틀려도 통과한다.
+        config = TrainingConfig(gradient_clip=1e6, micro_batch_size=micro)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        train_epoch(model, [doubled], optimizer, device=torch.device("cpu"), config=config)
+        results.append(torch.cat([p.detach().flatten() for p in model.parameters()]))
+    assert torch.allclose(results[0], results[1], atol=1e-6)
+
+
+def test_bf16_applies_only_on_cuda_and_precision_is_validated() -> None:
+    from garim.training.engine import uses_bf16
+
+    assert not uses_bf16(TrainingConfig(precision="bf16"), torch.device("cpu"))
+    assert uses_bf16(TrainingConfig(precision="bf16"), torch.device("cuda"))
+    with pytest.raises(ValueError, match="precision"):
+        uses_bf16(TrainingConfig(precision="fp16"), torch.device("cuda"))
+
+
+def test_micro_batch_cannot_exceed_the_logical_batch() -> None:
+    from garim.training.config import RunConfig
+
+    with pytest.raises(ValueError, match="micro_batch_size"):
+        RunConfig(seeds=[1, 2, 3], batch_size=16, micro_batch_size=32)

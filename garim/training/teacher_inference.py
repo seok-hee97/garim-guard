@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 # 정책 프롬프트는 런타임 L2 판정기와 한 출처다 — 학습 라벨과 런타임 판정이 다른 기준으로
 # 갈리지 않게 한다.
@@ -18,6 +19,30 @@ from garim.detect.l2 import (
 from garim.training.data import CorpusRecord
 from garim.training.teacher_io import TeacherArtifact
 from garim.training.teachers import TeacherSpec
+
+
+def last_position_logits(model: Any, input_ids: Any, attention_mask: Any) -> Any:
+    """각 행의 **마지막 실토큰 위치**에서만 다음 토큰 로짓을 낸다.
+
+    ★ 초판은 `model(...).logits` 로 배치 전체 위치의 로짓을 만든 뒤 한 칸만 골랐다. 메모리가
+      배치 × 길이 × 어휘에 비례한다 — kanana(어휘 128k)에서 16행을 교사 입력 최장 행
+      (약 4만 토큰)에 맞춰 패딩하면 로짓만 약 164GB 다. RTX 3090/4090(24GB)은 물론 어떤
+      GPU 에서도 그 배치에서 죽는다. 기반 모델의 은닉 상태를 쓰고 `lm_head` 를 고른 위치에만
+      건다 — 그 위치의 값은 같은 계산이고, 메모리는 배치 × 어휘가 된다.
+    """
+    import torch
+
+    hidden = model.model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+    positions = (
+        torch.arange(attention_mask.shape[1], device=attention_mask.device)
+        .unsqueeze(0)
+        .expand_as(attention_mask)
+        .masked_fill(attention_mask == 0, -1)
+        .max(dim=1)
+        .values
+    )
+    rows = torch.arange(hidden.shape[0], device=hidden.device)
+    return model.lm_head(hidden[rows, positions])
 
 
 class TeacherBackend(ABC):
@@ -100,17 +125,7 @@ class KananaBackend(TeacherBackend):
         if attention_mask is None:
             attention_mask = self.torch.ones_like(input_ids)
         with self.torch.inference_mode():
-            logits = self.model(input_ids=input_ids, attention_mask=attention_mask).logits
-        positions = (
-            self.torch.arange(attention_mask.shape[1], device=attention_mask.device)
-            .unsqueeze(0)
-            .expand_as(attention_mask)
-            .masked_fill(attention_mask == 0, -1)
-            .max(dim=1)
-            .values
-        )
-        rows = self.torch.arange(logits.shape[0], device=logits.device)
-        next_token_logits = logits[rows, positions]
+            next_token_logits = last_position_logits(self.model, input_ids, attention_mask)
         labels = ("NONE", "INJECTION", "SYSTEM_LEAK")
         selected = next_token_logits[:, [self.label_ids[label] for label in labels]]
         probabilities = self.torch.softmax(selected.float(), dim=-1).cpu().tolist()
@@ -343,18 +358,9 @@ class Qwen3GuardGenBackend(TeacherBackend):
             list(prompts), return_tensors="pt", padding=True
         ).to(self.model.device)
         with self.torch.inference_mode():
-            logits = self.model(**inputs).logits
-        attention_mask = inputs["attention_mask"]
-        positions = (
-            self.torch.arange(attention_mask.shape[1], device=attention_mask.device)
-            .unsqueeze(0)
-            .expand_as(attention_mask)
-            .masked_fill(attention_mask == 0, -1)
-            .max(dim=1)
-            .values
-        )
-        rows = self.torch.arange(logits.shape[0], device=logits.device)
-        next_token_logits = logits[rows, positions]
+            next_token_logits = last_position_logits(
+                self.model, inputs["input_ids"], inputs["attention_mask"]
+            )
         selected = next_token_logits[:, token_ids].float()
         return self.torch.softmax(selected, dim=-1).cpu().tolist()
 

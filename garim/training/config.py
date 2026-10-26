@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,6 +28,9 @@ class RunConfig(BaseModel):
     auxiliary_weight: float = Field(0.25, ge=0)
     pii_o_weight: float = Field(0.25, gt=0)
     early_stopping_patience: int = Field(2, ge=1)
+    # 메모리 손잡이 — `garim/training/engine.py` 참고. 논리 배치는 `batch_size` 그대로다.
+    micro_batch_size: int | None = Field(None, ge=1)
+    precision: Literal["fp32", "bf16"] = "fp32"
 
     @model_validator(mode="after")
     def validate_config(self) -> RunConfig:
@@ -34,6 +38,8 @@ class RunConfig(BaseModel):
             raise ValueError("training seeds must be unique")
         if self.stride >= self.max_length - 2:
             raise ValueError("stride must leave forward progress inside max_length")
+        if self.micro_batch_size is not None and self.micro_batch_size > self.batch_size:
+            raise ValueError("micro_batch_size cannot exceed batch_size")
         return self
 
 
