@@ -61,13 +61,18 @@ c5f09f32fd61e4e1c538f0c74bd5e2272646732d2e90a5002b46d0c21b38a57a  data/merged/pi
 - **디스크 60GB 이상** — 고정 자산 약 17GB(교사 3종 15GB · 원천 데이터 2.5GB) + venv(torch·CUDA
   라이브러리) + 코퍼스·체크포인트·ONNX.
 - `HF_TOKEN` 이 필요하다(gated 아닌 저장소도 rate limit 때문에 있는 편이 낫다).
-- ⚠️ **기본 브랜치(`main`)는 구 프로젝트다.** 반드시 작업 브랜치를 받는다. 그리고 그 브랜치가
-  원격에 **푸시돼 있어야** 한다 — 2026-10-26 기준 원격에는 `main` 만 있다.
+- ⚠️ **기본 브랜치(`main`)는 구 프로젝트다.** 반드시 작업 브랜치를 받는다(2026-10-26 푸시됨).
+- ⚠️ **저장소는 비공개다.** pod 에서 clone 하려면 인증이 필요하다. 이 저장소 하나에 Contents
+  읽기 권한만 준 fine-grained 토큰을 만들어 `GITHUB_TOKEN` 으로 넣고, clone 직후 원격 URL 에서
+  토큰을 지운다(남겨 두면 `.git/config` 에 평문으로 남는다).
 
 ```
 pip install uv
-git clone -b replan/genai-dlp-gateway https://github.com/seok-hee97/nipa-google-project.git
+export GITHUB_TOKEN=...      # 읽기 전용, 이 저장소만
+git clone -b replan/genai-dlp-gateway \
+  "https://x-access-token:${GITHUB_TOKEN}@github.com/seok-hee97/nipa-google-project.git"
 cd nipa-google-project
+git remote set-url origin https://github.com/seok-hee97/nipa-google-project.git
 uv sync --extra train
 export HF_TOKEN=...
 nvidia-smi        # CUDA Version >= 13.0 인지 확인
