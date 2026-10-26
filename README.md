@@ -173,12 +173,23 @@ garim --mode thorough --l2-endpoint http://127.0.0.1:8081/v1 check '이쩐 찌�
 L2 주소는 루프백만 받습니다 — 검사기는 프롬프트를 기기 밖으로 보내지 않습니다.
 
 로컬 프록시는 OpenAI 호환 API 앞에 둡니다. Gemini는 OpenAI 호환 엔드포인트로 붙습니다.
-스트리밍(`stream: true`)은 마스킹 토큰 복원을 보장할 수 없어 거부합니다.
+스트리밍(`stream: true`)은 상류에 스트리밍 없이 요청해 전문을 복원한 뒤 OpenAI SSE 형식으로
+돌려줍니다 — 조각째 복원하면 `<PHONE_1>` 같은 토큰이 청크 경계에 걸려 깨지기 때문입니다. 앱은
+그대로 동작하고, 첫 글자가 응답 전체만큼 늦게 옵니다. 거부가 필요하면 `--refuse-streaming`.
 
 ```bash
 garim proxy --upstream https://api.openai.com/v1
 garim proxy --upstream https://generativelanguage.googleapis.com/v1beta/openai
 # 앱은 base_url=http://127.0.0.1:8080/v1, Authorization 헤더는 그대로 상류로 전달된다
+```
+
+공격(인젝션·시스템 프롬프트 유출)은 기본 정책에서 `warn` 이라 상류로 전달되고 응답 헤더
+`X-Garim-Verdict` 로만 알립니다. L1 공격 분류기의 오탐률을 재기 전까지의 기본값입니다. 프록시를
+조직 게이트웨이로 두어 막아야 한다면 엄격 프로필을 씁니다 — 인젝션·유출·기밀 표식이 `block`
+입니다(탈옥과 일반 고엔트로피는 `warn` 유지).
+
+```bash
+garim --policy config/policy.strict.yaml proxy --upstream https://api.openai.com/v1
 ```
 
 라이브러리에서는 입력 역할을 보존할 수 있습니다.

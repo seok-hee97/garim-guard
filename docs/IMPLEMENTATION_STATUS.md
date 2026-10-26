@@ -25,7 +25,7 @@
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
 | §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 키가 Free Tier(모델당 일 20회)로 확정, 유료 키 필요 |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
-| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, 스트리밍 거부, **`tool_calls` 인자 검사·복원**, 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
+| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, **스트리밍은 모아서 복원한 뒤 SSE**(실모델 확인, `--refuse-streaming` 선택), 엄격 프로필(`config/policy.strict.yaml`), **`tool_calls` 인자 검사·복원**, 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
 현재 단계는 **학습 준비 코드와 로컬 고정 자산·코퍼스 준비 완료**다. 배포 가능한 L1
@@ -200,7 +200,7 @@ garim 을 import 할 수 있으면 참조 구현과의 일치까지 확인한다
 ## 2026-10-26 갱신 — 다이어그램 경로를 실제 입력으로 돌려 본 결과
 
 앱 → 검사(L0·L1·판정) → Gemini/OpenAI → 복원 → 앱 경로를 실제 입력으로 돌려 점검했다.
-L0·판정·마스킹·복원은 동작했고, 아래를 고쳤다. 테스트 503 → **552개 통과**, ruff·외부통신
+L0·판정·마스킹·복원은 동작했고, 아래를 고쳤다. 테스트 503 → **557개 통과**, ruff·외부통신
 봉인·커밋 PII 검사 통과.
 
 ### 1. 프록시가 함수 호출 인자를 원문 그대로 상류로 보냈다
@@ -342,6 +342,24 @@ OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 �
 수 있다는 신호다. **지연은 학습과 무관하므로** 기계가 한가할 때
 `python train/benchmark_l1.py --model-dir train/artifacts/smoke/onnx --output …` 로 다시 재면
 §8.5-1(W1 게이트)이 RunPod 없이 판정된다.
+
+### 10. 결정 사항 반영 (2026-10-26)
+
+- **스트리밍 — buffered SSE.** 채팅 앱 대부분이 `stream=True` 인데 프록시가 거부해서 앱이 깨졌다.
+  상류에는 스트리밍 없이 묻고(토큰이 청크 경계에 걸리지 않게) 전문을 복원한 뒤 OpenAI
+  `chat.completion.chunk` SSE 로 준다 — 본문·함수 인자·`include_usage` 사용량 청크·`[DONE]`.
+  차단은 SSE 가 아니라 400 JSON(OpenAI SDK 는 스트림을 읽기 전에 상태로 예외를 낸다). 로컬
+  Gemma 를 상류로 둔 `bench/proxy_e2e.py --stream` 에서 상류는 토큰만 받았고 클라이언트가 이어
+  붙인 문자열은 원문으로 복원됐다. 대가는 첫 글자 지연(응답 전체만큼).
+- **엄격 프로필 `config/policy.strict.yaml`.** 기본은 공격 `warn` 유지(L1 오탐률 측정 전).
+  게이트웨이로 막아야 하는 배치용 — 인젝션(직접·간접)·시스템 프롬프트 유출·기밀 표식 `block`,
+  탈옥·일반 고엔트로피는 `warn`. L1 평가에서 공격 오탐률이 §7.1.1 목표(≤ 0.02) 안이면 그때
+  기본값 상향을 다시 정한다.
+- **KoreanGuardrail 라이선스** — CC-BY-4.0 확인, DESIGN §8.5-14 닫음.
+- **구 프로젝트 잔여물 삭제** — `app/` `eval/` `src/` `scripts/`(캐시뿐), `report/`(빈 폴더),
+  `results/`(구 로그), `models/gpu_trained/`(682MB, 가림 미사용·재배포 금지 모델). 전부 Git 밖이었다.
+  `TEMP.md` 는 사용자 기획 메모라 남겼다.
+- **지연·메모리 예산** — 기계가 한가할 때 재측정 후 결정(§9). RunPod 과 무관.
 
 ## 학습을 시작하기 전에 남은 실행
 

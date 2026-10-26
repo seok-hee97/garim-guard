@@ -1,0 +1,75 @@
+# 엄격 프로필 — 프록시를 조직의 게이트웨이로 둘 때. 기본 프로필(config/policy.yaml)과 다른 곳만
+# ★ 로 표시했다.
+#
+#   garim --policy config/policy.strict.yaml proxy --upstream ...
+#
+# 기본 프로필이 공격을 warn 으로 두는 이유: warn 은 상류로 보내고 헤더(X-Garim-Verdict)로만
+# 알린다. 앱이 헤더를 읽지 않으면 사실상 통과다. 그래도 기본값을 block 으로 하지 않는 것은
+# L1 공격 분류기의 오탐률을 아직 재지 못했기 때문이다(§7.1.1 목표 ≤ 0.02) — 로컬 도구에서
+# 과탐은 사용자가 도구를 끄게 만든다. 이 프로필은 그 대가를 감수하겠다는 선택이다.
+#
+# block 으로 올린 것: 인젝션(직접·간접)과 시스템 프롬프트 유출 — 나가는 프롬프트를 유출 통로로
+# 바꾸는 공격이라 DLP 게이트웨이의 본업이다. 기밀 표식도 올렸다.
+# warn 으로 둔 것: 탈옥(A-JB-*) — 상류 모델의 콘텐츠 안전 문제에 가깝고 분류기 오탐률을 모른다.
+# 일반 고엔트로피 시크릿(L-SEC-05) — 해시·UUID 오탐이 많다.
+version: 1
+
+defaults:
+  verdict: mask
+
+rules:
+  rrn_anchor: true
+  # §2.5 기밀 표식 위치 가중치 임계 (첫3줄 +2 / 단독·괄호 +3 / 등급표기 +3 / 조사결합 -3).
+  # 표본 10건 기준값이므로 실제 코퍼스 확보 후 재조정한다.
+  marker_score_threshold: 3
+
+codes:
+  L-KR-01: block
+  L-KR-02: block
+  L-SEC-01: block
+  L-SEC-02: block
+  L-SEC-03: block
+  L-SEC-04: block
+  L-SEC-05: warn
+  L-DOC-01: block   # ★ 기본 warn
+  A-INJ-01: block   # ★ 기본 warn — 직접 인젝션
+  A-INJ-02: block   # ★ 기본 warn — 간접 인젝션(RAG·도구 출력)
+  A-LEAK-01: block  # ★ 기본 warn — 시스템 프롬프트 유출 시도
+  A-JB-01: warn
+  A-JB-02: warn
+
+content_type_policy:
+  code:
+    pii_threshold_delta: 0.15
+    secret_threshold_delta: -0.10
+    attack_threshold_delta: 0.10
+    identifier_allowlist: [user_name, phone_number, ssn, email, address, birth_date, card_no, account]
+  structured:
+    key_exclude: true
+    secret_threshold_delta: -0.10
+  log:
+    suppress: [L-CM-04]
+    attack_threshold_delta: 0.10
+
+thresholds:
+  l1_pii: 0.5
+  l1_atk: 0.5
+  l0: 0.5
+  l2_escalate: [0.4, 0.6]
+  romanized_evasion: 0.5
+  honorific_social_engineering: 0.5
+
+limits:
+  max_input_chars: 100000
+  max_segments: 64
+  chunk_size: 512
+  chunk_overlap: 64
+  max_l1_chunks: 128
+  max_l2_chunks: 32
+  l1_timeout_ms: 1000
+
+custom_patterns:
+  - code: L-CT-03
+    name: employee_id
+    regex: 'EMP-\d{6}'
+    mode: mask
