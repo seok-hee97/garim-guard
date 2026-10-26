@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from garim.training.data import load_jsonl
@@ -21,8 +23,20 @@ from garim.training.t4 import (
 _ATTACK_MARKERS = ("ADMIN", "SYSTEM", "DAN", "ROOT")
 
 
+def _require_local_corpus(*paths: str) -> None:
+    """로컬 코퍼스가 없으면(새 checkout·CI) 실패 대신 이유를 남기고 건너뛴다.
+
+    `data/` 는 체크섬을 통과하는 합성 식별자가 있어 저장소에 넣지 않는다. 이 테스트들은
+    `train/prepare_corpora.py`·`train/runpod_pipeline.py --rehearse` 뒤에 돈다.
+    """
+    missing = [path for path in paths if not Path(path).is_file()]
+    if missing:
+        pytest.skip(f"로컬 코퍼스 없음: {missing[0]}")
+
+
 @pytest.fixture(scope="module")
 def holdout() -> list:
+    _require_local_corpus("data/corpus/attack-synthetic-test.jsonl")
     return load_jsonl("data/corpus/attack-synthetic-test.jsonl")
 
 

@@ -219,12 +219,29 @@ def test_cli_refuses_teachers_run_on_different_inputs(tmp_path) -> None:
         )
 
 
-def test_default_gold_points_at_the_split_sidecars() -> None:
-    """기본값이 25a3528 이전 파일 이름을 가리키고 있었다 — RUNPOD 6b 는 `--gold` 를 안 준다."""
+def _require_local_corpus(*paths: str) -> None:
+    """로컬 코퍼스가 없으면(새 checkout·CI) 실패 대신 이유를 남기고 건너뛴다.
+
+    `data/` 는 체크섬을 통과하는 합성 식별자가 있어 저장소에 넣지 않는다. 이 테스트들은
+    `train/prepare_corpora.py`·`train/runpod_pipeline.py --rehearse` 뒤에 돈다.
+    """
+    missing = [path for path in paths if not Path(path).is_file()]
+    if missing:
+        pytest.skip(f"로컬 코퍼스 없음: {missing[0]}")
+
+
+def test_default_gold_matches_the_sidecars_the_pipeline_writes() -> None:
+    """기본값이 25a3528 이전 파일 이름을 가리키고 있었다 — 6b 는 `--gold` 를 안 준다.
+
+    `train/runpod_pipeline.py` 5단계(`make_teacher_input.py --gold`)가 쓰는 이름과 같아야 한다.
+    """
     from bench.teacher_agreement import DEFAULT_GOLD
 
-    for path in DEFAULT_GOLD:
-        assert Path(path).is_file(), path
+    pipeline = Path("train/runpod_pipeline.py").read_text(encoding="utf-8")
+    assert 'f"attack-generator-gold-{split}.json"' in pipeline
+    assert DEFAULT_GOLD == tuple(
+        f"data/corpus/attack-generator-gold-{split}.json" for split in ("train", "validation")
+    )
 
 
 @pytest.mark.parametrize("split", ["train", "validation"])
@@ -236,6 +253,10 @@ def test_gold_sidecar_is_not_part_of_the_teacher_input(split: str) -> None:
     """
     from garim.training.data import load_jsonl
 
+    _require_local_corpus(
+        f"data/corpus/attack-unlabeled-{split}.jsonl",
+        f"data/corpus/attack-generator-gold-{split}.json",
+    )
     rows = load_jsonl(f"data/corpus/attack-unlabeled-{split}.jsonl")
     assert rows and all(record.attack_label is None for record in rows)
     gold = json.loads(
@@ -253,6 +274,7 @@ def test_the_teacher_pool_carries_no_labels() -> None:
     """
     from garim.training.data import load_jsonl
 
+    _require_local_corpus("data/corpus/attack-teacher-pool-train.jsonl")
     rows = load_jsonl("data/corpus/attack-teacher-pool-train.jsonl")
     assert len(rows) > 10_000, "PolyGuard 가 합쳐지지 않았다"
     assert all(record.attack_label is None for record in rows)
