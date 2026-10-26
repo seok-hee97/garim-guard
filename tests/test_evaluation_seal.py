@@ -145,3 +145,38 @@ def test_evaluation_seal_rejects_training_provenance_drift(
 
     with pytest.raises(ValueError, match="content drift"):
         verify_evaluation_input_manifest(seal)
+
+
+
+def test_unlabeled_pii_utterances_still_may_not_repeat(
+    tmp_path: Path, in_directory: None
+) -> None:
+    """평가 봉인은 스팬 없는 PII 행의 겹침도 막는다 — 엄격하게 둔다.
+
+    KDPII test 의 `네, 맞습니다.` 류 128행이 PII 학습과 겹쳐 리허설 8b 가 멈췄다. 봉인에
+    예외를 여는 대신 학습 쪽에서 평가 지문을 뺀다(`train/runpod_pipeline.py` 3단계 —
+    PII 병합에 평가 차단 목록). 평가셋은 §7.1.0 의 외부 증거라 건드리지 않는다.
+    """
+    os.chdir(tmp_path)
+    training_manifest = _sealed_training(Path("."))
+    evaluation = Path("evaluation.jsonl")
+    write_jsonl(
+        evaluation,
+        [
+            CorpusRecord(
+                id="evaluation",
+                task="pii",
+                text="pii-train의 고유 문장",
+                source="fixture",
+                split="test",
+            )
+        ],
+    )
+    guide = Path("guide.md")
+    guide.write_text("fixed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="overlap training"):
+        create_evaluation_input_manifest(
+            [evaluation],
+            training_manifest_path=training_manifest,
+            provenance_files={"labeling_guide": guide},
+        )

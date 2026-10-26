@@ -350,13 +350,20 @@ def adapt_polyguard_mix(rows: Iterable[Mapping[str, Any]]) -> Iterator[CorpusRec
         if not isinstance(text, str) or not text.strip():
             continue
         source_id = metadata.get("source") if isinstance(metadata, Mapping) else None
+        record_id = _stable_id("polyguardmix", source_id, index, text)
         yield CorpusRecord(
-            id=_stable_id("polyguardmix", source_id, index, text),
+            id=record_id,
             task="attack",
             text=text,
             source="PolyGuardMix",
             split="train",
-            group_id=f"polyguardmix-{source_id or index}",
+            # ★ 회귀 — `polyguardmix-{source_id}` 였다. `metadata.source` 는 행 ID 가
+            #   아니라 **하위 데이터셋 이름**(`wildguardmix_translated_tower`·`itw` …)이라
+            #   한국어 17,273행이 group 둘로 뭉쳤다. train/validation 을 나누는 순간 하위
+            #   데이터셋이 통째로 한쪽에 간다 — 리허설에서 검증 분할에 PolyGuard 가 0행이었고,
+            #   해시가 반대로 떨어졌다면 공격 학습 데이터의 84% 가 검증으로 빠졌다.
+            #   한국어만 남기고 지문 중복을 지우므로 누수 단위는 행 자신이다.
+            group_id=record_id,
             meta={
                 "source_id": source_id,
                 "original_prompt_harm_label": row.get("prompt_harm_label"),

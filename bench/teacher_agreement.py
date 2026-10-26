@@ -43,6 +43,11 @@ from garim.training.teachers import load_teacher_policy
 
 # 이 위를 넘으면 두 번째 표가 첫 번째 표를 그대로 따라 하는 셈이라 검증이 아니다.
 RUBBER_STAMP_THRESHOLD = 0.95
+# `make_teacher_input.py` 가 분할별로 남기는 사이드카. 25a3528 에서 한 파일이 둘로 갈렸다.
+DEFAULT_GOLD = (
+    "data/corpus/attack-generator-gold-train.json",
+    "data/corpus/attack-generator-gold-validation.json",
+)
 
 
 def load_artifacts(path: str | Path) -> dict[str, TeacherArtifact]:
@@ -103,7 +108,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="교사 일치도 · JAILBREAK 독립성")
-    parser.add_argument("--gold", default="data/corpus/attack-generator-gold.json")
+    parser.add_argument(
+        "--gold",
+        action="append",
+        help="생성기 라벨 사이드카 JSON. 여러 번 줄 수 있다. 생략하면 분할별 두 파일",
+    )
     parser.add_argument("--teacher", action="append", required=True, help="name=path.jsonl")
     parser.add_argument("--primary", default="gemma4")
     parser.add_argument("--secondary", default="qwen3guard_gen")
@@ -120,23 +129,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit(f"duplicate --teacher name: {name}")
         loaded[name] = load_artifacts(path)
 
-    gold = json.loads(Path(args.gold).read_text(encoding="utf-8"))
-    if not isinstance(gold, dict) or not all(
-        isinstance(key, str) and isinstance(value, str) for key, value in gold.items()
-    ):
-        raise SystemExit("--gold must contain a JSON object mapping string IDs to labels")
+    gold: dict[str, str] = {}
+    for path in args.gold or DEFAULT_GOLD:
+        part = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(part, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in part.items()
+        ):
+            raise SystemExit(f"{path}: gold must be a JSON object mapping string IDs to labels")
+        conflicts = [key for key in set(part) & set(gold) if part[key] != gold[key]]
+        if conflicts:
+            raise SystemExit(f"{path}: {len(conflicts)} IDs carry a different gold label")
+        gold.update(part)
     policy = load_teacher_policy(args.policy)
     unknown = set(loaded) - set(policy.teachers)
     if unknown:
         raise SystemExit(f"teachers not defined by {args.policy}: {sorted(unknown)}")
+    # ★ 교사 풀은 생성기 행보다 크다 — PolyGuard·deepset 은 생성기 라벨이 없다. 초판은
+    #   교사 산출물이 gold 와 **정확히** 같은 ID 를 덮어야 한다고 요구해서, 풀이 커진 뒤
+    #   (25a3528) 6b 단계가 GPU 교사 실행 직후 `extra=17,787` 로 멈추게 돼 있었다.
+    #   요구할 것은 둘이다 — 교사끼리 같은 행을 봤는가, 생성기 행을 하나도 빠뜨리지 않았는가.
     gold_ids = set(gold)
+    coverage = {name: set(rows) for name, rows in loaded.items()}
+    pool_ids = next(iter(coverage.values()))
+    if any(ids != pool_ids for ids in coverage.values()):
+        sizes = {name: len(ids) for name, ids in coverage.items()}
+        raise SystemExit(f"teachers cover different ID sets {sizes} — 같은 입력 파일로 돌렸는가")
+    missing_gold = gold_ids - pool_ids
+    if missing_gold:
+        raise SystemExit(f"teacher artifacts miss {len(missing_gold)} generator-labeled rows")
     for name, rows in loaded.items():
-        if set(rows) != gold_ids:
-            missing = len(gold_ids - set(rows))
-            extra = len(set(rows) - gold_ids)
-            raise SystemExit(
-                f"{name}: artifact coverage differs from gold (missing={missing}, extra={extra})"
-            )
         spec = policy.teachers[name]
         drifted = [
             artifact.id
@@ -150,6 +171,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{name}: {len(drifted)} artifacts have teacher/model/revision drift"
             )
     payload: dict[str, Any] = {
+        "pool_rows": len(pool_ids),
+        "generator_rows": len(gold_ids),
         "generator_agreement": {
             name: generator_agreement(
                 rows, gold, eligible_labels=set(policy.teachers[name].votes_for)

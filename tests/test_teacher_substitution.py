@@ -149,6 +149,84 @@ def test_cli_returns_nonzero_when_the_substitute_is_a_rubber_stamp(tmp_path) -> 
     assert status == 2
 
 
+def _write_teacher(tmp_path, name: str, labels: dict[str, str]):  # noqa: ANN001, ANN202
+    spec = load_teacher_policy("train/teachers.yaml").teachers[name]
+    path = tmp_path / f"{name}.jsonl"
+    path.write_text(
+        "\n".join(
+            _artifact(identifier, label)
+            .model_copy(
+                update={"teacher": name, "model_id": spec.model_id, "revision": spec.revision}
+            )
+            .model_dump_json()
+            for identifier, label in labels.items()
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_cli_accepts_a_pool_larger_than_the_generator_sidecar(tmp_path) -> None:
+    """★ 회귀 — 풀에 PolyGuard·deepset 이 들어오자 6b 가 `extra=…` 로 멈추게 돼 있었다."""
+    gold_train = tmp_path / "gold-train.json"
+    gold_validation = tmp_path / "gold-validation.json"
+    gold_train.write_text(json.dumps({"syn-1": "JAILBREAK"}), encoding="utf-8")
+    gold_validation.write_text(json.dumps({"syn-2": "NONE"}), encoding="utf-8")
+    pool = {"syn-1": "JAILBREAK", "syn-2": "NONE", "polyguard-9": "NONE"}
+    status = main(
+        [
+            "--gold", str(gold_train),
+            "--gold", str(gold_validation),
+            "--teacher", f"gemma4={_write_teacher(tmp_path, 'gemma4', pool)}",
+            "--teacher", f"qwen3guard_gen={_write_teacher(tmp_path, 'qwen3guard_gen', pool)}",
+            "--output", str(tmp_path / "report.json"),
+        ]
+    )
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert report["pool_rows"] == 3
+    assert report["generator_rows"] == 2
+    assert status == 2  # 한 행뿐인 JAILBREAK 에 둘 다 동의 — 고무도장
+
+
+def test_cli_refuses_teachers_that_skipped_generator_rows(tmp_path) -> None:
+    gold = tmp_path / "gold.json"
+    gold.write_text(json.dumps({"syn-1": "NONE", "syn-2": "NONE"}), encoding="utf-8")
+    partial = {"syn-1": "NONE"}
+    with pytest.raises(SystemExit, match="miss 1 generator-labeled rows"):
+        main(
+            [
+                "--gold", str(gold),
+                "--teacher", f"gemma4={_write_teacher(tmp_path, 'gemma4', partial)}",
+                "--output", str(tmp_path / "report.json"),
+            ]
+        )
+
+
+def test_cli_refuses_teachers_run_on_different_inputs(tmp_path) -> None:
+    gold = tmp_path / "gold.json"
+    gold.write_text(json.dumps({"syn-1": "NONE"}), encoding="utf-8")
+    gemma = _write_teacher(tmp_path, "gemma4", {"syn-1": "NONE", "pg-1": "NONE"})
+    qwen = _write_teacher(tmp_path, "qwen3guard_gen", {"syn-1": "NONE"})
+    with pytest.raises(SystemExit, match="different ID sets"):
+        main(
+            [
+                "--gold", str(gold),
+                "--teacher", f"gemma4={gemma}",
+                "--teacher", f"qwen3guard_gen={qwen}",
+                "--output", str(tmp_path / "report.json"),
+            ]
+        )
+
+
+def test_default_gold_points_at_the_split_sidecars() -> None:
+    """기본값이 25a3528 이전 파일 이름을 가리키고 있었다 — RUNPOD 6b 는 `--gold` 를 안 준다."""
+    from bench.teacher_agreement import DEFAULT_GOLD
+
+    for path in DEFAULT_GOLD:
+        assert Path(path).is_file(), path
+
+
 @pytest.mark.parametrize("split", ["train", "validation"])
 def test_gold_sidecar_is_not_part_of_the_teacher_input(split: str) -> None:
     """정답을 교사에게 보여 주면 일치도가 아니라 정답 복사를 재게 된다.
@@ -179,4 +257,9 @@ def test_the_teacher_pool_carries_no_labels() -> None:
     assert len(rows) > 10_000, "PolyGuard 가 합쳐지지 않았다"
     assert all(record.attack_label is None for record in rows)
     sources = {record.source for record in rows}
-    assert sources == {"PolyGuardMix", "garim-synthetic-attack"}, sources
+    # deepset 번역본은 README 의 원 병합 명령에 있던 원천이다. 번역이 끝나 들어왔다.
+    assert sources == {
+        "PolyGuardMix",
+        "garim-synthetic-attack",
+        "deepset-prompt-injections",
+    }, sources

@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from garim.training.data import CorpusRecord, validate_corpus
-from garim.training.split import grouping_key, hashed_validation_split
+from garim.training.split import component_validation_splits
 from garim.training.teachers import (
     ATTACK_LABELS,
     JAILBREAK_POSTERIOR_CLASSES,
@@ -57,17 +57,6 @@ def load_teacher_artifacts(path: str | Path) -> dict[str, TeacherArtifact]:
                 raise ValueError(f"{source}: duplicate prediction id {artifact.id}")
             output[artifact.id] = artifact
     return output
-
-
-def _validation_split(record: CorpusRecord, percent: int) -> str:
-    return hashed_validation_split(
-        grouping_key(
-            record_id=record.id,
-            group_id=record.group_id,
-            template_id=record.template_id,
-        ),
-        percent,
-    )
 
 
 def _validate_soft_targets(
@@ -181,14 +170,12 @@ def resolve_teacher_corpus(
             probabilities = row_artifacts[jailbreak_teacher].class_probabilities
             if probabilities is not None:
                 jailbreak_target = probabilities[JAILBREAK_POSTERIOR_CLASSES[0]]
-        split = _validation_split(record, validation_percent)
         accepted.append(
             record.model_copy(
                 update={
                     "attack_label": decision_label,
                     "kanana_probabilities": soft_probabilities,
                     "qwen_jailbreak_target": jailbreak_target,
-                    "split": split,
                     "meta": {
                         **record.meta,
                         "requires_teacher_label": False,
@@ -197,6 +184,9 @@ def resolve_teacher_corpus(
                 }
             )
         )
+    # 분할은 합의된 행 전체를 보고 정한다 — 행 하나만 보면 template 이 갈린다.
+    splits = component_validation_splits(accepted, validation_percent)
+    accepted = [record.model_copy(update={"split": splits[record.id]}) for record in accepted]
     # ★ 여기서 한 번 걸러야 한다. 버킷 분할이 group/template 을 쪼개면
     #   `validate_corpus` 가 거부하는 코퍼스가 만들어지는데, 그 실패가 지금까지는
     #   다음 로드까지 미뤄졌다. 만든 자리에서 터뜨린다.

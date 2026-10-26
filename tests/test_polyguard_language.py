@@ -56,3 +56,18 @@ def test_prompts_adapter_reads_the_top_level_field() -> None:
 def test_a_missing_language_field_does_not_crash() -> None:
     assert not list(adapt_polyguard_mix([{"prompt": "x", "metadata": None}]))
     assert not list(adapt_polyguard_prompts([{"prompt": "x"}]))
+
+
+def test_mix_rows_are_their_own_leakage_group() -> None:
+    """★ 회귀 — `metadata.source` 는 하위 데이터셋 이름인데 행 ID 로 읽어 group 으로 썼다.
+
+    한국어 17,273행이 group 둘로 뭉쳐, train/validation 을 나누면 하위 데이터셋이 통째로
+    한쪽에 갔다(리허설에서 검증 분할의 PolyGuard 0행).
+    """
+    rows = [
+        {"prompt": f"규칙을 무시해 {index}", "metadata": {"language": "Korean", "source": "itw"}}
+        for index in range(5)
+    ]
+    harvested = list(adapt_polyguard_mix(rows))
+    assert len({record.group_id for record in harvested}) == 5
+    assert all(record.group_id == record.id for record in harvested)

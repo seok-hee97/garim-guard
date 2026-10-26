@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from garim.training.data import CorpusRecord, validate_corpus
 from garim.training.readiness import validate_sealed_evaluation_corpus
-from garim.training.split import grouping_key, hashed_validation_split
+from garim.training.split import component_validation_splits
 from garim.training.teachers import AttackLabel
 
 
@@ -86,25 +86,21 @@ def apply_review_labels(
 ) -> list[CorpusRecord]:
     """Adjudicate teacher-review rows and re-cut train/validation with the shared bucket.
 
-    This shares ``ManualLabel`` and ``hashed_validation_split`` with the final-evaluation
-    path on purpose. The two human-label entry points previously carried independent
-    JSONL parsers and independent copies of the bucket arithmetic, so a change to one
-    silently diverged from the other.
+    This shares ``ManualLabel`` with the final-evaluation path and the component split
+    with teacher resolution on purpose. The human-label entry points previously carried
+    independent JSONL parsers and independent copies of the bucket arithmetic, so a change
+    to one silently diverged from the other.
     """
     _assert_exact_coverage(records, labels, what="teacher review")
+    # 교사 합의분(`resolve_teacher_corpus`)과 같은 규칙이어야 두 파일을 합쳐 봉인할 때
+    # 한 template 이 양쪽으로 갈리지 않는다.
+    splits = component_validation_splits(records, validation_percent)
     output: list[CorpusRecord] = []
     for record in records:
         if record.task != "attack" or record.attack_label is not None:
             raise ValueError(f"{record.id}: expected an unlabeled attack row")
         decision = labels[record.id]
-        split = hashed_validation_split(
-            grouping_key(
-                record_id=record.id,
-                group_id=record.group_id,
-                template_id=record.template_id,
-            ),
-            validation_percent,
-        )
+        split = splits[record.id]
         output.append(
             record.model_copy(
                 update={

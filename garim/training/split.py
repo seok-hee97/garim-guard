@@ -41,25 +41,52 @@ def normalize_identifier(value: str) -> str:
     return _IDENTIFIER_SEPARATORS.sub("", normalized)
 
 
-def grouping_key(
-    *, record_id: str, group_id: str | None = None, template_id: str | None = None
-) -> str:
-    """The key that must stay on one side of a train/validation cut.
-
-    ``validate_corpus`` rejects a ``group_id`` **or** a ``template_id`` that straddles two
-    splits, so both have to drive the bucket. Keying on ``group_id or id`` alone let two rows
-    sharing a template land on opposite sides and produce a corpus the project's own
-    validator refuses — a failure that would surface only at the next load.
-    """
-    return group_id or template_id or record_id
-
-
 def hashed_validation_split(key: str, percent: int) -> str:
     """Deterministic train/validation assignment shared by every human-label path."""
     if not 0 <= percent < 100:
         raise ValueError("validation percent must be in [0, 100)")
     bucket = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % 100
     return "validation" if bucket < percent else "train"
+
+
+def component_validation_splits(records: Iterable[Any], percent: int) -> dict[str, str]:
+    """Cut train/validation per connected component of shared group/template/pair keys.
+
+    ★ 회귀 — 초판은 행마다 `group_id or template_id or id` 하나로 버킷을 정했다.
+      `validate_corpus` 는 group **와** template 이 각각 한쪽에만 있기를 요구하는데,
+      합성 공격은 template 300개 전부가 group 여럿에 걸쳐 있어서(group 은 template
+      안에 중첩된다) 같은 template 이 양쪽으로 갈렸다. RunPod 리허설에서
+      `template 'benign-076' crosses dataset splits` 로 7단계가 멈췄다 — GPU 교사
+      실행 **뒤에** 처음 드러날 자리였다.
+
+    키를 공유하는 행을 union-find 로 묶고, 성분마다 **가장 굵은 키**(template → group
+    → id) 중 가장 작은 것으로 버킷을 정한다. group 이 template 안에 중첩되는 한, 어떤
+    부분집합(교사 합의분·사람 검수분)에서 계산해도 한 template 은 같은 쪽에 떨어진다.
+    중첩이 깨진 데이터는 `validate_corpus` 가 봉인 시점에 거부한다.
+    """
+    materialized = list(records)
+    finder = _UnionFind(len(materialized))
+    owners: dict[tuple[str, str], int] = {}
+    for index, record in enumerate(materialized):
+        for kind in ("group_id", "template_id", "pair_id"):
+            value = getattr(record, kind, None)
+            if value is None:
+                continue
+            owner = owners.setdefault((kind, value), index)
+            if owner != index:
+                finder.union(owner, index)
+    components: dict[int, list[Any]] = defaultdict(list)
+    for index, record in enumerate(materialized):
+        components[finder.find(index)].append(record)
+    splits: dict[str, str] = {}
+    for members in components.values():
+        templates = sorted(member.template_id for member in members if member.template_id)
+        groups = sorted(member.group_id for member in members if member.group_id)
+        anchor = (templates or groups or sorted(member.id for member in members))[0]
+        split = hashed_validation_split(anchor, percent)
+        for member in members:
+            splits[member.id] = split
+    return splits
 
 
 class _UnionFind:
