@@ -174,9 +174,18 @@ def _train_seed(
         score = 2 * metrics.pii_character_recall * metrics.attack_macro_recall / max(
             1e-12, metrics.pii_character_recall + metrics.attack_macro_recall
         )
-        if score > best_score:
+        improved = score > best_score
+        if improved:
             best_score = score
             torch.save(model.state_dict(), seed_dir / "joint_l1.pt")
+        # 수 시간짜리 학습이 끝날 때까지 아무것도 안 찍으면 pod 에서 진행을 볼 방법이 없다.
+        print(
+            f"seed {seed} epoch {epoch}/{epochs} steps {losses.steps} loss {losses.total:.4f} "
+            f"pii_char_recall {metrics.pii_character_recall:.4f} "
+            f"attack_macro_recall {metrics.attack_macro_recall:.4f} "
+            f"hmean {score:.4f}{' *saved' if improved else ''}",
+            flush=True,
+        )
         if stopping.update(
             pii_recall=metrics.pii_character_recall,
             attack_macro_recall=metrics.attack_macro_recall,
