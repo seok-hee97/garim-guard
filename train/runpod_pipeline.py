@@ -175,6 +175,32 @@ def merge_pii() -> None:
         print(f"   sha256 {_digest(output)}  {output}")
 
 
+def check_pii_windows() -> None:
+    """3b — PII 학습·검증 전체를 학습 창으로 인코딩해 본다(CPU). 교사보다 먼저다.
+
+    ★ 학습 dry-run 은 32행만 인코딩한다. 앞 공백을 문 KDPII span 하나가 "512토큰 창에 안
+      들어간다" 로 실패한 것이 **교사 3종을 다 돌린 뒤** 학습 첫 줄에서였다(RunPod). PII
+      코퍼스는 3단계에서 확정되므로 여기서 전부 인코딩하면 그 종류의 실패가 GPU 를 쓰기 전에
+      드러난다.
+    """
+    from transformers import AutoTokenizer
+
+    from garim.training.config import load_run_config
+    from garim.training.data import load_jsonl
+    from garim.training.dataset import EncodedCorpusDataset
+
+    config = load_run_config()
+    tokenizer = AutoTokenizer.from_pretrained(
+        ROOT / "models/pinned/l1_ax_encoder", local_files_only=True, use_fast=True
+    )
+    for path in (*PII_TRAIN, *PII_VALIDATION):
+        records = load_jsonl(ROOT / path)
+        windows = EncodedCorpusDataset(
+            tokenizer, records, max_length=config.max_length, stride=config.stride
+        )
+        print(f"\n== 3b 창 정렬 {path}: {len(records)}행 → {len(windows)}창", flush=True)
+
+
 def build_pool() -> Path:
     """5~5c — 생성기 라벨 분리, 번역 적용, 교사 풀 병합, train·validation 을 한 입력으로."""
     for split in ("train", "validation"):
@@ -322,6 +348,7 @@ def main() -> int:
     materialize_t4()
     apply_deepset()
     merge_pii()
+    check_pii_windows()
     teacher_input = build_pool()
     if args.rehearse:
         teachers = write_standin_teachers(teacher_input, work)

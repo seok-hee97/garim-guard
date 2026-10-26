@@ -49,6 +49,26 @@ def test_kdpii_adapter_narrows_account_and_does_not_guess_unknown_labels() -> No
     assert report.ignored_labels == Counter({"OG_COMPANY": 1})
 
 
+def test_kdpii_spans_never_carry_edge_whitespace_into_training_windows() -> None:
+    """★ 회귀 — 원천 span 이 앞 공백을 물어 20토큰짜리 행이 "512토큰 창에 안 들어간다" 로
+    RunPod 첫 학습을 멈췄다. 토큰은 공백을 덮지 않는다.
+    """
+    dialogues = [
+        {
+            "id": "d2",
+            "sentence": [
+                {
+                    "form": " 3762 743966 38584 카드로 결제해 주세요",
+                    "PNE": [{"form": " 3762 743966 38584", "label": "QT_CARD_NUMBER"}],
+                }
+            ],
+        }
+    ]
+    records, _ = adapt_kdpii_dialogues(dialogues, split="train")
+    span = records[0].spans[0]
+    assert records[0].text[span.start : span.end] == "3762 743966 38584"
+
+
 def test_klue_adapter_keeps_only_hangul_ps_names_of_two_to_four_characters() -> None:
     rows = [
         {

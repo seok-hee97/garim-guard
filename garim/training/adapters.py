@@ -129,6 +129,13 @@ def _position(entity: Mapping[str, Any], text: str, form: str, cursor: int) -> t
 
 
 def _refine_span(label: str, text: str, start: int, end: int) -> tuple[int, int]:
+    # ★ 원천 span 이 앞뒤 공백을 무는 경우가 있다(KDPII CARD `' 3762 743966 38584'`). 토큰은
+    #   공백을 덮지 않으므로 학습 창 정렬이 "엔티티가 512토큰 창에 안 들어간다" 로 멈췄다 —
+    #   20토큰짜리 행이었다(RunPod 첫 학습). 문자 단위 평가에서도 공백이 엔티티로 셈해진다.
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
     value = text[start:end]
     if label == "KR_ACCOUNT":
         match = _ACCOUNT_TOKEN.search(value)
