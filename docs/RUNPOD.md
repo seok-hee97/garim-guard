@@ -253,9 +253,34 @@ python -m bench.teacher_agreement \
   --primary gemma4 --secondary qwen3guard_gen
 ```
 
-**동의율 ≥ 0.95 면 교체 실패로 본다.** 두 번째 표가 정보를 더하지 않는다는 뜻이고, 그때는
-4.x 격리 venv 로 되돌아간다. 같은 하네스가 **생성기 라벨과 교사 라벨의 일치도**도 낸다 —
-자작 공격 코퍼스를 외부 모델로 검증할 유일한 기회다.
+**동의율 ≥ 0.95 면 파이프라인이 멈춘다.** 같은 하네스가 **생성기 라벨과 교사 라벨의 일치도**도
+낸다 — 자작 공격 코퍼스를 외부 모델로 검증할 유일한 기회다.
+
+#### 6b 가 멈췄을 때의 판정 — 교사 산출물이 생기기 전(2026-10-26)에 정해 둔다
+
+높은 동의율만으로는 "따라 하기" 인지 "진짜 일치" 인지 갈리지 않는다. 하네스가 함께 내는
+`jailbreak_on_primary_negative`(Gemma 가 JAILBREAK 이 **아니라** 한 행에서 Qwen 이 JAILBREAK
+이라 한 비율)로 가른다.
+
+| 동의율 | Gemma-음성 위 Qwen JAILBREAK 비율 | 판정 | 행동 |
+|---|---|---|---|
+| < 0.95 | — | 통과 | 그대로 진행 |
+| ≥ 0.95 | **< 0.05** | 진짜 일치 — Qwen 이 혼자서는 거의 JAILBREAK 이라 하지 않는다 | `--accept-rubber-stamp` 로 진행하고 두 수치를 모델 카드에 적는다 |
+| ≥ 0.95 | **≥ 0.05** | 따라 하기 — 무엇에나 JAILBREAK 이라 하는 교사다 | **Qwen3Guard-Gen-4B 로 교체** 후 Qwen 단계만 다시 |
+
+**교체 절차(Gen-0.6B → Gen-4B).** 같은 계열·같은 택소노미라 `Qwen3GuardGenBackend` 가 그대로
+맞고, 원격 코드가 없고, Apache-2.0 이며 `train/models.yaml` 에 revision 이 이미 고정돼 있다
+(`l2_qwen3guard_gen_4b`). 한국어 F1 0.6B 77.1 → 4B 85.7(§6.4.3), bf16 약 9GB 라 24GB 에 들어간다.
+이름(`qwen3guard_gen`)은 그대로 두고 모델만 바꾼다 — 경로·합의 규칙이 그대로 이어진다.
+
+1. `train/models.yaml` 의 `teacher_qwen3guard_gen` 과 `train/teachers.yaml` 의 `qwen3guard_gen` 에서
+   `model_id` → `Qwen/Qwen3Guard-Gen-4B`, `revision` → `6ec42827da0c1ff11e7a49dc269d2e810d27e108`,
+   `parameters` → `4411424256`
+2. `python train/validate_models.py` → `python train/download_assets.py --execute`
+3. `data/corpus/teacher-qwen3guard_gen.jsonl` 을 지운다 — 옛 모델 산출물은 revision 불일치로 거부된다
+4. `python train/runpod_pipeline.py --device cuda --train` 재실행 — kanana·Gemma 는 이어 돌기라
+   건너뛰고 Qwen 만 다시 돈다. 4B 로도 따라 하기면 사람이 판단한다(JAILBREAK 를 Gemma 단독
+   판정으로 받을지, 그 클래스를 이번 학습에서 뺄지)
 
 ## 학습 전 확인할 것 — 해소됨
 
