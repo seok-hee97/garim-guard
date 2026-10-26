@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
@@ -19,6 +20,9 @@ from garim.detect.l2 import (
 from garim.training.data import CorpusRecord
 from garim.training.teacher_io import TeacherArtifact
 from garim.training.teachers import TeacherSpec
+
+# 읽지 못한 교사 출력의 표시 — 신뢰도 0 의 기권이다. `bench/teacher_agreement.py` 가 뺀다.
+UNPARSED_SUFFIX = ":unparsed"
 
 
 def last_position_logits(model: Any, input_ids: Any, attention_mask: Any) -> Any:
@@ -180,8 +184,24 @@ class Gemma4Backend(TeacherBackend):
             response = self._generate(prompt + GEMMA_RETRY_SUFFIX)
             try:
                 label = parse_policy_label(response)
-            except L2ParseError as exc:
-                raise ValueError(f"Gemma output is not one project label: {response!r}") from exc
+            except L2ParseError:
+                # ★ 한 행이 교사 단계 전체를 멈추게 두지 않는다. 신뢰도 0 은 표를 던지지
+                #   않으므로(`minimum_confidence`) 이 행은 2표 합의를 못 채워 감사 기록과 함께
+                #   폐기된다 — `NONE` 으로 흡수되지 않는다. 일치도 하네스는 이 표시를 빼고 센다.
+                print(
+                    f"gemma4: {record.id} unparsed after retry: {response[:60]!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return TeacherArtifact(
+                    id=record.id,
+                    teacher=self.name,
+                    model_id=self.spec.model_id,
+                    revision=self.spec.revision,
+                    label="NONE",
+                    confidence=0.0,
+                    prompt_version=f"{GEMMA_POLICY_VERSION}{UNPARSED_SUFFIX}",
+                )
         return TeacherArtifact(
             id=record.id,
             teacher=self.name,

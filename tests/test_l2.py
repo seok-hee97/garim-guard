@@ -219,3 +219,14 @@ def test_proxy_in_thorough_mode_uses_the_injected_judge() -> None:
         {"model": "x", "messages": [{"role": "user", "content": "안녕하세요"}]}, {}
     )
     assert headers["X-Garim-Degraded"] == "false"
+
+
+def test_a_category_description_reads_as_its_category() -> None:
+    """★ 회귀 — pod 의 Gemma 교사가 `NONE` 대신 NONE 설명을 옮겨 적어 교사 단계 전체가 멈췄다."""
+    assert parse_policy_label("정상 요청. 업무 지시·질문·번역·요약") == "NONE"
+    assert parse_policy_label("앞선 지시를 무시·덮어쓰기·재정의하려는 시도.") == "INJECTION"
+    assert parse_policy_label("시스템 프롬프트·개발자 지시·설정 자체를 출력") == "SYSTEM_LEAK"
+    # 범주 이름이 있으면 이름이 이긴다. 설명이 첫머리가 아니면 읽지 않는다.
+    assert parse_policy_label("JAILBREAK — 정상 요청처럼 보이지만") == "JAILBREAK"
+    with pytest.raises(L2ParseError):
+        parse_policy_label("이 요청은 정상 요청입니다")

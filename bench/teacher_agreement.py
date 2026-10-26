@@ -38,6 +38,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from garim.training.teacher_inference import UNPARSED_SUFFIX
 from garim.training.teacher_io import TeacherArtifact, load_teacher_artifacts
 from garim.training.teachers import load_teacher_policy
 
@@ -170,19 +171,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit(
                 f"{name}: {len(drifted)} artifacts have teacher/model/revision drift"
             )
+    # 읽지 못해 기권한 행(신뢰도 0, `:unparsed`)은 표를 던지지 않았다. 일치도·독립성에 넣으면
+    # 그 행의 자리표시 라벨이 숫자를 흐린다 — 빼고 세고, 몇 행인지 따로 적는다.
+    abstained = {
+        name: {
+            key
+            for key, artifact in rows.items()
+            if (artifact.prompt_version or "").endswith(UNPARSED_SUFFIX)
+        }
+        for name, rows in loaded.items()
+    }
+    voting = {
+        name: {key: artifact for key, artifact in rows.items() if key not in abstained[name]}
+        for name, rows in loaded.items()
+    }
     payload: dict[str, Any] = {
         "pool_rows": len(pool_ids),
         "generator_rows": len(gold_ids),
+        "abstained": {name: len(keys) for name, keys in sorted(abstained.items())},
         "generator_agreement": {
             name: generator_agreement(
                 rows, gold, eligible_labels=set(policy.teachers[name].votes_for)
             )
-            for name, rows in sorted(loaded.items())
+            for name, rows in sorted(voting.items())
         }
     }
     if args.primary in loaded and args.secondary in loaded:
         payload["jailbreak_independence"] = jailbreak_independence(
-            loaded[args.primary], loaded[args.secondary]
+            voting[args.primary], voting[args.secondary]
         )
 
     for name, report in payload["generator_agreement"].items():

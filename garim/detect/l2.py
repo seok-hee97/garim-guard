@@ -63,12 +63,34 @@ class L2ParseError(ValueError):
     """판정기 출력이 범주 하나로 읽히지 않는다 — §3.6 '출력 파싱 실패'."""
 
 
+# 정책 프롬프트의 범주 설명 첫머리. 모델이 범주 이름 대신 설명을 그대로 옮겨 적을 때 쓴다.
+_DESCRIPTION_PREFIXES = {
+    "정상 요청": "NONE",
+    "앞선 지시를": "INJECTION",
+    "안전 정책·제약을": "JAILBREAK",
+    "시스템 프롬프트·개발자 지시": "SYSTEM_LEAK",
+}
+
+
 def parse_policy_label(response: str) -> str:
-    """응답에서 범주 이름을 정확히 하나 읽는다. 둘 이상이거나 없으면 실패한다."""
+    """응답에서 범주를 정확히 하나 읽는다. 둘 이상이거나 없으면 실패한다.
+
+    ★ 범주 이름이 없으면 **응답이 범주 설명으로 시작하는지** 본다. RTX 3090 pod 의 Gemma 교사가
+      19,157행 중 1,553번째에서 `NONE` 대신 `정상 요청. 업무 지시·질문·번역·요약` 을 두 번 내고
+      교사 단계 전체를 멈췄다 — 정책 프롬프트의 NONE 설명을 그대로 옮겨 적은 것이다. 설명은
+      범주와 1:1 이라 그 범주로 읽는다. 첫머리가 정확히 하나의 설명일 때만이다.
+    """
     matches = _LABEL.findall(response.upper())
-    if len(set(matches)) != 1:
-        raise L2ParseError(f"judge output is not one project label: {response[:80]!r}")
-    return matches[-1]
+    if len(set(matches)) == 1:
+        return matches[-1]
+    if not matches:
+        head = response.strip()
+        described = {
+            label for prefix, label in _DESCRIPTION_PREFIXES.items() if head.startswith(prefix)
+        }
+        if len(described) == 1:
+            return described.pop()
+    raise L2ParseError(f"judge output is not one project label: {response[:80]!r}")
 
 
 @dataclass(frozen=True, slots=True)

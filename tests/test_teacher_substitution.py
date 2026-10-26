@@ -285,3 +285,67 @@ def test_the_teacher_pool_carries_no_labels() -> None:
         "garim-synthetic-attack",
         "deepset-prompt-injections",
     }, sources
+
+
+def test_unreadable_gemma_output_abstains_instead_of_stopping_the_run() -> None:
+    """★ 회귀 — 한 행이 19,157행 교사 단계 전체를 멈췄다.
+
+    이제는 표를 던지지 않는 기권으로 남긴다.
+    """
+    from garim.training.data import CorpusRecord
+    from garim.training.teacher_inference import UNPARSED_SUFFIX, Gemma4Backend
+    from garim.training.teachers import TeacherPrediction, resolve_teacher_label
+
+    policy = load_teacher_policy("train/teachers.yaml")
+    backend = Gemma4Backend.__new__(Gemma4Backend)
+    backend.name, backend.spec = "gemma4", policy.teachers["gemma4"]
+    record = CorpusRecord(id="r1", task="attack", text="x", source="t", split="train")
+
+    backend._generate = lambda prompt: "정상 요청. 업무 지시·질문·번역·요약"  # noqa: SLF001
+    described = backend.predict(record)
+    assert (described.label, described.confidence) == ("NONE", 1.0)
+
+    backend._generate = lambda prompt: "음…"  # noqa: SLF001
+    abstained = backend.predict(record)
+    assert abstained.confidence == 0.0
+    assert abstained.prompt_version.endswith(UNPARSED_SUFFIX)
+    # 신뢰도 0 은 표가 아니다 — kanana 의 NONE 한 표만으로는 합의가 안 된다(NONE 흡수 금지).
+    decision = resolve_teacher_label(
+        {
+            "kanana": TeacherPrediction("NONE", 0.9),
+            "gemma4": TeacherPrediction(abstained.label, abstained.confidence),
+            "qwen3guard_gen": TeacherPrediction("NONE", 0.9),
+        },
+        policy,
+    )
+    assert decision.status == "review"
+
+
+def test_agreement_statistics_leave_out_abstentions(tmp_path) -> None:
+    from garim.training.teacher_inference import UNPARSED_SUFFIX
+
+    gold = tmp_path / "gold.json"
+    gold.write_text(json.dumps({"s1": "JAILBREAK", "s2": "JAILBREAK"}), encoding="utf-8")
+    spec = load_teacher_policy("train/teachers.yaml").teachers["gemma4"]
+    gemma = tmp_path / "gemma4.jsonl"
+    rows = [
+        _artifact("s1", "JAILBREAK").model_copy(
+            update={"teacher": "gemma4", "model_id": spec.model_id, "revision": spec.revision}
+        ),
+        _artifact("s2", "NONE").model_copy(
+            update={
+                "teacher": "gemma4",
+                "model_id": spec.model_id,
+                "revision": spec.revision,
+                "confidence": 0.0,
+                "prompt_version": f"gemma4-policy-v1{UNPARSED_SUFFIX}",
+            }
+        ),
+    ]
+    gemma.write_text("\n".join(row.model_dump_json() for row in rows) + "\n", encoding="utf-8")
+    output = tmp_path / "r.json"
+    main(["--gold", str(gold), "--teacher", f"gemma4={gemma}", "--output", str(output)])
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["abstained"] == {"gemma4": 1}
+    assert report["generator_agreement"]["gemma4"]["rows"] == 1
+    assert report["generator_agreement"]["gemma4"]["agreement"] == 1.0
