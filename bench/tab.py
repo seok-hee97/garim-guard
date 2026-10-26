@@ -173,18 +173,64 @@ def evaluate(documents: Sequence[TabDocument], detector: Detector, *, name: str)
     )
 
 
-def garim_context_detector(policy_path: str = "config/policy.yaml") -> Detector:
+def garim_context_detector(
+    policy_path: str = "config/policy.yaml",
+    *,
+    l1_model_dir: str | None = None,
+    degraded: Counter[str] | None = None,
+) -> Detector:
     """가림 — 문맥 의존 3종(PERSON/ADDRESS/ORG_ID)은 L1 전용이라 L0 만으로는 0 이 나온다.
 
     그 0 이 이 하네스의 기준선이다. L1 가중치를 연결하면 여기서 증분이 보여야 한다.
+    `degraded` 를 넘기면 L1 이 시간·예산 초과로 빠진 문서 수를 센다 — 그 문서의 0 은
+    판별력이 아니라 지연 예산의 결과다.
     """
     from garim import Inspector
 
-    inspector = Inspector(policy_path)
+    l1_backend = None
+    if l1_model_dir is not None:
+        from garim.detect.l1 import OnnxL1Backend
+
+        l1_backend = OnnxL1Backend(l1_model_dir)
+    inspector = Inspector(policy_path, l1_backend=l1_backend)
     context_codes = set(ENTITY_TO_CODE.values())
 
     def detector(text: str) -> list[tuple[int, int]]:
         result = inspector.check(text)
+        if degraded is not None and result.degraded:
+            degraded["documents"] += 1
         return [f.span for f in result.leaks if f.code in context_codes]
 
     return detector
+
+
+def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="축 (a) — TAB 문맥 의존 3종 재현율")
+    parser.add_argument("--tab", required=True, help="TAB echr_test.json")
+    parser.add_argument("--policy", default="config/policy.yaml")
+    parser.add_argument("--l1-model-dir")
+    parser.add_argument("--output")
+    args = parser.parse_args()
+
+    degraded: Counter[str] = Counter()
+    name = "garim-l1" if args.l1_model_dir else "garim-l0"
+    detector = garim_context_detector(
+        args.policy, l1_model_dir=args.l1_model_dir, degraded=degraded
+    )
+    payload = evaluate(load_tab(args.tab), detector, name=name).as_dict()
+    payload["policy"] = args.policy
+    payload["degraded_documents"] = degraded["documents"]
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.output:
+        destination = Path(args.output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

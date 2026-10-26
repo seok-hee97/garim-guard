@@ -111,6 +111,15 @@ def test_l0_scores_zero_because_context_codes_are_l1_only(tab_file: Path) -> Non
     assert set(report.recall_by_identifier_type.values()) == {0.0}
 
 
+def test_degraded_documents_are_counted_not_hidden(tab_file: Path) -> None:
+    """L1 이 시간 초과로 빠진 문서의 0 을 판별력으로 읽지 않게 따로 센다."""
+    from collections import Counter
+
+    degraded: Counter[str] = Counter()
+    evaluate(load_tab(tab_file), garim_context_detector(degraded=degraded), name="garim-l0")
+    assert degraded["documents"] == 0
+
+
 def test_empty_document_set_is_refused() -> None:
     with pytest.raises(ValueError, match="at least one document"):
         evaluate([], lambda text: [], name="empty")

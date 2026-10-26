@@ -35,6 +35,19 @@ def garim_l0(policy_path: str = "config/policy.yaml") -> Judge:
     return judge
 
 
+def garim_l1(l1_model_dir: str, policy_path: str = "config/policy.yaml") -> Judge:
+    """가림 본체 + 학습된 L1(ONNX QInt8) — interactive 모드 그대로, L0 와 같은 판정 기준."""
+    from garim import Inspector
+    from garim.detect.l1 import OnnxL1Backend
+
+    inspector = Inspector(policy_path, l1_backend=OnnxL1Backend(l1_model_dir))
+
+    def judge(text: str) -> bool:
+        return bool(inspector.check(text).attacks)
+
+    return judge
+
+
 def rules_without_normalization() -> Judge:
     """§7.3 '정규화 OFF' 베이스라인 — 같은 규칙을 원문에만 적용한다."""
     from garim.detect.rules import detect_attacks
