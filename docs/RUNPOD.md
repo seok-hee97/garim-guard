@@ -7,7 +7,7 @@
 |---|---|---|
 | kanana 2.1b 추론 | ✅ | 4.19GB, MPS 로 돈다 |
 | gemma-4-E2B 추론 | ❌ | 10.28GB 를 16GB 에서 돌리면 스왑 — 4행에 10분 초과 |
-| Qwen3Guard-**Gen** 0.6B | ✅ | Stream 을 대체했다 — 아래 참조. 1.4GB |
+| Qwen3Guard-**Gen** 4B | ❌ | Stream → Gen-0.6B → **Gen-4B** — 아래 참조. bf16 약 9GB |
 | R1/R2 gradient 학습 | ❌ | MPS 가 matmul 에서 죽는다. CUDA 가 필요하다 |
 
 ## ★ 올리는 것은 저장소뿐이다
@@ -278,10 +278,33 @@ python -m bench.teacher_agreement \
    `model_id` → `Qwen/Qwen3Guard-Gen-4B`, `revision` → `6ec42827da0c1ff11e7a49dc269d2e810d27e108`,
    `parameters` → `4411424256`
 2. `python train/validate_models.py` → `python train/download_assets.py --execute`
-3. `data/corpus/teacher-qwen3guard_gen.jsonl` 을 지운다 — 옛 모델 산출물은 revision 불일치로 거부된다
+3. `data/corpus/teacher-qwen3guard_gen.jsonl` 을 코퍼스 밖으로 옮긴다(대조용) — 그대로 두면
+   `run_teacher.py` 가 `existing output model/revision drift` 로 거부한다
 4. `python train/runpod_pipeline.py --device cuda --train` 재실행 — kanana·Gemma 는 이어 돌기라
    건너뛰고 Qwen 만 다시 돈다. 4B 로도 따라 하기면 사람이 판단한다(JAILBREAK 를 Gemma 단독
    판정으로 받을지, 그 클래스를 이번 학습에서 뺄지)
+
+#### 실제로 일어난 일 — 표에 없던 반대쪽 실패(RTX 3090, 2026-10-27)
+
+Gen-0.6B 는 따라 하기가 아니라 **거의 알아보지 못했다.** 6b 는 통과했다 — 게이트는 동의율이
+**높을** 때만 멈추기 때문이다.
+
+| 0.6B 6b 지표 | 값 |
+|---|---|
+| Gemma 가 JAILBREAK 이라 한 행 | 1,596 |
+| 그중 Qwen 도 JAILBREAK (`agreement_on_jailbreak`) | **0.036** |
+| Gemma-음성 위 Qwen JAILBREAK (`jailbreak_on_primary_negative`) | 0.004 |
+| 생성기 JAILBREAK 159행 위 Qwen 재현율 | **0.145** (136행을 Safe) |
+
+JAILBREAK 는 Gemma·Qwen 2표가 있어야 받으므로 합의 결과가 **학습 53행 · 검증 5행**이었다.
+백엔드 결함이 아님은 확인했다 — 생성기 JAILBREAK 행에서 Safe 확신도 평균이 0.996 이었다.
+0.6B 가 한국어 탈옥을 탈옥으로 보지 않는 것이다(§6.2.2 가 경고한 다국어 약점과 같은 방향).
+
+**판단: 미리 정한 교체 대상(Gen-4B)으로 바꾼다.** 표의 행동은 따라 하기에 대해 정해 둔 것이라
+이 경우를 덮지 않는다 — 그래서 **교사 산출물을 본 뒤, 학습·평가 전**에 내린 결정임을 적어 둔다.
+L1 결과는 아무것도 보지 않았다. 검증 5행으로는 JAILBREAK head 를 고를 수도 잴 수도 없고,
+같은 계열의 상위 모델로 바꾸는 것이 합의 규칙(2표)을 느슨하게 하는 것보다 덜 자의적이다.
+0.6B 산출물과 6b 보고서는 pod 의 `/workspace/backup-qwen0p6b/` 에 남겨 두고 결과와 함께 보고한다.
 
 ## 학습 전 확인할 것 — 해소됨
 

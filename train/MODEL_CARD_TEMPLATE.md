@@ -36,7 +36,7 @@ KLUE-NER의 CC-BY-SA-4.0 학습 사실과 출처를 명시합니다. 가중치 �
 
 - `kakaocorp/kanana-safeguard-prompt-2.1b@167d74d4706b236580b0e48318337c7ac6ba7848`
 - `google/gemma-4-E2B-it@3e22461f65e89153144f8adb70e3b8c2cc9845a7`
-- `Qwen/Qwen3Guard-Gen-0.6B@fada3b2f655b89601929198343c94cd2f64d93cc`
+- `Qwen/Qwen3Guard-Gen-4B@6ec42827da0c1ff11e7a49dc269d2e810d27e108` (Gen-0.6B 에서 교체 — RUNPOD.md 6b 참조)
 
 일반 다수결이 아니라 클래스별 두 교사 합의를 사용했습니다. 불일치·누락 행은 자동으로
 `NONE` 처리하지 않고 사람 검토 큐로 분리했습니다.

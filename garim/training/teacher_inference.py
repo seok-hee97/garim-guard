@@ -290,7 +290,7 @@ class Qwen3GuardStreamBackend(TeacherBackend):
 
 
 class Qwen3GuardGenBackend(TeacherBackend):
-    """`Qwen/Qwen3Guard-Gen-0.6B` — Stream 대체. JAILBREAK 자격만 갖는다.
+    """`Qwen/Qwen3Guard-Gen` 계열(0.6B → 4B) — Stream 대체. JAILBREAK 자격만 갖는다.
 
     ## 왜 Stream 이 아닌가
 

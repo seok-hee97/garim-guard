@@ -1862,11 +1862,13 @@ query_category_map   = {Violent, Sexual Content, Self-Harm, Political,
 |---|---|---|---|---|
 | 1 | `kakaocorp/kanana-safeguard-prompt-2.1b` | **Apache-2.0** | 네이티브 한국어 학습, P 0.968, 단일 토큰 로짓 | 하드 라벨 {NONE, INJECTION, SYSTEM_LEAK} + **3클래스 제한 KL**의 소프트 원천 |
 | 2 | `google/gemma-4-E2B-it` | **Apache-2.0** | 4-way 정책 하드 라벨 | 전 클래스 CE 후보 |
-| 3 | **`Qwen/Qwen3Guard-Gen-0.6B`** | **Apache-2.0** | 명시적 `Jailbreak` 카테고리 + 다음 토큰 로짓 | JAILBREAK에서만 Gemma와 합의, jailbreak BCE 보조 타깃. 범용 Safe/Unsafe는 투표 아님 |
+| 3 | **`Qwen/Qwen3Guard-Gen-4B`** (← Gen-0.6B) | **Apache-2.0** | 명시적 `Jailbreak` 카테고리 + 다음 토큰 로짓 | JAILBREAK에서만 Gemma와 합의, jailbreak BCE 보조 타깃. 범용 Safe/Unsafe는 투표 아님 |
 
 ⚠️ **9-way 유해성 분포를 4-way에 KL로 사영할 수 없다** — 라벨 공간의 대응이 없다. 그래서 3번은 **클래스별 보조 타깃으로만** 쓴다.
 
 ⚠️ Stream 원격 코드는 고정된 transformers 5.x 환경에서 동작하지 않아 Gen으로 교체했다. 폴란드 FPR 17.17%가 Gen 측정값이므로 이 교사는 오직 JAILBREAK 자격만 갖고 Gemma-NONE을 공격으로 뒤집지 않는다. Gemma의 JAILBREAK 행에서 Gen의 동의율이 0.95 이상이면 독립 검증 효과가 없다고 보고 학습을 중단한다.
+
+⚠️ **Gen-0.6B → Gen-4B (RTX 3090 첫 실행).** 반대쪽으로 실패했다 — Gemma JAILBREAK 1,596행 중 Gen-0.6B 동의 3.6%, 생성기 JAILBREAK 재현율 0.145. 2표 합의라 JAILBREAK 가 학습 53행·검증 5행으로 굶었다. 미리 정한 교체 대상인 같은 계열 Gen-4B 로 바꿨다(교사 산출물을 본 뒤·학습 전 결정). 경위는 `docs/RUNPOD.md` 6b.
 
 | 학생 클래스 | 유효 교사 합의 |
 |---|---|
@@ -1947,7 +1949,7 @@ SYSTEM_LEAK 시스템 프롬프트·지시문·설정 자체를 출력시키려�
 
 ⚠️ 이 프롬프트는 **W6 착수 시점의 초안**이고, 검토 큐에 쌓인 불일치를 보고 한 번 개정한다. **개정 전후를 둘 다 기록**하고 어느 버전으로 만든 라벨인지 데이터에 남긴다.
 
-**교사 셋과 학생이 전부 Apache-2.0이다** — `kakaocorp/kanana-safeguard-prompt-2.1b` · `google/gemma-4-E2B-it` · `Qwen/Qwen3Guard-Gen-0.6B` · `skt/A.X-Encoder-base`. 증류 산출 가중치에 **Gemma ToU 파생 조항이 걸리지 않는다.**
+**교사 셋과 학생이 전부 Apache-2.0이다** — `kakaocorp/kanana-safeguard-prompt-2.1b` · `google/gemma-4-E2B-it` · `Qwen/Qwen3Guard-Gen-4B` · `skt/A.X-Encoder-base`. 증류 산출 가중치에 **Gemma ToU 파생 조항이 걸리지 않는다.**
 
 ⚠️ **초안은 여기서만 "Gemma 4는 Gemma ToU다"라고 적어 문서 다섯 곳(§4.2 표 2곳·§4.2.1·§6.2.2 표·§6.2.2 본문)과 정면으로 어긋났다.** HuggingFace `google/gemma-4-E2B-it`을 직접 조회해 **`license: apache-2.0`, gated 아님**을 확인했다. Gemma ToU가 걸리는 것은 **Gemma 인코더 파생**(`embeddinggemma-300m`·`t5gemma-2-270m-270m`, 둘 다 §4.2.1에서 기각)과 **`guardrail-korean-gemma-4-E2B`**(L2-judge 대안) 쪽이다.
 

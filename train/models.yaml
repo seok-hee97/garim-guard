@@ -52,13 +52,19 @@ models:
   #   ⚠️ §6.2.2 가 **이 모델의 폴란드 FPR 17.17%** 를 명시했다(Bielik Guard 실사용
   #      측정). 그래서 교체하되 JAILBREAK 동의율을 함께 재고, 지나치게 높으면 검증
   #      효과가 없다는 뜻이므로 교체 실패로 본다 — `bench/teacher_agreement.py`.
+  # ★ Gen-0.6B → Gen-4B (2026-10-27, RTX 3090 첫 실행). 0.6B 는 JAILBREAK 를 거의 알아보지
+  #   못했다 — 생성기가 JAILBREAK 로 만든 한국어 행 159개 중 0.145 만 JAILBREAK 이라 했고(나머지는
+  #   Safe 신뢰도 0.996), Gemma 의 JAILBREAK 1,596행 중 동의 0.036. 2표 규칙이 학습 JAILBREAK 를
+  #   53행만 남겼다. 4B 는 RUNPOD.md 에 미리 적어 둔 교체 대상(같은 계열·택소노미, 한국어 F1
+  #   77.1 → 85.7)이다. 교사 산출물을 본 뒤 · **학습 전**에 정했다 — 모델 결과는 보지 않았다.
+  #   이름은 그대로 두어 경로·합의 규칙을 잇는다. 0.6B 산출물은 대조용으로 남긴다.
   - name: teacher_qwen3guard_gen
-    model_id: Qwen/Qwen3Guard-Gen-0.6B
-    revision: fada3b2f655b89601929198343c94cd2f64d93cc
+    model_id: Qwen/Qwen3Guard-Gen-4B
+    revision: 6ec42827da0c1ff11e7a49dc269d2e810d27e108
     purpose: teacher
     license: Apache-2.0
     gated: false
-    parameters: 751632384
+    parameters: 4411424256
 
   - name: l2_qwen3guard_gen_4b
     model_id: Qwen/Qwen3Guard-Gen-4B

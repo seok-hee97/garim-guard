@@ -65,7 +65,7 @@
 |---|---|---|---|
 | L1 백본 | `skt/A.X-Encoder-base` (한국어 ModernBERT, 0.15B) | Apache-2.0 | 토큰 분류에는 양방향 인코더가 필요하다 |
 | **L2 판정** | **`google/gemma-4-E2B-it`** (Q4_K_M GGUF, 온디바이스) | **Apache-2.0** | 정책 프롬프트로 판정하는 생성 모델 자리 |
-| **R2 교사** | **Gemma 4 E2B** + kanana-safeguard-prompt-2.1b + Qwen3Guard-Gen-0.6B | Apache-2.0 | 클래스별 2표 합의로 공격 라벨 증류 |
+| **R2 교사** | **Gemma 4 E2B** + kanana-safeguard-prompt-2.1b + Qwen3Guard-Gen-4B | Apache-2.0 | 클래스별 2표 합의로 공격 라벨 증류 |
 
 **Gemma 4 가 L1 에 들어가지 못한 이유는 조사로 확인했다.** transformers 의 Gemma 4 에는
 분류 헤드가 없고(인과 마스크 생성 모델, 임베딩 포함 5.1B), Gemma 계열 인코더 파생

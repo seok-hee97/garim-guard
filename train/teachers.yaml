@@ -24,9 +24,10 @@ teachers:
   #   §6.2.2 가 걸어 둔 방어 장치 셋을 **그대로 둔다** — 이 교사는 JAILBREAK 한 칸만
   #   투표하고, 정족수 2 라 Gemma 동의가 필수이며, Gemma-NONE 을 뒤집지 못한다.
   #   §6.2.2 가 Gen-0.6B 의 폴란드 FPR 17.17% 를 명시했으므로 그 셋이 특히 중요하다.
+  # ★ 0.6B → 4B — `train/models.yaml` 의 같은 자리 주석 참고.
   qwen3guard_gen:
-    model_id: Qwen/Qwen3Guard-Gen-0.6B
-    revision: fada3b2f655b89601929198343c94cd2f64d93cc
+    model_id: Qwen/Qwen3Guard-Gen-4B
+    revision: 6ec42827da0c1ff11e7a49dc269d2e810d27e108
     votes_for: [JAILBREAK]
     soft_targets: [JAILBREAK]
     can_flip_none: false
