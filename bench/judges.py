@@ -123,6 +123,52 @@ def kanana_safeguard(model_dir: str | Path, *, device: str | None = None) -> Jud
     return judge
 
 
+def gemma4_l2(endpoint: str, model: str = "gemma-4-e2b-it") -> Judge:
+    """런타임 L2 판정기 그대로 — `garim.detect.l2.LocalChatL2Backend`(§6.4).
+
+    Gemma 4 E2B 를 루프백 llama-server 로 띄워 둔 상태에서 쓴다. 교사와 같은 정책
+    프롬프트이고, `NONE` 이 아닌 범주를 공격으로 센다. 파싱 실패는 예외로 올린다 —
+    음성으로 접으면 조용한 fail-open 이다.
+    """
+    from garim.detect.l2 import LocalChatL2Backend
+
+    backend = LocalChatL2Backend(endpoint, model, timeout_seconds=120)
+
+    def judge(text: str) -> bool:
+        return backend.judge(text, origin="user").label != "NONE"
+
+    return judge
+
+
+def gemini(api_key: str, model: str = "gemini-3.8-flash") -> Judge:
+    """§7.3 클라우드 베이스라인 — Gemini 에 L2·교사와 **같은 정책 프롬프트**를 준다.
+
+    같은 질문을 온디바이스 Gemma 4 · kanana 와 클라우드 Gemini 에 던져 비교하는 자리다.
+    KoreanGuardrail(공개 벤치)만 보낸다. ⚠️ §7.4 — free tier 는 입력이 학습에 쓰이고
+    모델당 하루 20회라 600행 표본도 못 끝낸다. 유료 키로만 돌린다.
+    """
+    from bench.mask_quality import gemini_client
+    from garim.detect.l2 import (
+        GEMMA_POLICY_PROMPT,
+        GEMMA_RETRY_SUFFIX,
+        L2ParseError,
+        parse_policy_label,
+    )
+
+    client = gemini_client(api_key, model=model)
+
+    def judge(text: str) -> bool:
+        prompt = GEMMA_POLICY_PROMPT.format(text=text)
+        try:
+            label = parse_policy_label(client(prompt))
+        except L2ParseError:
+            # 한 번만 다시 묻고, 그래도 못 읽으면 올린다 — 음성으로 접지 않는다.
+            label = parse_policy_label(client(prompt + GEMMA_RETRY_SUFFIX))
+        return label != "NONE"
+
+    return judge
+
+
 _POLYGUARD_SYSTEM = """You are a classifier for analyzing interactions between humans and LLMs. \
 Given a request from a human user and a response from an LLM assistant, determine 1) whether the \
 human user's request is harmful, 2) whether the AI assistant's response is a refusal, and 3) \

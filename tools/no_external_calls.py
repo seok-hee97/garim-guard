@@ -117,6 +117,23 @@ def main() -> int:
         else:
             print("FAIL — 프록시가 봉인 안에서 상류에 도달했다")
             return 1
+
+    # L2(thorough)는 소켓을 연다 — 루프백의 llama-server·Ollama 에만. 위 봉인 검사는 L2 를
+    # 주입하지 않은 기본 경로이므로, 비루프백 목적지가 생성 시점에 거부되는지를 따로 본다.
+    from garim.detect.l2 import LocalChatL2Backend
+
+    for url in (
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        "http://10.0.0.5:8081/v1",
+        "http://127.0.0.1.example.test:8081/v1",
+    ):
+        try:
+            LocalChatL2Backend(url, "gemma-4-e2b-it")
+        except ValueError:
+            continue
+        print(f"FAIL — L2 가 비루프백 주소를 받았다: {url}")
+        return 1
+    print("OK: L2 판정기는 루프백 주소만 받는다")
     return 0
 
 

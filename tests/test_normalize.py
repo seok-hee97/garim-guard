@@ -84,6 +84,25 @@ def test_josa_is_corrected_only_for_restored_hangul_values() -> None:
     assert vault.restore(f"{email}이 옵니다") == "user@example.test이 옵니다"
 
 
+def test_josa_follows_the_reading_of_a_final_digit() -> None:
+    """★ 회귀 — L0 가 가리는 값은 전부 숫자로 끝나는데 교정이 한글 값에만 걸렸다."""
+    vault = Vault()
+    phone = vault.token_for("010-1234-5678", "PHONE")  # 팔 — ㄹ 받침
+    card = vault.token_for("4539578763621482", "CARD")  # 이 — 받침 없음
+    account = vault.token_for("110-123-456780", "KR_ACCOUNT")  # 영·십 — ㄹ 아닌 받침
+    assert vault.restore(f"{phone}를 확인") == "010-1234-5678을 확인"
+    assert vault.restore(f"{phone}으로 연락") == "010-1234-5678로 연락"
+    assert vault.restore(f"{card}을 확인") == "4539578763621482를 확인"
+    assert vault.restore(f"{account}로 입금") == "110-123-456780으로 입금"
+
+
+def test_copula_after_a_token_is_not_treated_as_a_subject_particle() -> None:
+    vault = Vault()
+    person = vault.token_for("김철수", "PERSON")
+    assert vault.restore(f"{person}이에요") == "김철수이에요"
+    assert vault.restore(f"{person}이 왔다") == "김철수가 왔다"
+
+
 def test_vault_reports_unknown_restore_tokens() -> None:
     vault = Vault()
     vault.token_for("user@example.test", "EMAIL")

@@ -46,6 +46,7 @@ limits:
   chunk_size: 512
   chunk_overlap: 64
   max_l1_chunks: 128
+  max_l2_chunks: 32
   l1_timeout_ms: 1000
 
 custom_patterns:

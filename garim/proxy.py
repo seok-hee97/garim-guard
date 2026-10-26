@@ -31,6 +31,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from garim.api import Inspector
+from garim.detect.l1 import L1Backend
+from garim.detect.l2 import L2Backend
 from garim.models import Origin, Segment
 from garim.policy.schema import load_policy
 from garim.tls import https_context
@@ -65,6 +67,8 @@ class ProxyConfig:
     mode: str = "interactive"
     timeout_seconds: float = 60.0
     forward_authorization: bool = True
+    l1_model_dir: str | None = None
+    l1_model_file: str = "garim_l1.int8.onnx"
 
     def __post_init__(self) -> None:
         if not self.upstream_base_url.startswith(("http://", "https://")):
@@ -112,6 +116,10 @@ def _with_text(content: Any, replacement: str) -> Any:
     텍스트가 아닌 파트(이미지 등)는 순서대로 보존한다. 검사 대상이 아니었으므로 손댈
     이유가 없다.
     """
+    if content is None and replacement == "":
+        # `tool_calls` 만 있는 assistant 메시지는 content 가 null 이다. 다른 메시지가
+        # 마스킹됐다는 이유로 그 모양을 "" 로 바꿀 이유가 없다.
+        return None
     if isinstance(content, str) or not isinstance(content, list):
         return replacement
     updated: list[Any] = []
@@ -146,7 +154,92 @@ def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
     return segments
 
 
-def _blocked_body(result: Any) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class _ArgumentSlot:
+    """`tool_calls[].function.arguments` 하나 — `content` 밖에 있는 검사 단위.
+
+    ★ **원문 유출이 있었다.** `segments_from_messages` 는 `content` 만 읽는다. 함수
+      호출을 쓰는 대화는 매 요청에 이전 턴의 assistant `tool_calls` 를 함께 보내는데,
+      그 인자가 검사 없이 상류로 나갔다. 같은 요청 안에서 `tool` 메시지의
+      `kim@example.test` 는 `<EMAIL_1>` 로 가려지고, 바로 앞 assistant 메시지의
+      `{"email": "kim@example.test"}` 는 원문 그대로 나갔다.
+
+    §1.3 은 도구 호출을 범위 밖으로 둔다. 그래도 프록시가 `tool` 역할을 받아들이는
+    이상, 그 대화에 실려 가는 바이트를 검사하지 않을 근거는 없다.
+    """
+
+    message: int
+    call: int | None  # None 이면 구식 `function_call`
+    original: str
+    scanned: str
+    is_json: bool
+
+
+def _argument_slots(messages: list[dict[str, Any]]) -> list[_ArgumentSlot]:
+    slots: list[_ArgumentSlot] = []
+    for index, message in enumerate(messages):
+        calls = message.get("tool_calls")
+        if calls is not None and not isinstance(calls, list):
+            raise ProxyError(400, f"messages[{index}].tool_calls must be an array")
+        for call_index, call in enumerate(calls or []):
+            function = call.get("function") if isinstance(call, dict) else None
+            if isinstance(function, dict) and "arguments" in function:
+                slots.append(_slot(index, call_index, function["arguments"]))
+        legacy = message.get("function_call")
+        if isinstance(legacy, dict) and "arguments" in legacy:
+            slots.append(_slot(index, None, legacy["arguments"]))
+    return slots
+
+
+def _slot(message: int, call: int | None, arguments: Any) -> _ArgumentSlot:
+    if not isinstance(arguments, str):
+        # OpenAI 계약은 JSON 문자열이다. 다른 모양을 추측해 직렬화하면 상류가 받는
+        # 바이트와 우리가 검사한 바이트가 갈린다.
+        raise ProxyError(400, f"messages[{message}] tool call arguments must be a JSON string")
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return _ArgumentSlot(message, call, arguments, arguments, is_json=False)
+    # `\uXXXX` 이스케이프를 풀어 검사한다 — 기본 `json.dumps` 는 한글을 전부 이스케이프하고
+    # 규칙은 이스케이프된 바이트를 읽지 못한다.
+    scanned = json.dumps(parsed, ensure_ascii=False)
+    return _ArgumentSlot(message, call, arguments, scanned, is_json=True)
+
+
+def _masked_arguments(slot: _ArgumentSlot, masked: str) -> str:
+    if masked == slot.scanned:
+        return slot.original
+    if slot.is_json:
+        try:
+            json.loads(masked)
+        except json.JSONDecodeError as exc:
+            # 스팬이 JSON 이스케이프에 걸쳤다. 깨진 인자를 보내느니 보내지 않는다.
+            raise ProxyError(
+                400, "masking would corrupt tool call arguments; request was not forwarded"
+            ) from exc
+    return masked
+
+
+def _with_arguments(
+    messages: list[dict[str, Any]], slots: list[_ArgumentSlot], masked: list[str]
+) -> list[dict[str, Any]]:
+    updated = [dict(message) for message in messages]
+    for slot, text in zip(slots, masked, strict=True):
+        arguments = _masked_arguments(slot, text)
+        if arguments is slot.original:
+            continue
+        message = updated[slot.message]
+        if slot.call is None:
+            message["function_call"] = {**message["function_call"], "arguments": arguments}
+            continue
+        calls = list(message["tool_calls"])
+        call = calls[slot.call]
+        calls[slot.call] = {**call, "function": {**call["function"], "arguments": arguments}}
+        message["tool_calls"] = calls
+    return updated
+
+
+def _blocked_body(result: Any, segment_messages: list[int]) -> dict[str, Any]:
     return {
         "error": {
             "type": "garim_blocked",
@@ -155,7 +248,12 @@ def _blocked_body(result: Any) -> dict[str, Any]:
             "degraded": result.degraded,
             "degraded_reasons": result.degraded_reasons,
             "findings": [
-                {"code": finding.code, "segment": finding.segment_idx, "rule": finding.rule}
+                {
+                    "code": finding.code,
+                    "segment": finding.segment_idx,
+                    "message": segment_messages[finding.segment_idx],
+                    "rule": finding.rule,
+                }
                 for finding in (*result.leaks, *result.attacks)
             ],
         }
@@ -171,17 +269,29 @@ class ProxyService:
         *,
         inspector: Inspector | None = None,
         sender: Any = None,
+        l1_backend: L1Backend | None = None,
+        l2_backend: L2Backend | None = None,
     ) -> None:
         self.config = config
         if inspector is not None:
             self._inspector_factory = lambda: inspector
         else:
+            # 모델은 프로세스에 한 번만 올린다. 볼트는 요청마다 새로 만들어야 하므로
+            # (다른 요청의 원문이 이 응답에 복원되면 안 된다) Inspector 는 요청마다,
+            # 백엔드는 공유다. 공유를 견디는 조건은 `OnnxL1Backend` 가 진다.
+            if l1_backend is None and config.l1_model_dir is not None:
+                from garim.detect.l1 import OnnxL1Backend
+
+                l1_backend = OnnxL1Backend(
+                    config.l1_model_dir, model_filename=config.l1_model_file
+                )
+
             def trusted_inspector() -> Inspector:
                 policy = load_policy(config.policy_path)
                 # Unlike the library API, the proxy parsed the protocol-level role itself.
                 # This is the one place where DESIGN §2.5b allows origin trust.
                 policy.origin_policy.trust_declared = True
-                return Inspector(policy)
+                return Inspector(policy, l1_backend=l1_backend, l2_backend=l2_backend)
 
             self._inspector_factory = trusted_inspector
         self._sender = sender or self._send_upstream
@@ -200,7 +310,15 @@ class ProxyService:
             ) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            raise ProxyError(exc.code, "upstream rejected the request") from exc
+            # 상류의 오류 본문을 넘긴다 — 없으면 할당량 초과(429)·과부하(503)·키 오류를
+            # 앱에서 구분할 수 없다. 상류가 받은 것은 이미 마스킹된 요청이므로 그 응답에
+            # 원문이 실릴 자리는 없다.
+            raw = exc.read(4096)
+            try:
+                detail: Any = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                detail = raw.decode("utf-8", errors="replace")[:1000]
+            raise ProxyError(exc.code, "upstream rejected the request", detail) from exc
         except OSError as exc:
             raise ProxyError(502, f"upstream is unreachable: {exc}") from exc
 
@@ -211,7 +329,14 @@ class ProxyService:
             # 조각난 응답에서 볼트 토큰이 청크 경계에 걸리면 복원이 조용히 깨진다.
             raise ProxyError(400, "streaming is not supported: masked tokens cannot be restored")
 
-        segments = segments_from_messages(payload.get("messages"))
+        messages = payload.get("messages")
+        segments = segments_from_messages(messages)
+        slots = _argument_slots(messages)
+        segments.extend(
+            Segment(slot.scanned, origin=segments[slot.message].origin, content_type="structured")
+            for slot in slots
+        )
+        segment_messages = [*range(len(messages)), *(slot.message for slot in slots)]
         inspector = self._inspector_factory()
         result = inspector.check(segments, mode=self.config.mode)
         response_headers = {
@@ -222,15 +347,19 @@ class ProxyService:
             response_headers["X-Garim-Degraded-Reasons"] = ",".join(result.degraded_reasons)
 
         if result.verdict == "block":
-            return 400, _blocked_body(result), response_headers
+            return 400, _blocked_body(result, segment_messages), response_headers
 
         outbound = dict(payload)
         masked = result.masked_segments
         if masked is not None:
-            outbound["messages"] = [
-                {**message, "content": _with_text(message.get("content"), text)}
-                for message, text in zip(payload["messages"], masked, strict=True)
-            ]
+            outbound["messages"] = _with_arguments(
+                [
+                    {**message, "content": _with_text(message.get("content"), text)}
+                    for message, text in zip(messages, masked[: len(messages)], strict=True)
+                ],
+                slots,
+                masked[len(messages) :],
+            )
 
         upstream = self._sender("/chat/completions", outbound, headers)
         if result.vault is not None:
@@ -257,15 +386,63 @@ def _restore_choices(response: Any, vault: Any) -> tuple[Any, bool]:
     missing = False
     for choice in choices:
         message = choice.get("message") if isinstance(choice, dict) else None
-        if isinstance(message, dict) and isinstance(message.get("content"), str):
-            content, content_missing = vault.restore_with_status(message["content"])
-            missing = missing or content_missing
-            restored.append(
-                {**choice, "message": {**message, "content": content}}
-            )
-        else:
+        if not isinstance(message, dict):
             restored.append(choice)
+            continue
+        message = dict(message)
+        if isinstance(message.get("content"), str):
+            message["content"], content_missing = vault.restore_with_status(message["content"])
+            missing = missing or content_missing
+        # ★ 인자도 돌아오는 길이다. 초판은 `content` 만 복원해서, 모델이 마스킹된 번호로
+        #   함수를 부르면 앱의 도구가 `{"to": "<PHONE_1>"}` 을 받았다.
+        if isinstance(message.get("tool_calls"), list):
+            calls = []
+            for call in message["tool_calls"]:
+                function = call.get("function") if isinstance(call, dict) else None
+                if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                    arguments, call_missing = _restore_arguments(function["arguments"], vault)
+                    missing = missing or call_missing
+                    call = {**call, "function": {**function, "arguments": arguments}}
+                calls.append(call)
+            message["tool_calls"] = calls
+        legacy = message.get("function_call")
+        if isinstance(legacy, dict) and isinstance(legacy.get("arguments"), str):
+            arguments, call_missing = _restore_arguments(legacy["arguments"], vault)
+            missing = missing or call_missing
+            message["function_call"] = {**legacy, "arguments": arguments}
+        restored.append({**choice, "message": message})
     return {**response, "choices": restored}, missing
+
+
+def _restore_arguments(arguments: str, vault: Any) -> tuple[str, bool]:
+    """JSON 인자는 문자열 리프만 복원하고 다시 직렬화한다.
+
+    원문을 JSON 텍스트에 그대로 끼워 넣으면 따옴표·역슬래시가 든 값이 인자를 깨뜨린다.
+    """
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return vault.restore_with_status(arguments)
+    missing = False
+    changed = False
+
+    def walk(node: Any) -> Any:
+        nonlocal missing, changed
+        if isinstance(node, str):
+            value, node_missing = vault.restore_with_status(node)
+            missing = missing or node_missing
+            changed = changed or value != node
+            return value
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if isinstance(node, dict):
+            return {walk(key): walk(value) for key, value in node.items()}
+        return node
+
+    restored = walk(parsed)
+    if not changed:
+        return arguments, missing
+    return json.dumps(restored, ensure_ascii=False), missing
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -320,7 +497,15 @@ class _Handler(BaseHTTPRequestHandler):
         self._reply(status, body, headers)
 
 
-def build_server(config: ProxyConfig, *, host: str = "127.0.0.1", port: int = 8080) -> Any:
+def build_server(
+    config: ProxyConfig,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    l1_backend: L1Backend | None = None,
+    l2_backend: L2Backend | None = None,
+) -> Any:
     """`127.0.0.1` 에만 바인드한다 — 기본값으로 외부에 노출되지 않는다."""
-    handler = type("GarimProxyHandler", (_Handler,), {"service": ProxyService(config)})
+    service = ProxyService(config, l1_backend=l1_backend, l2_backend=l2_backend)
+    handler = type("GarimProxyHandler", (_Handler,), {"service": service})
     return ThreadingHTTPServer((host, port), handler)

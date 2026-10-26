@@ -70,3 +70,30 @@ def test_policy_chunk_size_cannot_exceed_backend_limit() -> None:
     config = PolicyConfig(limits=Limits(chunk_size=1024, chunk_overlap=64))
     with pytest.raises(ValueError, match="cannot exceed"):
         Inspector(config, l1_backend=BoundedBackend())
+
+
+def test_onnx_backend_cancels_only_the_timed_out_worker() -> None:
+    """프록시는 백엔드 하나를 요청 여럿이 공유한다.
+
+    한 요청의 타임아웃이 남의 추론을 끊으면 안 된다.
+    """
+    import threading
+    from types import SimpleNamespace
+
+    from garim.detect.l1 import OnnxL1Backend
+
+    backend = object.__new__(OnnxL1Backend)
+    backend._run_options_lock = threading.Lock()
+    mine, other = SimpleNamespace(terminate=False), SimpleNamespace(terminate=False)
+    backend._active_run_options = {1: mine, 2: other}
+    backend.cancel_current(1)
+    assert mine.terminate
+    assert not other.terminate
+
+
+def test_cli_refuses_to_run_without_the_requested_l1_model(tmp_path, capsys) -> None:  # noqa: ANN001
+    """모델을 달라고 했는데 못 올렸으면 L0 만으로 조용히 돌지 않는다."""
+    from garim.cli import main
+
+    assert main(["--l1-model-dir", str(tmp_path), "check", "안녕하세요"]) == 4
+    assert "garim:" in capsys.readouterr().err

@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 from garim.api import Inspector
+from garim.detect.l1 import L1Backend
+from garim.detect.l2 import L2Backend
 from garim.models import CheckResult
 
 _TEXT_SUFFIXES = {
@@ -50,6 +52,26 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="garim", description="로컬 프롬프트 사전 검사기")
     parser.add_argument("--policy", help="정책 YAML 경로")
     parser.add_argument("--mode", choices=("interactive", "thorough"), default="interactive")
+    parser.add_argument(
+        "--l1-model-dir",
+        help="학습된 L1 ONNX 디렉터리(garim_l1.*.onnx·labels.json·토크나이저). 생략하면 L0 만 돈다",
+    )
+    parser.add_argument(
+        "--l1-model-file",
+        default="garim_l1.int8.onnx",
+        help="--l1-model-dir 안의 ONNX 파일 이름",
+    )
+    parser.add_argument(
+        "--l2-endpoint",
+        help="thorough 모드 L2 판정기의 루프백 OpenAI 호환 /v1 주소 "
+        "(llama-server·Ollama). 루프백이 아니면 거부한다",
+    )
+    parser.add_argument(
+        "--l2-model",
+        default="gemma-4-e2b-it",
+        help="L2 서버에 넘길 모델 이름. 기본은 Gemma 4 E2B(§6.4)",
+    )
+    parser.add_argument("--l2-timeout", type=float, default=30.0, help="L2 호출당 제한(초)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check = subparsers.add_parser("check", help="문자열 또는 표준입력 검사")
@@ -68,6 +90,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="상류 base URL. 코드에 박힌 기본값을 두지 않는다 — 목적지는 항상 선언이다.",
     )
     proxy.add_argument("--host", default="127.0.0.1", help="기본값은 루프백이다")
+    proxy.add_argument(
+        "--upstream-timeout",
+        type=float,
+        default=60.0,
+        help="상류 응답 대기(초). 사고(thinking) 모델은 60초를 넘기기도 한다",
+    )
     proxy.add_argument("--port", type=int, default=8080)
     proxy.add_argument(
         "--no-forward-authorization",
@@ -116,10 +144,30 @@ def _iter_files(path: Path) -> list[Path]:
     )
 
 
+def _l1_backend(args: argparse.Namespace) -> L1Backend | None:
+    if args.l1_model_dir is None:
+        return None
+    from garim.detect.l1 import OnnxL1Backend
+
+    return OnnxL1Backend(args.l1_model_dir, model_filename=args.l1_model_file)
+
+
+def _l2_backend(args: argparse.Namespace) -> L2Backend | None:
+    if args.l2_endpoint is None:
+        return None
+    from garim.detect.l2 import LocalChatL2Backend
+
+    return LocalChatL2Backend(
+        args.l2_endpoint, args.l2_model, timeout_seconds=args.l2_timeout
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        inspector = Inspector(args.policy)
+        l1_backend = _l1_backend(args)
+        l2_backend = _l2_backend(args)
+        inspector = Inspector(args.policy, l1_backend=l1_backend, l2_backend=l2_backend)
         if args.command == "check":
             text = args.text if args.text is not None else sys.stdin.read()
             result = inspector.check(text, mode=args.mode)
@@ -134,11 +182,29 @@ def main(argv: list[str] | None = None) -> int:
                 policy_path=args.policy,
                 mode=args.mode,
                 forward_authorization=args.forward_authorization,
+                timeout_seconds=args.upstream_timeout,
+                l1_model_dir=args.l1_model_dir,
+                l1_model_file=args.l1_model_file,
             )
-            server = build_server(config, host=args.host, port=args.port)
+            server = build_server(
+                config,
+                host=args.host,
+                port=args.port,
+                l1_backend=l1_backend,
+                l2_backend=l2_backend,
+            )
+            layers = "+".join(
+                name
+                for name, present in (
+                    ("L0", True),
+                    ("L1", l1_backend is not None),
+                    ("L2", l2_backend is not None),
+                )
+                if present
+            )
             print(
                 f"garim proxy: http://{args.host}:{args.port}/v1 -> {args.upstream} "
-                f"(mode={args.mode})",
+                f"(mode={args.mode}, layers={layers})",
                 file=sys.stderr,
             )
             try:
@@ -176,7 +242,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 4
         return highest
-    except (OSError, TypeError, ValueError) as exc:
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        # RuntimeError: L1 extra(onnxruntime·transformers) 미설치. 모델을 달라고 했는데
+        # 못 올렸으면 L0 만으로 조용히 도는 대신 시작하지 않는다.
         print(f"garim: {exc}", file=sys.stderr)
         return 4
 

@@ -96,6 +96,9 @@ class Limits(BaseModel):
     #   ⚠️ 128 은 실측이 아니다 — §7.1.3 지연 수치 전체가 W1 첫날 실측 대상이고
     #      이 값도 거기서 다시 잡는다. 지금은 "무한이 아니다" 를 보장할 뿐이다.
     max_l1_chunks: int = Field(128, ge=1)
+    # L2(thorough) 판정 호출 상한. 생성형 판정은 호출당 초 단위라 L1 보다 훨씬 작게 둔다.
+    # 넘치면 L1 과 같은 균등 표본 + warn + degraded(`l2_chunk_cap`). 실측값이 아니다.
+    max_l2_chunks: int = Field(32, ge=1)
     # ★ §3.6 "L1 지연 예산 초과 → 타임아웃 후 L0 결과 채택, degraded".
     #   초판은 동기 호출 + except 뿐이라 1.5초 걸리는 백엔드에 1.51초 블로킹하고
     #   degraded=False 를 냈다. §7.1.3 의 세그먼트당 L1 예산이 160ms 다.

@@ -115,6 +115,28 @@ NORMALIZATION_DELTA_ORDER = (
 DELTA_KEYS_EXCLUDED_FROM_FEATURES = ("space",)
 
 
+class _SerializedTokenizer:
+    """Fast tokenizer wrapper that lets one backend serve concurrent requests.
+
+    HF fast tokenizers mutate their Rust-side truncation/padding state on each call; two
+    threads calling with different settings can fail with ``RuntimeError: Already
+    borrowed``. The runtime calls it with two settings — ``chunk_text`` without
+    truncation and ``infer`` with it — so a shared backend would hit exactly that.
+    Tokenization is short next to the ONNX run, so a lock costs little.
+    """
+
+    def __init__(self, tokenizer: object) -> None:
+        self._tokenizer = tokenizer
+        self._lock = threading.Lock()
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        with self._lock:
+            return self._tokenizer(*args, **kwargs)  # type: ignore[operator]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._tokenizer, name)
+
+
 class OnnxL1Backend:
     """Local ONNX Runtime adapter for the shared-encoder/four-head model contract.
 
@@ -152,15 +174,19 @@ class OnnxL1Backend:
         if len(self.pii_labels) != 29 or self.pii_labels[0] != "O":
             raise ValueError("pii_labels must contain O plus 14 BIO entity pairs")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer = AutoTokenizer.from_pretrained(
             directory, local_files_only=True, use_fast=True
         )
-        if not self.tokenizer.is_fast:
+        if not tokenizer.is_fast:
             raise ValueError("L1 requires a fast tokenizer for source offset mapping")
+        self.tokenizer = _SerializedTokenizer(tokenizer)
         self.session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
         self._ort = ort
         self._run_options_lock = threading.Lock()
-        self._active_run_options = None
+        # 워커 스레드 id → 그 스레드의 RunOptions. 프록시는 요청마다 Inspector 를 만들고
+        # 이 백엔드 하나를 공유한다. 슬롯이 하나뿐이면 요청 A 의 타임아웃이 요청 B 의
+        # 추론을 끊는다.
+        self._active_run_options: dict[int, object] = {}
         self.input_names = {item.name for item in self.session.get_inputs()}
         self.output_names = [item.name for item in self.session.get_outputs()]
         required_outputs = {
@@ -176,12 +202,19 @@ class OnnxL1Backend:
             )
         self.max_length = max_length
 
-    def cancel_current(self) -> None:
-        """Ask ONNX Runtime to terminate the active inference, if one exists."""
+    def cancel_current(self, thread_id: int | None = None) -> None:
+        """Ask ONNX Runtime to terminate the inference running on ``thread_id``.
+
+        Without a thread id every active inference is terminated.
+        """
         with self._run_options_lock:
-            run_options = self._active_run_options
-        if run_options is not None:
-            run_options.terminate = True
+            if thread_id is None:
+                targets = list(self._active_run_options.values())
+            else:
+                target = self._active_run_options.get(thread_id)
+                targets = [] if target is None else [target]
+        for run_options in targets:
+            run_options.terminate = True  # type: ignore[attr-defined]
 
     @staticmethod
     def _softmax(values: object) -> object:
@@ -274,14 +307,15 @@ class OnnxL1Backend:
             )
         )
         run_options = self._ort.RunOptions()
+        worker = threading.get_ident()
         with self._run_options_lock:
-            self._active_run_options = run_options
+            self._active_run_options[worker] = run_options
         try:
             raw_outputs = self.session.run(self.output_names, feed, run_options)
         finally:
             with self._run_options_lock:
-                if self._active_run_options is run_options:
-                    self._active_run_options = None
+                if self._active_run_options.get(worker) is run_options:
+                    del self._active_run_options[worker]
         outputs = dict(zip(self.output_names, raw_outputs, strict=True))
 
         attack = self._softmax(outputs["attack_logits"])[0]

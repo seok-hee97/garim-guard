@@ -62,7 +62,15 @@ class Vault:
                 missing = True
                 return match.group(0)
             particle = match.group(3)
-            if particle:
+            following = text[match.end() : match.end() + 1]
+            # `<X_1>이에요`·`<X_1>이고` 의 `이` 는 주격 조사가 아니라 서술격이다.
+            # 주격으로 보고 바꾸면 `김철수가에요` 가 된다 — 뒤에 음절이 이어지면 두지 않는다.
+            copula = (
+                particle in {"이", "가"}
+                and bool(following)
+                and 0xAC00 <= ord(following) <= 0xD7A3
+            )
+            if particle and not copula:
                 particle = correct_particle(value, particle)
             return value + (particle or "")
 

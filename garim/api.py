@@ -8,15 +8,26 @@ from dataclasses import dataclass, replace
 from time import perf_counter
 
 from garim.detect.l1 import L1Backend
+from garim.detect.l2 import L2_LABELS, L2Backend, L2ParseError
 from garim.detect.merge import ModeResolver, merge_overlaps
-from garim.detect.pipeline import DetectionPipeline, PipelineResult
+from garim.detect.pipeline import (
+    DetectionPipeline,
+    PipelineResult,
+    _evasion_codes,
+    attack_code_for,
+)
 from garim.mask.vault import Vault, mask_text
 from garim.models import CheckResult, ContentType, Finding, Origin, Segment
+from garim.normalize.chain import normalize
 from garim.policy.engine import MASK_LABELS, SEVERITY, PolicyEngine
 from garim.policy.schema import PolicyConfig, load_policy
 from garim.segment.chunk import chunk_text
 from garim.segment.content_type import detect_content_type
 from garim.segment.split import split_text
+
+# L2 는 토크나이저가 없다. `chunk_text` 의 문자 모드(토큰당 0.5자)로 약 2,000자 / 겹침 200자.
+_L2_CHUNK_TOKENS = 4000
+_L2_OVERLAP_TOKENS = 400
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +48,7 @@ class Inspector:
         policy: PolicyConfig | str | None = None,
         *,
         l1_backend: L1Backend | None = None,
+        l2_backend: L2Backend | None = None,
         vault: Vault | None = None,
     ) -> None:
         if isinstance(policy, PolicyConfig):
@@ -45,6 +57,7 @@ class Inspector:
             config = load_policy(policy)
         self.policy = PolicyEngine(config)
         self.pipeline = DetectionPipeline(self.policy, l1_backend)
+        self.l2_backend = l2_backend
         self.vault = vault or Vault(scope="session")
         backend_max_length = getattr(l1_backend, "max_length", None)
         if (
@@ -100,12 +113,15 @@ class Inspector:
         content_types: list[str] = []
         delta = _empty_delta()
         latency = _empty_latency()
-        degraded = truncated_input or mode == "thorough"  # L2 미배선 + 입력 절단
-        if mode == "thorough":
+        l2_missing = mode == "thorough" and self.l2_backend is None
+        degraded = truncated_input or l2_missing
+        if l2_missing:
+            # thorough 를 요청받고 L2 없이 돌면 L0+L1 결과를 thorough 라고 부르게 된다.
             degraded_reasons.append("l2_not_wired")
         # 검사하지 않은 꼬리를 외부로 보낼 수 없으므로 절단은 fail-closed다.
         forced_block = truncated_input
-        forced_warn = mode == "thorough"
+        forced_warn = l2_missing
+        segment_types: dict[int, ContentType] = {}
         internal_segments = 0
         # ★ §3.6 "청크 수 상한 초과 → warn + degraded" — 초판에 이 행이 없었다.
         #   `max_segments` 가드는 `split_text` 결과만 세고 `chunk_text` 결과를 세지
@@ -155,6 +171,7 @@ class Inspector:
                 if segment.content_type != "unknown"
                 else (slice_types[0] if len(set(slice_types)) == 1 else "prose")
             )
+            segment_types[segment_idx] = l0_content_type
             try:
                 accumulate(
                     self.pipeline.scan(
@@ -222,6 +239,45 @@ class Inspector:
                 forced_warn = True
                 degraded_reasons.append("l1_pipeline_error")
 
+        if mode == "thorough" and self.l2_backend is not None:
+            l2_jobs = [
+                _L1Job(
+                    piece.text,
+                    inputs[segment_idx].origin,
+                    content_type,
+                    segment_idx,
+                    piece.start,
+                    group=segment_idx,
+                )
+                # 인코딩 오류·L0 실패 세그먼트는 `segment_types` 에 없다 — 이미 warn/block 이다.
+                for segment_idx, content_type in segment_types.items()
+                for piece in chunk_text(
+                    inputs[segment_idx].text,
+                    chunk_size=_L2_CHUNK_TOKENS,
+                    chunk_overlap=_L2_OVERLAP_TOKENS,
+                )
+                if piece.text.strip()
+            ]
+            selected_l2 = _select_l1_jobs(l2_jobs, self.policy.config.limits.max_l2_chunks)
+            if len(selected_l2) < len(l2_jobs):
+                degraded = True
+                forced_warn = True
+                degraded_reasons.append("l2_chunk_cap")
+            l2_started = perf_counter()
+            for job in selected_l2:
+                try:
+                    findings.extend(self._l2_findings(job))
+                except L2ParseError:
+                    # §3.6 "L2 출력 파싱 실패 → L1 결과 유지, 최소 warn + degraded".
+                    degraded = True
+                    forced_warn = True
+                    degraded_reasons.append("l2_parse_error")
+                except Exception as exc:
+                    degraded = True
+                    forced_warn = True
+                    degraded_reasons.append(f"l2_error:{type(exc).__name__}")
+            latency["l2"] += (perf_counter() - l2_started) * 1000
+
         if internal_segments > self.policy.config.limits.max_segments:
             # ★ 사유를 안 적으면 감사 로그가 "무언가 나빠졌다" 까지만 말한다. 다른
             #   강등 경로는 전부 사유를 남기는데(`input_truncated`·`l0_error`·
@@ -283,6 +339,51 @@ class Inspector:
             latency_ms={key: round(value, 3) for key, value in latency.items()},
             degraded_reasons=sorted(set(degraded_reasons)),
         )
+
+
+    def _l2_findings(self, job: _L1Job) -> list[Finding]:
+        """Judge one chunk on the recovered streams; the first attack label wins.
+
+        스트림 분리(§2.3.4)를 L2 앞단에도 건다. 같은 kanana 에 원문만 줄 때 0.630, 이
+        세 스트림(`norm`·`detensified`·`nospace`, 하나라도 걸리면 채택)을 줄 때 0.747
+        이었다(RESULTS §1, `bench/judges.py::with_all_streams`). `norm` 하나만은 +0.000
+        이었다 — 방어는 정규화가 아니라 스트림을 **나누는** 데 있다. 측정한 구성 그대로
+        쓴다. 대가도 같이 온다: 과방어 0.017 → 0.030, 평범한 한국어도 대개 세 번 부른다.
+        """
+        assert self.l2_backend is not None
+        bundle = normalize(job.text)
+        streams: list[tuple[str, str]] = []
+        for stream, text in (
+            ("norm", bundle.norm.text),
+            ("detensified", bundle.detensified.text),
+            ("nospace", bundle.nospace.text),
+        ):
+            if text and all(text != seen for _, seen in streams):
+                streams.append((stream, text))
+        for stream, text in streams:
+            judgement = self.l2_backend.judge(text, origin=job.origin)
+            if judgement.label not in L2_LABELS:
+                raise L2ParseError(f"judge returned an unknown label: {judgement.label!r}")
+            if judgement.label == "NONE":
+                continue
+            code = attack_code_for(
+                judgement.label, origin=job.origin, normalized_text=bundle.norm.text
+            )
+            finding = Finding(
+                code,
+                (job.source_offset, job.source_offset + len(job.text)),
+                judgement.confidence,
+                "L2",
+                f"judge:{judgement.model}",
+                segment_idx=job.segment_idx,
+                evasion=[] if text == job.text else _evasion_codes(bundle, stream),
+                normalized_only=text != job.text,
+                stream=f"l2-{stream}",
+            )
+            if not self.policy.accepts(finding, job.content_type, origin=job.origin):
+                return []
+            return [finding]
+        return []
 
 
 def _finding_key(finding: Finding) -> tuple[int, int, int, str]:
@@ -352,4 +453,4 @@ def _empty_delta() -> dict[str, int]:
 
 
 def _empty_latency() -> dict[str, float]:
-    return {"normalize": 0.0, "l0": 0.0, "l1": 0.0, "total": 0.0}
+    return {"normalize": 0.0, "l0": 0.0, "l1": 0.0, "l2": 0.0, "total": 0.0}

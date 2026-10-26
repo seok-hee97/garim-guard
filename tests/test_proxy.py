@@ -173,3 +173,142 @@ def test_unknown_restore_token_is_reported_as_degraded() -> None:
 def test_empty_messages_are_refused() -> None:
     with pytest.raises(ProxyError, match="non-empty array"):
         segments_from_messages([])
+
+
+def _rrn() -> str:
+    digits = "900101123456"
+    weights = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5]
+    check = (11 - sum(int(d) * w for d, w in zip(digits, weights, strict=True)) % 11) % 10
+    return f"{digits[:6]}-{digits[6:]}{check}"
+
+
+def _tool_history(arguments: Any) -> dict[str, Any]:
+    return {
+        "model": "x",
+        "messages": [
+            {"role": "user", "content": "고객 조회해줘"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": arguments},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "조회 완료"},
+        ],
+    }
+
+
+def test_tool_call_arguments_are_inspected_not_forwarded_raw() -> None:
+    """★ 회귀 — `content` 만 검사해서 이전 턴의 함수 인자가 원문 그대로 나갔다."""
+    import json
+
+    recorder = _Recorder()
+    arguments = json.dumps({"phone": "010-9876-5432", "email": "kim@example.test"})
+    status, _, headers = _service(recorder).handle_chat_completions(_tool_history(arguments), {})
+    assert status == 200
+    assert headers["X-Garim-Verdict"] == "mask"
+    outbound = recorder.calls[0]["payload"]
+    serialized = json.dumps(outbound, ensure_ascii=False)
+    assert "010-9876-5432" not in serialized
+    assert "kim@example.test" not in serialized
+    sent = json.loads(outbound["messages"][1]["tool_calls"][0]["function"]["arguments"])
+    assert sent == {"phone": "<PHONE_1>", "email": "<EMAIL_1>"}
+    # 손대지 않은 모양은 그대로다.
+    assert outbound["messages"][1]["content"] is None
+
+
+def test_tool_call_arguments_are_inspected_after_unescaping_hangul() -> None:
+    """기본 `json.dumps` 는 한글을 `\\uXXXX` 로 낸다 — 이스케이프된 채로는 규칙이 못 읽는다."""
+    import json
+
+    from garim.proxy import _argument_slots
+
+    arguments = json.dumps({"memo": "[대외비] 구조조정 계획"})
+    assert "대외비" not in arguments
+    slots = _argument_slots(_tool_history(arguments)["messages"])
+    assert "대외비" in slots[0].scanned
+
+
+def test_blocked_tool_call_arguments_are_never_forwarded() -> None:
+    import json
+
+    recorder = _Recorder()
+    arguments = json.dumps({"rrn": f"주민등록번호 {_rrn()}"})
+    status, body, _ = _service(recorder).handle_chat_completions(_tool_history(arguments), {})
+    assert status == 400
+    assert recorder.calls == []
+    finding = next(item for item in body["error"]["findings"] if item["code"] == "L-KR-01")
+    assert finding["message"] == 1
+
+
+def test_non_string_tool_arguments_are_refused() -> None:
+    with pytest.raises(ProxyError, match="JSON string"):
+        _service(_Recorder()).handle_chat_completions(_tool_history({"phone": "x"}), {})
+
+
+def test_tool_call_arguments_in_the_answer_are_restored() -> None:
+    """★ 회귀 — 응답은 `content` 만 복원해서 앱의 도구가 `<PHONE_1>` 을 받았다."""
+    import json
+
+    def sender(path: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+        del path, headers
+        token = payload["messages"][0]["content"].split()[0]
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "c2",
+                                "type": "function",
+                                "function": {"name": "sms", "arguments": json.dumps({"to": token})},
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+
+    status, body, headers = _service(sender).handle_chat_completions(
+        _request(("user", "010-1234-5678 로 문자 보내줘")), {}
+    )
+    assert status == 200
+    arguments = body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(arguments) == {"to": "010-1234-5678"}
+    assert headers["X-Garim-Degraded"] == "false"
+
+
+def test_upstream_error_body_reaches_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    """429 할당량·503 과부하·키 오류를 앱이 구분할 수 있어야 한다 — 초판은 본문을 버렸다."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        body = io.BytesIO(b'{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED"}}')
+        raise urllib.error.HTTPError("https://upstream.test/v1", 429, "Too Many", {}, body)
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    service = ProxyService(ProxyConfig(upstream_base_url="https://upstream.test/v1"))
+    with pytest.raises(ProxyError) as caught:
+        service.handle_chat_completions(_request(("user", "안녕하세요")), {})
+    assert caught.value.status == 429
+    assert caught.value.detail == {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED"}}
+
+
+def test_e2e_echo_judge_tells_a_leak_from_a_pass_and_refuses_to_guess() -> None:
+    """상류의 메아리로 판정한다 — 지시를 안 따른 응답을 통과로 세지 않는다."""
+    from bench.proxy_e2e import EMAIL, PHONE, judge_echo
+
+    passed = judge_echo(f"연락처 [PHONE_1], 메일 [EMAIL_1]\n연락처 {PHONE}, 메일 {EMAIL}")
+    assert passed["verdict"] == "pass"
+    leaked = judge_echo(f"연락처 {PHONE}, 메일 {EMAIL}\n연락처 {PHONE}, 메일 {EMAIL}")
+    assert leaked["verdict"] == "leak"
+    assert judge_echo("죄송하지만 도와드릴 수 없습니다.")["verdict"] == "inconclusive"

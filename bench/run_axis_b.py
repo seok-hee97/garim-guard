@@ -25,6 +25,10 @@ JUDGES = (
     "kanana",
     "kanana-normalized",
     "kanana-all-streams",
+    "gemma4-l2",
+    "gemma4-l2-all-streams",
+    "gemini",
+    "gemini-all-streams",
     "polyguard",
 )
 
@@ -36,6 +40,10 @@ def main() -> int:
     parser.add_argument("--policy", default="config/policy.yaml")
     parser.add_argument("--kanana-dir")
     parser.add_argument("--polyguard-dir")
+    parser.add_argument("--l2-endpoint", help="Gemma 4 llama-server /v1 (루프백)")
+    parser.add_argument("--l2-model", default="gemma-4-e2b-it")
+    parser.add_argument("--gemini-model", default="gemini-3.8-flash")
+    parser.add_argument("--env", default=".env", help="GEMINI_API_KEY 를 읽을 파일")
     parser.add_argument("--sample", type=int, help="label-balanced subset size")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--output")
@@ -60,6 +68,23 @@ def main() -> int:
             if name == "kanana-normalized":
                 judge = judge_module.with_normalization(judge)
             elif name == "kanana-all-streams":
+                judge = judge_module.with_all_streams(judge)
+        elif name.startswith("gemini"):
+            import os
+
+            from bench.mask_quality import load_env
+
+            key = {**load_env(args.env), **os.environ}.get("GEMINI_API_KEY")
+            if not key:
+                raise SystemExit("GEMINI_API_KEY 가 없다 — §7.4 대로 유료 키를 쓴다")
+            judge = judge_module.gemini(key, args.gemini_model)
+            if name == "gemini-all-streams":
+                judge = judge_module.with_all_streams(judge)
+        elif name.startswith("gemma4-l2"):
+            if not args.l2_endpoint:
+                raise SystemExit("--l2-endpoint is required for the gemma4-l2 judge")
+            judge = judge_module.gemma4_l2(args.l2_endpoint, args.l2_model)
+            if name == "gemma4-l2-all-streams":
                 judge = judge_module.with_all_streams(judge)
         else:
             if not args.polyguard_dir:

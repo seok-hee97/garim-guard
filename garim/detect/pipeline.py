@@ -49,7 +49,7 @@ def _call_with_deadline(
     budget_seconds: float,
     *,
     gate: threading.Lock,
-    on_timeout: Callable[[], None] | None = None,
+    on_timeout: Callable[[int | None], None] | None = None,
 ) -> _T:
     """`budget_seconds` 안에 결과를 못 받으면 포기한다 — §3.6.
 
@@ -89,7 +89,8 @@ def _call_with_deadline(
     if worker.is_alive():
         if on_timeout is not None:
             try:
-                on_timeout()
+                # 워커 id 를 넘긴다 — 백엔드를 공유하는 다른 요청의 추론을 끊지 않는다.
+                on_timeout(worker.ident)
             except Exception:
                 pass  # cancellation is best-effort; timeout semantics must remain stable
         raise TimeoutError("L1 inference exceeded its budget")
@@ -157,6 +158,19 @@ def _evasion_codes(bundle: NormalizedBundle, stream: str) -> list[str]:
     return codes
 
 
+def attack_code_for(label: str, *, origin: Origin, normalized_text: str) -> str:
+    """Map a model's 4-way attack label to a project attack code (L1 and L2 share it)."""
+    if label == "INJECTION":
+        # ★ origin 으로 끄지 않는다(§2.5b). 강등은 정책층이 trust_declared 를 보고 한다.
+        return "A-INJ-02" if origin in ("retrieved", "tool") else "A-INJ-01"
+    if label == "JAILBREAK":
+        lexical = detect_attacks(normalized_text, origin=origin)
+        return "A-JB-01" if any(item.code == "A-JB-01" for item in lexical) else "A-JB-02"
+    if label == "SYSTEM_LEAK":
+        return "A-LEAK-01"
+    raise ValueError(f"not an attack label: {label!r}")
+
+
 def _trim_span_whitespace(span: tuple[int, int], text: str) -> tuple[int, int]:
     start, end = span
     while start < end and text[start].isspace():
@@ -172,10 +186,10 @@ class DetectionPipeline:
         self.l1_backend = l1_backend
         self._l1_gate = threading.Lock()
 
-    def _cancel_l1(self) -> None:
+    def _cancel_l1(self, thread_id: int | None = None) -> None:
         cancel = getattr(self.l1_backend, "cancel_current", None)
         if callable(cancel):
-            cancel()
+            cancel(thread_id)
 
     def _scan_view(
         self,
@@ -253,14 +267,7 @@ class DetectionPipeline:
             output.attack_probabilities.items(), key=lambda item: item[1]
         )
         if attack_label != "NONE":
-            if attack_label == "INJECTION":
-                # ★ origin 으로 끄지 않는다(§2.5b). 강등은 정책층이 trust_declared 를 보고 한다.
-                code = "A-INJ-02" if origin in ("retrieved", "tool") else "A-INJ-01"
-            elif attack_label == "JAILBREAK":
-                lexical = detect_attacks(bundle.norm.text, origin=origin)
-                code = "A-JB-01" if any(item.code == "A-JB-01" for item in lexical) else "A-JB-02"
-            else:
-                code = "A-LEAK-01"
+            code = attack_code_for(attack_label, origin=origin, normalized_text=bundle.norm.text)
             if attack_label != "NONE":
                 evasion: list[str] = []
                 thresholds = self.policy.config.thresholds
