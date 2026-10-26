@@ -214,3 +214,103 @@ def test_entity_decoder_merges_bio_runs_and_splits_on_new_begin(
         ("PERSON", (0, 5)),
         ("PERSON", (5, 8)),
     ]
+
+
+def test_cli_check_runs_l1_from_the_model_dir(l1_model_dir: Path, capsys) -> None:  # noqa: ANN001
+    """학습 산출물이 생겨도 CLI 에 꽂을 자리가 없었다 — `--l1-model-dir` 의 왕복."""
+    import json
+
+    from garim.cli import main
+
+    text = "홍길동 에게 전달 해 주세요"
+    code = main(["--l1-model-dir", str(l1_model_dir), "check", "--json", text])
+    payload = json.loads(capsys.readouterr().out)
+    assert code != 4
+    assert not payload["degraded"], payload["degraded_reasons"]
+    assert payload["latency_ms"]["l1"] > 0
+
+
+def test_proxy_loads_the_l1_backend_once_and_shares_it(l1_model_dir: Path) -> None:
+    from garim.proxy import ProxyConfig, ProxyService
+
+    def sender(path, payload, headers):  # noqa: ANN001, ANN202
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    service = ProxyService(
+        ProxyConfig(upstream_base_url="https://upstream.test/v1", l1_model_dir=str(l1_model_dir)),
+        sender=sender,
+    )
+    first = service._inspector_factory()
+    second = service._inspector_factory()
+    assert first.pipeline.l1_backend is second.pipeline.l1_backend
+    assert first.vault is not second.vault  # 볼트는 요청마다 새것이다
+    status, _, headers = service.handle_chat_completions(
+        {"model": "x", "messages": [{"role": "user", "content": "홍길동 에게 전달 해 주세요"}]}, {}
+    )
+    assert status in {200, 400}
+    assert headers["X-Garim-Degraded"] == "false"
+
+
+def test_shared_backend_survives_concurrent_requests(l1_model_dir: Path) -> None:
+    """chunk_text(무절단)와 infer(절단)가 토크나이저 상태를 번갈아 바꾼다 — 동시에 불러도 버틴다."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from garim import Inspector
+    from garim.policy.schema import Limits, PolicyConfig
+
+    backend = OnnxL1Backend(l1_model_dir)
+    # 이 테스트가 보는 것은 충돌(`Already borrowed`)이지 지연이 아니다. 부하가 걸린 머신에서
+    # 1초 예산을 넘는 것은 정상적인 `l1_timeout` 이라 예산을 넉넉히 둔다.
+    policy = PolicyConfig(limits=Limits(l1_timeout_ms=60_000))
+
+    def run(index: int) -> list[str]:
+        text = "홍길동 에게 전달 해 주세요 " * (1 + index % 3)
+        return Inspector(policy, l1_backend=backend).check(text).degraded_reasons
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        reasons = [reason for found in pool.map(run, range(400)) for reason in found]
+    assert not reasons, sorted(set(reasons))
+
+
+class RangeEncoder(torch.nn.Module):
+    """ModernBERT 처럼 시퀀스 길이에서 위치·국소 창을 만든다 — ONNX 에 동적 `Range` 가 생긴다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.embedding = torch.nn.Embedding(VOCAB, HIDDEN)
+        self.position = torch.nn.Embedding(512, HIDDEN)
+
+    def forward(self, input_ids, attention_mask, token_type_ids=None):  # noqa: ANN001
+        del attention_mask, token_type_ids
+        positions = torch.arange(input_ids.shape[1], device=input_ids.device)
+        window = ((positions[None, :] - positions[:, None]).abs() <= 4).float()
+        hidden = self.embedding(input_ids) + self.position(positions)[None]
+        hidden = torch.einsum("ij,bjd->bid", window / window.sum(-1, keepdim=True), hidden)
+        return SimpleNamespace(last_hidden_state=hidden)
+
+
+def test_quantization_survives_a_dynamic_range_in_the_graph(tmp_path: Path) -> None:
+    """★ 회귀 — 실제 A.X 그래프의 양자화가 symbolic shape inference 의 `_infer_Range` 에서 죽었다.
+
+    `TinyEncoder` 에는 `Range` 가 없어 위 왕복이 통과했다. 로컬 CPU 미니 학습으로 처음 찾았고,
+    RunPod 에서는 학습을 다 마친 뒤 11단계에서 드러날 자리였다.
+    """
+    model = JointL1Model(RangeEncoder(), hidden_size=HIDDEN, dropout=0.0)
+    export_joint_onnx(
+        model,
+        tmp_path / "garim_l1.fp32.onnx",
+        input_ids=torch.randint(0, VOCAB, (1, 8)),
+        attention_mask=torch.ones((1, 8), dtype=torch.long),
+        normalization_delta=torch.zeros((1, len(NORMALIZATION_DELTA_ORDER))),
+    )
+    quantize_joint_onnx(tmp_path / "garim_l1.fp32.onnx", tmp_path / "garim_l1.int8.onnx")
+    write_l1_metadata(tmp_path)
+    _write_fast_tokenizer(tmp_path)
+    text = "홍길동 에게 전달 해 주세요"
+    output = OnnxL1Backend(tmp_path).infer(
+        text,
+        normalization_delta=dict.fromkeys(NORMALIZATION_DELTA_ORDER, 0),
+        origin="user",
+        content_type="prose",
+    )
+    output.validate(len(text))

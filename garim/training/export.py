@@ -116,9 +116,18 @@ def quantize_joint_onnx(source: str | Path, destination: str | Path) -> Path:
     with ``Inferred shape and existing shape differ in dimension 0: (24) vs (4)`` — the
     head weight ``[4, 24]`` read after transposition. ``quant_pre_process`` is the path
     onnxruntime itself asks for in the warning this used to emit on every run.
+
+    ★ 회귀 — 실제 A.X 로 내보낸 그래프에서 양자화가 죽었다. `quant_pre_process` 의 symbolic
+    shape inference 가 ModernBERT 의 동적 `Range`(rotary·sliding window 마스크)에서
+    `_infer_Range … assert len(x) == 1` 로 멈춘다. 작은 대역 인코더에는 `Range` 가 없어
+    왕복 테스트가 통과했고, RunPod 에서 학습을 다 마친 **뒤** 처음 드러날 자리였다(로컬
+    CPU 미니 학습으로 찾았다). symbolic 패스를 끄면 위의 stale ``value_info`` 가 되살아나므로
+    (`775 vs 4` — 공격 헤드 입력 768 + 델타 7), 그 원인 자체를 지운다: 익스포터가 남긴 중간
+    ``value_info`` 를 비우고 ONNX shape inference 가 새로 채우게 한다.
     """
     import tempfile
 
+    import onnx
     from onnxruntime.quantization import QuantType, quantize_dynamic
     from onnxruntime.quantization.shape_inference import quant_pre_process
 
@@ -126,8 +135,12 @@ def quantize_joint_onnx(source: str | Path, destination: str | Path) -> Path:
     destination_path = Path(destination)
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as workspace:
+        model = onnx.load(str(source_path))
+        del model.graph.value_info[:]
+        cleaned = Path(workspace) / "cleaned.onnx"
+        onnx.save(model, str(cleaned))
         prepared = Path(workspace) / "prepared.onnx"
-        quant_pre_process(str(source_path), str(prepared), skip_symbolic_shape=False)
+        quant_pre_process(str(cleaned), str(prepared), skip_symbolic_shape=True)
         quantize_dynamic(
             model_input=str(prepared),
             model_output=str(destination_path),
