@@ -98,6 +98,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     proxy.add_argument("--port", type=int, default=8080)
     proxy.add_argument(
+        "--refuse-streaming",
+        action="store_const",
+        const="refuse",
+        default="buffered",
+        dest="streaming",
+        help="stream=true 요청을 거부한다. 기본은 모아서 복원한 뒤 SSE 로 돌려준다",
+    )
+    proxy.add_argument(
         "--no-forward-authorization",
         action="store_false",
         dest="forward_authorization",
@@ -183,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
                 mode=args.mode,
                 forward_authorization=args.forward_authorization,
                 timeout_seconds=args.upstream_timeout,
+                streaming=args.streaming,
                 l1_model_dir=args.l1_model_dir,
                 l1_model_file=args.l1_model_file,
             )

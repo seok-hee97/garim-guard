@@ -11,8 +11,12 @@
    400 을 돌려준다. 검사기가 통과시키지 않은 것이 밖으로 나가는 경로를 두지 않는다.
 2. **복원은 돌아오는 길에서만 한다.** 마스킹된 프롬프트를 보내고, 응답 본문을 같은
    볼트로 되돌려 앱에 준다(§3.3). 볼트는 요청 하나의 수명이다.
-3. **스트리밍은 지원하지 않고 거부한다.** 조각난 응답에서는 토큰이 청크 경계에 걸려
-   복원이 깨진다. 조용히 복원 없이 흘려보내는 것보다 거부가 맞다(§3.6 의 fail 방향).
+3. **스트리밍은 모아서 복원한 뒤 돌려준다(buffered SSE).** 조각난 응답을 조각째 복원하면
+   `<PHONE_1>` 같은 토큰이 청크 경계에 걸려 깨진다. 그래서 상류에는 스트리밍 없이 요청하고,
+   전문을 복원한 다음 OpenAI `chat.completion.chunk` 형식의 SSE 로 돌려준다. 앱은
+   `stream=True` 그대로 동작하고, 대가는 첫 글자가 응답 전체만큼 늦게 오는 것이다.
+   ★ 초판은 스트리밍을 거부했다. 채팅 앱 대부분이 `stream=True` 라 그대로면 앱이 깨지고,
+   §1.1 이 경고한 대로 도구를 끄게 된다. 거부가 필요하면 `streaming="refuse"`.
 4. **상류 주소는 설정으로만 받는다.** 코드에 박힌 기본 상류가 없다 — 사용자가 명시하지
    않으면 프록시가 뜨지 않는다. §1 의 "검사기 자체는 아무 데도 보내지 않는다" 를
    프록시에서도 깨지 않으려면 목적지가 항상 사용자의 선언이어야 한다.
@@ -69,10 +73,13 @@ class ProxyConfig:
     forward_authorization: bool = True
     l1_model_dir: str | None = None
     l1_model_file: str = "garim_l1.int8.onnx"
+    streaming: str = "buffered"
 
     def __post_init__(self) -> None:
         if not self.upstream_base_url.startswith(("http://", "https://")):
             raise ValueError("upstream_base_url must be an absolute http(s) URL")
+        if self.streaming not in {"buffered", "refuse"}:
+            raise ValueError("streaming must be 'buffered' or 'refuse'")
         if self.mode not in {"interactive", "thorough"}:
             raise ValueError("mode must be 'interactive' or 'thorough'")
 
@@ -325,7 +332,8 @@ class ProxyService:
     def handle_chat_completions(
         self, payload: dict[str, Any], headers: dict[str, str]
     ) -> tuple[int, dict[str, Any], dict[str, str]]:
-        if payload.get("stream"):
+        stream = bool(payload.get("stream"))
+        if stream and self.config.streaming == "refuse":
             # 조각난 응답에서 볼트 토큰이 청크 경계에 걸리면 복원이 조용히 깨진다.
             raise ProxyError(400, "streaming is not supported: masked tokens cannot be restored")
 
@@ -361,6 +369,10 @@ class ProxyService:
                 masked[len(messages) :],
             )
 
+        if stream:
+            # 상류에는 스트리밍 없이 묻는다 — 전문을 복원한 뒤 SSE 로 다시 쪼갠다(`to_sse`).
+            outbound["stream"] = False
+            outbound.pop("stream_options", None)
         upstream = self._sender("/chat/completions", outbound, headers)
         if result.vault is not None:
             upstream, restore_missing = _restore_choices(upstream, result.vault)
@@ -414,6 +426,55 @@ def _restore_choices(response: Any, vault: Any) -> tuple[Any, bool]:
     return {**response, "choices": restored}, missing
 
 
+def to_sse(response: dict[str, Any], *, include_usage: bool = False) -> str:
+    """복원이 끝난 `chat.completion` 하나를 OpenAI `chat.completion.chunk` SSE 로 바꾼다.
+
+    선택지마다 역할 → 본문·함수 호출 → 종료 사유 순서의 청크를 내고 `[DONE]` 으로 끝낸다.
+    본문은 한 청크다 — 이미 전문이 손에 있고, 쪼개는 것은 모양만 흉내 낼 뿐이다.
+    """
+    base = {
+        "id": response.get("id", "chatcmpl-garim"),
+        "object": "chat.completion.chunk",
+        "created": response.get("created", 0),
+        "model": response.get("model", ""),
+    }
+    if response.get("system_fingerprint") is not None:
+        base["system_fingerprint"] = response["system_fingerprint"]
+    events: list[dict[str, Any]] = []
+    for position, choice in enumerate(response.get("choices") or []):
+        index = choice.get("index", position) if isinstance(choice, dict) else position
+        message = choice.get("message") if isinstance(choice, dict) else None
+        message = message if isinstance(message, dict) else {}
+        events.append({"index": index, "delta": {"role": message.get("role", "assistant")},
+                       "finish_reason": None})
+        delta: dict[str, Any] = {}
+        if isinstance(message.get("content"), str):
+            delta["content"] = message["content"]
+        if isinstance(message.get("tool_calls"), list):
+            delta["tool_calls"] = [
+                {"index": call_index, **call}
+                for call_index, call in enumerate(message["tool_calls"])
+            ]
+        if isinstance(message.get("function_call"), dict):
+            delta["function_call"] = message["function_call"]
+        if delta:
+            events.append({"index": index, "delta": delta, "finish_reason": None})
+        events.append({"index": index, "delta": {},
+                       "finish_reason": choice.get("finish_reason", "stop")})
+    lines = [
+        "data: " + json.dumps({**base, "choices": [event]}, ensure_ascii=False) + "\n\n"
+        for event in events
+    ]
+    if include_usage and response.get("usage") is not None:
+        lines.append(
+            "data: "
+            + json.dumps({**base, "choices": [], "usage": response["usage"]}, ensure_ascii=False)
+            + "\n\n"
+        )
+    lines.append("data: [DONE]\n\n")
+    return "".join(lines)
+
+
 def _restore_arguments(arguments: str, vault: Any) -> tuple[str, bool]:
     """JSON 인자는 문자열 리프만 복원하고 다시 직렬화한다.
 
@@ -451,6 +512,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """★ 프롬프트 원문이 접근 로그로 새지 않게 기본 로깅을 끈다(§3.2)."""
+
+    def _reply_sse(self, body: str, headers: dict[str, str]) -> None:
+        encoded = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(encoded)))
+        for key, value in headers.items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(encoded)
 
     def _reply(self, status: int, body: dict[str, Any], headers: dict[str, str]) -> None:
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -493,6 +565,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(
                 500, {"error": {"message": f"garim proxy failed: {type(exc).__name__}"}}, {}
             )
+            return
+        if status == 200 and payload.get("stream"):
+            options = payload.get("stream_options")
+            include_usage = isinstance(options, dict) and bool(options.get("include_usage"))
+            self._reply_sse(to_sse(body, include_usage=include_usage), headers)
             return
         self._reply(status, body, headers)
 

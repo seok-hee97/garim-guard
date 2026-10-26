@@ -125,14 +125,164 @@ def test_content_part_arrays_keep_their_shape() -> None:
     assert content[1]["type"] == "image_url"
 
 
-def test_streaming_is_refused_rather_than_silently_unmasked() -> None:
-    """청크 경계에 볼트 토큰이 걸리면 복원이 조용히 깨진다 — §3.6 의 fail 방향."""
+def test_refuse_mode_still_refuses_streaming() -> None:
+    """`--refuse-streaming` — 거부가 필요한 배치는 그대로 고를 수 있다."""
     recorder = _Recorder()
+    service = ProxyService(
+        ProxyConfig(upstream_base_url="https://upstream.test/v1", streaming="refuse"),
+        sender=recorder,
+    )
     with pytest.raises(ProxyError, match="streaming is not supported"):
-        _service(recorder).handle_chat_completions(
-            {**_request(("user", "안녕")), "stream": True}, {}
-        )
+        service.handle_chat_completions({**_request(("user", "안녕")), "stream": True}, {})
     assert recorder.calls == []
+
+
+def _serve(sender: Any, **config: Any) -> Any:
+    """실제 HTTP 핸들러로 띄운다 — SSE 는 핸들러가 만든다."""
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from garim.proxy import _Handler
+
+    service = ProxyService(
+        ProxyConfig(upstream_base_url="https://upstream.test/v1", **config), sender=sender
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), type("H", (_Handler,), {"service": service}))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _post(server: Any, body: dict[str, Any]) -> tuple[int, dict[str, str], str]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_address[1]}/v1/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=10) as response:  # noqa: S310
+            return response.status, dict(response.headers), response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers), exc.read().decode("utf-8")
+
+
+def _sse_chunks(text: str) -> list[Any]:
+    import json
+
+    events = [line[len("data: "):] for line in text.split("\n\n") if line.startswith("data: ")]
+    assert events[-1] == "[DONE]"
+    return [json.loads(event) for event in events[:-1]]
+
+
+def test_streaming_is_answered_as_sse_after_full_restoration() -> None:
+    """★ 회귀 — 초판은 `stream=True` 를 거부했다. 채팅 앱 대부분이 스트리밍이라 앱이 깨졌다.
+
+    상류에는 스트리밍 없이 묻고(토큰이 청크 경계에 걸리지 않게), 전문을 복원해 SSE 로 준다.
+    """
+    seen: list[dict[str, Any]] = []
+
+    def sender(path: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+        seen.append(payload)
+        token = payload["messages"][-1]["content"].split()[1]
+        return {
+            "id": "chatcmpl-1",
+            "created": 1,
+            "model": "m",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": f"{token}로 연락드릴게요"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 4, "total_tokens": 9},
+        }
+
+    server = _serve(sender)
+    try:
+        status, headers, text = _post(
+            server,
+            {
+                **_request(("user", "번호 010-1234-5678 입니다")),
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            },
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/event-stream")
+    assert headers["X-Garim-Verdict"] == "mask"
+    assert seen[0]["stream"] is False and "stream_options" not in seen[0]
+    assert "010-1234-5678" not in seen[0]["messages"][-1]["content"]
+    chunks = _sse_chunks(text)
+    content = "".join(
+        chunk["choices"][0]["delta"].get("content", "") for chunk in chunks if chunk["choices"]
+    )
+    assert content == "010-1234-5678로 연락드릴게요"
+    assert all(chunk["object"] == "chat.completion.chunk" for chunk in chunks)
+    assert chunks[-1]["usage"]["total_tokens"] == 9
+    assert [c["choices"][0]["finish_reason"] for c in chunks if c["choices"]][-1] == "stop"
+
+
+def test_blocked_streaming_request_gets_a_json_error_not_a_stream() -> None:
+    """차단은 SSE 가 아니라 400 JSON 이다 — OpenAI SDK 는 스트림을 읽기 전에 상태로 예외를 낸다."""
+    recorder = _Recorder()
+    server = _serve(recorder)
+    try:
+        status, headers, text = _post(
+            server, {**_request(("user", f"주민등록번호 {_rrn()} 입니다")), "stream": True}
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert status == 400
+    assert headers["Content-Type"].startswith("application/json")
+    assert "garim_blocked" in text
+    assert recorder.calls == []
+
+
+def test_sse_carries_restored_tool_call_arguments() -> None:
+    import json
+
+    from garim.proxy import to_sse
+
+    response = {
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "sms", "arguments": json.dumps({"to": "010"})},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ]
+    }
+    chunks = _sse_chunks(to_sse(response))
+    deltas = [chunk["choices"][0]["delta"] for chunk in chunks]
+    calls = [delta["tool_calls"] for delta in deltas if "tool_calls" in delta]
+    expected = {
+        "index": 0,
+        "id": "c1",
+        "type": "function",
+        "function": {"name": "sms", "arguments": json.dumps({"to": "010"})},
+    }
+    assert calls == [[expected]]
+    assert chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"
 
 
 def test_degraded_is_visible_to_the_caller() -> None:

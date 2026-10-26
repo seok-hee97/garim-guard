@@ -63,7 +63,21 @@ def judge_echo(content: str) -> dict[str, Any]:
     }
 
 
-def run(upstream: str, model: str, api_key: str | None, timeout: float) -> dict[str, Any]:
+def _content_from_sse(text: str) -> str:
+    """SSE 청크의 `delta.content` 를 이어 붙인다 — 스트리밍 클라이언트가 보는 문자열."""
+    parts = []
+    for block in text.split("\n\n"):
+        if not block.startswith("data: ") or block == "data: [DONE]":
+            continue
+        chunk = json.loads(block[len("data: "):])
+        for choice in chunk.get("choices", []):
+            parts.append(choice.get("delta", {}).get("content") or "")
+    return "".join(parts)
+
+
+def run(
+    upstream: str, model: str, api_key: str | None, timeout: float, *, stream: bool = False
+) -> dict[str, Any]:
     from garim.proxy import ProxyConfig, build_server
 
     server = build_server(
@@ -80,6 +94,7 @@ def run(upstream: str, model: str, api_key: str | None, timeout: float) -> dict[
                 {"role": "user", "content": INSTRUCTION},
             ],
             "temperature": 0,
+            "stream": stream,
         }
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -94,12 +109,18 @@ def run(upstream: str, model: str, api_key: str | None, timeout: float) -> dict[
         try:
             with opener.open(request, timeout=timeout + 30) as response:  # noqa: S310
                 garim = {k: v for k, v in response.headers.items() if k.startswith("X-Garim")}
-                payload = json.loads(response.read().decode("utf-8"))
+                raw = response.read().decode("utf-8")
+                content_type = response.headers.get("Content-Type", "")
         except urllib.error.HTTPError as exc:
             return {"verdict": "error", "status": exc.code,
                     "body": exc.read(2000).decode("utf-8", errors="replace")}
-        content = payload["choices"][0]["message"]["content"] or ""
-        return {"upstream": upstream, "model": model, "garim_headers": garim,
+        if stream:
+            if not content_type.startswith("text/event-stream"):
+                return {"verdict": "error", "reason": f"expected SSE, got {content_type}"}
+            content = _content_from_sse(raw)
+        else:
+            content = json.loads(raw)["choices"][0]["message"]["content"] or ""
+        return {"upstream": upstream, "model": model, "stream": stream, "garim_headers": garim,
                 "content": content, **judge_echo(content)}
     finally:
         server.shutdown()
@@ -112,6 +133,7 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", help="Authorization 으로 넘길 키의 환경 변수 이름")
     parser.add_argument("--timeout", type=float, default=240.0)
+    parser.add_argument("--stream", action="store_true", help="stream=true 로 SSE 경로를 잰다")
     args = parser.parse_args()
     api_key = None
     if args.api_key_env:
@@ -120,7 +142,7 @@ def main() -> int:
         api_key = {**load_env(".env"), **os.environ}.get(args.api_key_env)
         if not api_key:
             raise SystemExit(f"{args.api_key_env} 가 없다")
-    report = run(args.upstream, args.model, api_key, args.timeout)
+    report = run(args.upstream, args.model, api_key, args.timeout, stream=args.stream)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return {"pass": 0, "leak": 1}.get(report["verdict"], 2)
 
