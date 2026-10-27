@@ -40,3 +40,4 @@ report/
 ~$*
 TEMP.md
 .hf-staging/
+.backup/
