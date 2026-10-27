@@ -146,6 +146,65 @@ def materialize_r2() -> None:
         print(f"\n== 2b {name} {len(records)}행  sha256 {_digest(CORPUS / name)}")
 
 
+def audit_data() -> None:
+    """2d — GPU 전 데이터 감사(`garim/training/data_audit.py`). 결함이면 여기서 멈춘다.
+
+    ★ R1 은 이 검사가 없어서 합성 test 가 학습 문장을 그대로 담은 채 학습까지 갔다(RESULTS_L1
+      §5-③). 행 지문이 아니라 꼬리말·가역 은닉을 걷어 낸 **기본 문장**으로 본다. R1 합성을 넣으면
+      세 결함(test 문장 32개 학습 중복 · 라벨 충돌 2 · 정상 고유 문장 5)으로 멈춘다.
+    """
+    from garim.training.data import load_jsonl
+    from garim.training.data_audit import DataAuditError, audit_attack_synthetic
+
+    attack = [
+        record
+        for split in ("train", "validation", "test")
+        for record in load_jsonl(ROOT / CORPUS / f"attack-synthetic-r2-{split}.jsonl")
+    ]
+    pii_families = {
+        split: {record.template_id for record in load_jsonl(
+            ROOT / CORPUS / f"pii-negative-r2-{split}.jsonl")}
+        for split in ("train", "validation", "test")
+    }
+    try:
+        report = audit_attack_synthetic(attack)
+    except DataAuditError as exc:
+        raise SystemExit(f"[2d 데이터 감사] {exc}") from exc
+    crossing = pii_families["test"] & (pii_families["train"] | pii_families["validation"])
+    if crossing:
+        raise SystemExit(
+            f"[2d 데이터 감사] PII 음성 test family 가 학습 쪽에도 있다: {sorted(crossing)}"
+        )
+    print(f"\n== 2d 데이터 감사 통과  {json.dumps(report, ensure_ascii=False)}")
+
+
+def audit_consensus(resolved: Path, out: Path) -> None:
+    """7b — 합의 뒤 생성기 행의 채택·폐기를 보고하고, 생성기 NONE 채택률이 0.9 아래면 멈춘다.
+
+    ★ R1 은 생성기 NONE 954행 중 379행이 폐기된 것이 6b 보고서에 이미 수치로 있었는데 아무
+      게이트도 보지 않았다(RESULTS_L1 §5-②). C3 규칙이면 채택률이 1 에 가까워야 한다.
+    """
+    from garim.training.data import load_jsonl
+    from garim.training.data_audit import DataAuditError, audit_generator_consensus
+
+    gold: dict[str, str] = {}
+    for path in GENERATOR_GOLD:
+        gold.update(json.loads((ROOT / path).read_text(encoding="utf-8")))
+    families = {
+        record.id: str(record.template_id)
+        for split in ("train", "validation")
+        for record in load_jsonl(ROOT / CORPUS / f"attack-synthetic-r2-{split}.jsonl")
+    }
+    rows = json.loads((ROOT / resolved / "teacher-resolution-audit.json").read_text())["rows"]
+    try:
+        report = audit_generator_consensus(rows, gold, families)
+    except DataAuditError as exc:
+        raise SystemExit(f"[7b 합의 감사] {exc}") from exc
+    payload = json.dumps(report, ensure_ascii=False, indent=2)
+    (ROOT / out).write_text(payload + "\n", encoding="utf-8")
+    print(f"\n== 7b 합의 감사 통과  {json.dumps(report, ensure_ascii=False)}")
+
+
 def apply_deepset() -> None:
     """2c — deepset 번역 적용과 외부 이진 gold. 3단계보다 **먼저** 와야 한다.
 
@@ -421,6 +480,7 @@ def main() -> int:
         check_cuda()
         probe_gpu_memory()
     materialize_r2()
+    audit_data()
     apply_deepset()
     merge_pii()
     check_pii_windows()
@@ -453,6 +513,7 @@ def main() -> int:
         _python("train/resolve_teacher_labels.py", "--input", str(teacher_input),
                 *teacher_args, *generator_args, "--output-dir", str(resolved), "--drop-review"),
     )
+    audit_consensus(resolved, work / "consensus-audit-r2.json")
     corpora: list[str] = []
     for flag, paths in (
         ("--pii-train", PII_TRAIN),

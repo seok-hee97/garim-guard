@@ -179,3 +179,32 @@ def test_negatives_never_trip_the_rule_layer(pii: list[CorpusRecord]) -> None:
     for record in pii:
         if not record.spans:
             assert not detect_kr_pii(record.text) + detect_common_pii(record.text), record.id
+
+
+def test_data_audit_stops_the_r1_generator_and_passes_r2(attack: list[CorpusRecord]) -> None:
+    """R1 을 학습까지 보낸 세 결함을 감사가 잡아야 한다(RESULTS_L1 §5-③)."""
+    from garim.training.data_audit import DataAuditError, audit_attack_synthetic
+    from garim.training.synthetic import generate_attack_corpus
+
+    with pytest.raises(DataAuditError) as caught:
+        audit_attack_synthetic(generate_attack_corpus())
+    message = str(caught.value)
+    assert "학습 쪽에도 있다" in message and "라벨 둘 이상" in message and "부족" in message
+    report = audit_attack_synthetic(attack)
+    assert report["test_bases_seen_in_training"] == 0 and report["label_conflicts"] == 0
+
+
+def test_consensus_audit_stops_when_generator_benign_is_dropped_wholesale() -> None:
+    from garim.training.data_audit import DataAuditError, audit_generator_consensus
+
+    gold = {f"r{i}": "NONE" for i in range(10)}
+    families = {f"r{i}": "fam-a" if i < 5 else "fam-b" for i in range(10)}
+    kept = [{"id": f"r{i}", "status": "accepted", "label": "NONE"} for i in range(10)]
+    assert audit_generator_consensus(kept, gold, families)["benign_acceptance"] == 1.0
+    r1_like = [
+        {"id": f"r{i}", "status": "accepted", "label": "NONE"} if i >= 5
+        else {"id": f"r{i}", "status": "review", "label": None, "reason": "no_consensus"}
+        for i in range(10)
+    ]
+    with pytest.raises(DataAuditError, match="fam-a"):
+        audit_generator_consensus(r1_like, gold, families)
