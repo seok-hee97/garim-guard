@@ -208,3 +208,71 @@ def test_consensus_audit_stops_when_generator_benign_is_dropped_wholesale() -> N
     ]
     with pytest.raises(DataAuditError, match="fam-a"):
         audit_generator_consensus(r1_like, gold, families)
+
+
+def test_reference_numbers_do_not_reveal_the_label(attack: list[CorpusRecord]) -> None:
+    """R1·초기 R2 는 꼬리말 번호가 생성 순서라 공격 0~599 · 정상 600~ 로 갈렸다."""
+    from garim.normalize.chain import normalize
+
+    numbers: dict[bool, list[int]] = defaultdict(list)
+    for record in attack:
+        found = re.search(r"참고 번호 (\d{4})", normalize(record.text).norm.text)
+        if found:
+            numbers[record.attack_label == "NONE"].append(int(found.group(1)))
+    benign, hostile = numbers[True], numbers[False]
+    # 번호 하나로 공격과 정상을 가르는 확률(AUC)이 동전 던지기와 같아야 한다.
+    wins = sum((b > h) + 0.5 * (b == h) for b in benign[::7] for h in hostile)
+    auc = wins / (len(benign[::7]) * len(hostile))
+    assert abs(auc - 0.5) < 0.05
+
+
+def test_benign_rows_carry_every_t4_benign_hiding_except_b64(attack: list[CorpusRecord]) -> None:
+    """정상 학습문에 없는 은닉으로 정상 FPR(O2)을 재면 모델과 무관하게 통과할 수 없다."""
+    hidings = Counter(r.meta["hiding"] for r in attack if r.attack_label == "NONE")
+    for technique in ("zwsp", "jamo", "space_break", "tensify", "homoglyph", "hanja",
+                      "chosung", "space_join"):
+        assert hidings[technique] > 0, technique
+    assert hidings["b64"] == 0
+
+
+def test_homoglyph_marker_does_not_track_the_label(attack: list[CorpusRecord]) -> None:
+    """정상 한국어 행에만 라틴 접두를 심었더니 그것이 NONE 의 지름길이 됐다(재검토)."""
+    from garim.normalize.chain import normalize
+
+    marker = re.compile(r"^(xlsx|html|xml|css) 자료:", re.I)
+    by_label = Counter(
+        (r.attack_label == "NONE", bool(marker.search(normalize(r.text).norm.text)))
+        for r in attack if r.meta["hiding"] == "homoglyph"
+    )
+    assert by_label[(False, True)] and by_label[(False, False)]  # 공격에도 접두 있음·없음
+    assert by_label[(True, False)]  # 정상에도 접두 없는 동형 문자
+    # 한글 본문 위의 동형 문자(= `t4-r2-test` 동형 문자 셀의 모양)도 두 라벨에 다 있다.
+    hangul = Counter(r.attack_label == "NONE" for r in attack
+                     if r.meta["hiding"] == "homoglyph" and not r.romanized_target)
+    assert hangul[True] and hangul[False]
+    # T4 정상 셀의 접두(`CSV 첨부:` 등)는 학습에 나오지 않는다.
+    assert not any("첨부:" in normalize(r.text).norm.text for r in attack if r.split != "test")
+
+
+def test_one_attack_family_per_class_is_pinned_to_validation(attack: list[CorpusRecord]) -> None:
+    from garim.training.split import component_validation_splits
+
+    pinned = {(r.attack_label, r.template_id) for r in attack
+              if r.attack_label != "NONE" and r.split == "validation"}
+    assert {label for label, _ in pinned} == {"INJECTION", "JAILBREAK", "SYSTEM_LEAK"}
+    assert all(family.endswith("-t2") for _, family in pinned)
+    pool = [r for r in attack if r.split != "test"]
+    splits = component_validation_splits(pool, 10)
+    assert all(splits[r.id] == r.split for r in pool)  # 7단계가 다시 나누지 않는다
+
+
+def test_shipping_contexts_reach_training_and_some_numbers_lead_with_zero(
+    pii: list[CorpusRecord],
+) -> None:
+    shipping = [r for r in pii if r.template_id.startswith("pii-num-ship-")]
+    assert shipping and all(r.split == "train" for r in shipping)
+    assert any(re.search(r"(?<!\d)0\d{7,}", r.text) for r in pii
+               if r.meta["type"] == "numeric_context_negative")
+    numbers = [token for r in pii if r.meta["type"] == "numeric_context_negative"
+               for token in re.findall(r"\d[\d-]{6,}\d", r.text)]
+    assert numbers and not any(token.startswith("010") for token in numbers)

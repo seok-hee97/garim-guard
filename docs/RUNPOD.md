@@ -33,14 +33,14 @@
 PREREG §9 에 있다.
 
 ```
-9b2a343999143eaf9ccaf3c2733dd7b0f374f798f6d248862d7e7e70fc4f6ab0  data/merged/pii-train.jsonl
-439bd43945ebec79a7f11c025c67f622606214ed5347b71a430cec2abf422eec  data/merged/pii-validation.jsonl
-9f12d8307083e87b7d7e25a802f84979327ecd6b4eff40d069a76a7374c9655e  data/corpus/attack-teacher-input-r2.jsonl
+5bb694f5a1c04e247eed25aca8debf7a3563a42cb4166488a8587df6babb3720  data/merged/pii-train.jsonl
+66a12b0f2050e1b64a3f8b6cf31e946e251ccae7dcd9c78aeaa5f28ae4f2fb10  data/merged/pii-validation.jsonl
+83d39963a621603725de4d39a206771674f7d257fa536ec88633b66841e5e0f6  data/corpus/attack-teacher-input-r2.jsonl
 ```
 
-로컬 리허설은 2b~7 을 그대로, 8~10 은 Qwen 항목을 뺀 임시 models manifest 로 통과했다(로컬 Qwen
-자산이 0.6B 라 8단계 자산 drift 검사에 걸린다 — R1 때와 같은 로컬 전용 실패). 평가 봉인 9개 파일
-17,115행, preflight ok, 학습 dry-run 64창.
+로컬 리허설은 2b~7b 를 그대로, 8~10 은 Qwen 항목을 뺀 임시 models manifest 로 통과했다(로컬 Qwen
+자산이 0.6B 라 8단계 자산 drift 검사에 걸린다 — R1 때와 같은 로컬 전용 실패). 2d 데이터 감사 · 7b 합의
+감사 통과, 평가 봉인 9개 파일 17,042행, preflight ok, 학습 dry-run 64창.
 
 **11 — R2 판정.** seed 는 `train/artifacts/l1-r2/three-seed-report.json` 에서 같은 규칙으로 고른다.
 R1(`l1-onnx`)과 R2(`l1-r2-onnx`)를 **같은 명령으로 둘 다** 잰다.

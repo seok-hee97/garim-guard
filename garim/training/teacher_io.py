@@ -179,6 +179,29 @@ def resolve_teacher_corpus(
             probabilities = row_artifacts[jailbreak_teacher].class_probabilities
             if probabilities is not None:
                 jailbreak_target = probabilities[JAILBREAK_POSTERIOR_CLASSES[0]]
+        silenced: list[str] = []
+        if generator_label is not None:
+            # ★ C3 은 하드 라벨만 바꾼다. 생성기 표로 NONE 이 된 행에 kanana 의 INJECTION 분포를
+            #   그대로 붙이면 증류 항(가중 0.5)이 그 하드 네거티브를 공격 쪽으로 반만큼 끌어간다
+            #   (R1 산출물 재연: 채택 NONE 952 중 165행이 kanana 최상위 INJECTION). 채택 라벨과
+            #   모순되는 교사 soft target 은 그 행에서 끈다.
+            #   JAILBREAK 행은 kanana 분포에 그 칸이 없어(3클래스 제한 KL) 모순이 정의되지
+            #   않으므로 둔다.
+            if (
+                soft_probabilities is not None
+                and decision_label in SOFT_TARGET_CLASSES
+                and SOFT_TARGET_CLASSES[
+                    max(range(len(soft_probabilities)), key=soft_probabilities.__getitem__)
+                ] != decision_label
+            ):
+                soft_probabilities = None
+                silenced.append("soft")
+            if jailbreak_target is not None and (jailbreak_target >= 0.5) != (
+                decision_label == "JAILBREAK"
+            ):
+                jailbreak_target = None
+                silenced.append("jailbreak")
+        audit[-1]["silenced_soft_targets"] = silenced
         accepted.append(
             record.model_copy(
                 update={

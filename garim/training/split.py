@@ -80,10 +80,22 @@ def component_validation_splits(records: Iterable[Any], percent: int) -> dict[st
         components[finder.find(index)].append(record)
     splits: dict[str, str] = {}
     for members in components.values():
-        templates = sorted(member.template_id for member in members if member.template_id)
-        groups = sorted(member.group_id for member in members if member.group_id)
-        anchor = (templates or groups or sorted(member.id for member in members))[0]
-        split = hashed_validation_split(anchor, percent)
+        # ★ R2 생성기는 family 단위로 검증을 고정한다(`meta.split_pinned`). 해시로 다시 나누면
+        #   공격 family 9개가 전부 train 에 떨어져 seed 선택용 검증에 SYSTEM_LEAK 이 한 행뿐이었다.
+        pinned = {
+            member.split
+            for member in members
+            if (getattr(member, "meta", None) or {}).get("split_pinned")
+        }
+        if len(pinned) > 1:
+            raise ValueError(f"pinned splits disagree inside one component: {sorted(pinned)}")
+        if pinned:
+            split = pinned.pop()
+        else:
+            templates = sorted(member.template_id for member in members if member.template_id)
+            groups = sorted(member.group_id for member in members if member.group_id)
+            anchor = (templates or groups or sorted(member.id for member in members))[0]
+            split = hashed_validation_split(anchor, percent)
         for member in members:
             splits[member.id] = split
     return splits

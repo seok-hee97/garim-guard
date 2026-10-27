@@ -86,6 +86,15 @@ _NUMERIC_CONTEXTS = (
     "고객 상담 이력 번호 {num}의 처리 결과를 요약해 주세요.",
     "공사 현장 작업 지시 번호 {num}의 완료 보고서를 써 주세요.",
 )
+# ★ GPU 전 독립 검토 — 운송장·송장 문맥은 `pii-num-00` 하나뿐이었고 그것이 해시로 test 에 떨어져
+#   학습에는 송장 문맥이 0 이었다. R1 제품 경로 오탐의 대부분이 바로 그 문맥(12자리 운송장번호)이다.
+#   새로 쓴 문맥을 train 에 고정한다(bc-pii-ko 의 "배송 조회가 가능합니다" 문형은 쓰지 않는다).
+_SHIPPING_CONTEXTS = (
+    "운송장 {num} 화물이 아직 집하되지 않았다고 합니다.",
+    "반품 송장 {num}을 출력해서 상자 위에 붙여 주세요.",
+    "편의점 택배 운송장 {num}의 접수 시각을 확인해 주세요.",
+    "해외 배송 송장번호 {num} 건의 통관 진행 상황을 알려 주세요.",
+)
 _ACCOUNT_CONTEXTS = (
     "환불받으실 계좌번호 {num}으로 입금해 드리겠습니다.",
     "급여 이체 계좌를 {num}로 변경해 주세요.",
@@ -156,6 +165,8 @@ _LATIN_MARKERS = ("CSV", "PDF", "API", "JSON")
 
 
 def _family_split(family: str) -> Split:
+    if family.startswith("pii-num-ship-"):
+        return "train"
     bucket = int(hashlib.sha256(f"pii-neg-r2:{family}".encode()).hexdigest()[:8], 16) % 10
     if bucket < 2:
         return "test"
@@ -173,11 +184,19 @@ def _l0_silent(text: str) -> bool:
     return not (detect_kr_pii(text) + detect_common_pii(text))
 
 
-def _number(rng: random.Random, length: int, *, hyphen: bool) -> str:
-    """음성 번호. 다른 PII 형식으로 읽힐 모양은 피한다 — 이 범주가 가르치려는 것은 문맥이다."""
+def _number(
+    rng: random.Random, length: int, *, hyphen: bool, leading_zero: bool = False
+) -> str:
+    """음성 번호. 다른 PII 형식으로 읽힐 모양은 피한다 — 이 범주가 가르치려는 것은 문맥이다.
+
+    `leading_zero` 면 앞자리를 0 으로 둔다. R1 의 나머지 bc 오탐(`04760327` 의 `04` 를 전화로)이
+    그 모양이었다. 휴대전화 접두 `010` 은 언제나 뺀다.
+    """
     while True:
         digits = "".join(rng.choice(string.digits) for _ in range(length))
-        if digits.startswith("0"):  # 휴대전화 · 지역번호 모양
+        if leading_zero:
+            digits = "0" + digits[1:]
+        if digits.startswith("010") or (digits.startswith("0") and not leading_zero):
             continue
         if length == 13 and _rrn_check_digit(digits[:12]) == digits[12]:
             continue  # 체크섬을 통과하는 주민번호 모양
@@ -238,7 +257,10 @@ def _record(
 def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
     rng = random.Random(seed)
     records: list[CorpusRecord] = []
-    numeric = [(f"pii-num-{i:02d}", text) for i, text in enumerate(_NUMERIC_CONTEXTS)]
+    numeric = [
+        *((f"pii-num-{i:02d}", text) for i, text in enumerate(_NUMERIC_CONTEXTS)),
+        *((f"pii-num-ship-{i}", text) for i, text in enumerate(_SHIPPING_CONTEXTS)),
+    ]
     accounts = [(f"pii-acct-{i:02d}", text) for i, text in enumerate(_ACCOUNT_CONTEXTS)]
     numeric_by_split: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for family, text in numeric:
@@ -272,9 +294,10 @@ def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
         )
     for local_index in range(NUMERIC_NEGATIVES - ACCOUNT_PAIRS):
         family, template = numeric[local_index % len(numeric)]
-        number = _number(rng, rng.randint(8, 14), hyphen=local_index % 2 == 1)
+        shape = {"hyphen": local_index % 2 == 1, "leading_zero": local_index % 8 == 0}
+        number = _number(rng, rng.randint(8, 14), **shape)
         while not _l0_silent(template.format(num=number)):
-            number = _number(rng, rng.randint(8, 14), hyphen=local_index % 2 == 1)
+            number = _number(rng, rng.randint(8, 14), **shape)
         records.append(
             _record(len(records), template.format(num=number), family,
                     "numeric_context_negative", extra={"paired": False})

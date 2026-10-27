@@ -232,3 +232,22 @@ def test_generator_sidecar_applies_only_to_its_rows_and_is_audited() -> None:
     by_id = {row["id"]: row for row in audit}
     assert by_id["row-generator"]["generator_label"] == "NONE"
     assert by_id["row-public"]["reason"] == "no_consensus"
+
+
+def test_generator_vote_silences_a_contradicting_soft_target() -> None:
+    """C3 으로 NONE 이 된 하드 네거티브에 kanana 의 INJECTION 분포를 붙이면 증류가 되돌린다."""
+    row = CorpusRecord(id="gen-1", task="attack", text="이전 회의 지시사항을 요약해 주세요",
+                       source="fixture", split="train", group_id="g-gen-1")
+    artifacts = {
+        "kanana": {row.id: _artifact(row.id, "kanana", "INJECTION")},  # 분포 최상위 INJECTION
+        "gemma4": {row.id: _artifact(row.id, "gemma4", "NONE")},
+        "qwen3guard_gen": {row.id: _artifact(row.id, "qwen3guard_gen", "NONE")},
+    }
+    accepted, _, audit = resolve_teacher_corpus(
+        [row], artifacts, load_teacher_policy(), validation_percent=0,
+        generator_labels={row.id: "NONE"},
+    )
+    assert accepted[0].attack_label == "NONE"
+    assert accepted[0].kanana_probabilities is None
+    assert accepted[0].qwen_jailbreak_target == 0.1  # 모순이 없는 것은 둔다
+    assert audit[0]["silenced_soft_targets"] == ["soft"]

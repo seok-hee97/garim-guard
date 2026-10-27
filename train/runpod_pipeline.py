@@ -136,7 +136,13 @@ def materialize_r2() -> None:
     ):
         for split in ("train", "validation", "test"):
             outputs[f"{stem}-{split}.jsonl"] = [r for r in records if r.split == split]
-    holdout = outputs["attack-synthetic-r2-test.jsonl"]
+    # T4 는 은닉 · 로마자 · 존댓말이 없는 기본 행에서만 만든다. 이미 은닉된 행에 셀 기법을 한 번 더
+    # 걸면 한 행에 은닉이 두 겹이라 셀별 FPR 이 그 셀의 기법만 재지 않는다.
+    holdout = [
+        record for record in outputs["attack-synthetic-r2-test.jsonl"]
+        if record.meta.get("hiding") == "none"
+        and not record.romanized_target and not record.honorific_target
+    ]
     outputs["t4-r2-test.jsonl"] = generate_t4_benign(holdout)
     outputs["t4-prime-r2-test.jsonl"] = generate_t4_prime(
         holdout, prefix="t4pr2", record_family=True

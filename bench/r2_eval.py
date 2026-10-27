@@ -9,6 +9,7 @@
 | O3 PII 음성 오탐 행 | `pii-negative-r2-test` 음성 두 범주 | 제품 경로 — 예측이 나온 행 |
 | O4 계좌 짝 양성 R | `pii-negative-r2-test` 계좌 짝 양성 | 제품 경로 KR_ACCOUNT 문자 재현율 |
 | S4 PII 오탐 행 | `t4-r2-test` | 제품 경로 |
+| O3 bc 음성 오탐 행 | bc-pii-ko 보강 음성 | 제품 경로 — 숫자 덩어리를 가린 문형이 family |
 
 행 수는 n 이 아니다(§7.6-4) — 모든 비율에 family 수와 family 를 복원 추출한 2,000회 bootstrap 의
 95% 구간을 붙인다. 제품 경로는 임계 근처 개체가 CPU 에 따라 갈리므로 기계 정보도 남긴다.
@@ -23,6 +24,7 @@ import argparse
 import json
 import platform
 import random
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -81,6 +83,7 @@ def main() -> int:
     parser.add_argument("--policy", default="config/policy.yaml")
     parser.add_argument("--t4", default="data/corpus/t4-r2-test.jsonl")
     parser.add_argument("--pii-negative", default="data/corpus/pii-negative-r2-test.jsonl")
+    parser.add_argument("--bc", default="data/corpus/bc_pii_augmented_negative-test.jsonl")
     parser.add_argument("--output")
     args = parser.parse_args()
 
@@ -135,6 +138,11 @@ def main() -> int:
         else:
             negatives[kind].append((_family(record), float(bool(predicted)), 1.0))
 
+    bc_rows = [
+        # 숫자 덩어리와 코드 접두를 통째로 가린다 — 한 자리씩 가리면 24개, 실제 문형은 12개다.
+        (re.sub(r"[A-Z]*\d+", "#", record.text), float(bool(pii_spans(record.text))), 1.0)
+        for record in load_jsonl(args.bc)
+    ]
     summarize = cluster_bootstrap
     report = {
         "model": f"{args.l1_model_dir}/{args.model_file}",
@@ -149,6 +157,7 @@ def main() -> int:
             "all_negatives": summarize([u for units in negatives.values() for u in units]),
             **{kind: summarize(units) for kind, units in sorted(negatives.items())},
         },
+        "O3_bc_negative_rows_with_prediction": summarize(bc_rows),
         "O4_account_pair_positive_char_recall": summarize(account),
         "S4_t4_r2_rows_with_pii": summarize(t4_pii_rows),
     }
