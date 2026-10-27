@@ -157,9 +157,13 @@ garim scan ./prompts
 
 학습된 L1과 L2 판정기는 플래그로 붙입니다. 둘 다 없으면 L0만 돕니다.
 
+학습된 가중치는 HF 비공개 저장소에 있습니다 — 모델 `cycloevan/safeagent-kr`, 데이터 · 학습 기록은 같은
+이름의 dataset 저장소(루트가 `data/` 구조). 배포 L1 은 `l1/r1/onnx/` 입니다.
+
 ```bash
-# L1 — train/export_l1.py 산출 디렉터리
-garim --l1-model-dir artifacts/l1 check '홍길동 고객 주소는 …'
+# L1 — 배포 모델(R1, INT8 reduce_range) 받기. 또는 train/export_l1.py 산출 디렉터리
+hf download cycloevan/safeagent-kr --include "l1/r1/onnx/*" --local-dir models/garim
+garim --l1-model-dir models/garim/l1/r1/onnx check '홍길동 고객 주소는 …'
 
 # L2 — 고정 revision의 Gemma 4 E2B를 Q8_0 GGUF로 바꿔 루프백에 띄운다(§6.4.4).
 # 변환기는 설치한 llama.cpp와 같은 커밋의 convert_hf_to_gguf.py를 쓴다.
