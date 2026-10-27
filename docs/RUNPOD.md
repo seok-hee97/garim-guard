@@ -28,20 +28,21 @@
 있다(`--ack-sensitive-synthetic-identifiers` 게이트가 그것 때문에 있다). 재생성 방식이면
 그 값들이 **네트워크를 타지 않는다.**
 
-### 대조용 해시 (로컬 기준, 2026-10-26)
+### 대조용 해시 (로컬 기준, 2026-10-27 — pod 와 일치 확인)
 
 `runpod_pipeline.py` 가 3·5c 단계에서 이 값을 출력한다.
 
 ```
-15bca7d41d9df1ab9cd15826a21316c46b64ef9b47a7c14814d7d0a3cad56994  data/merged/pii-train.jsonl
-c5f09f32fd61e4e1c538f0c74bd5e2272646732d2e90a5002b46d0c21b38a57a  data/merged/pii-validation.jsonl
+0d62d35e1fad4ba9e45f247dae2098abe7ad5ed939bc858d46bc161d763ccfe4  data/merged/pii-train.jsonl
+213d9685b3ca7885a62d4b3b17bbc9942a883dd40c7f5bdce618b00482e8a002  data/merged/pii-validation.jsonl
 fc305d710e93efbd4dd59b49e1d8b792de6f1b2f1782f19fb468c62c456f4b9d  data/corpus/attack-teacher-input.jsonl
 34f9d7ac891fe1fb96476345bff8818d1b81899bf0768ae868c2f05dcaa4e48c  data/corpus/t4-test.jsonl
 1cd1d529f5ab6b4abd2a1d18770fe5f1c1921ee176f4b0bafca12bf84bef40db  data/corpus/t4-prime-test.jsonl
 ```
 
 2단계(`prepare_corpora.py`) 산출 16개도 2026-10-26 원자산에서 다시 만들어 로컬본과 **바이트
-단위로 같은 것**을 확인했다.
+단위로 같은 것**을 확인했다. 2026-10-27 KDPII span 공백 수정으로 `kdpii-train`(`7b8aa4a0…`)·
+`kdpii-validation`(`4e14aa55…`)과 위 PII 병합 두 값이 바뀌었다. `kdpii-test` 는 그대로다.
 
 (이전 판의 `attack-train/validation.jsonl` 해시는 합성 1,238행짜리 옛 봉인 입력이라 뺐다.
 공격 학습 입력은 이제 7단계 교사 합의 산출물이다. PII 두 값은 3단계에 평가 차단 목록이
@@ -87,6 +88,22 @@ uv sync --extra train
 export HF_TOKEN=...
 nvidia-smi        # CUDA Version >= 13.0 인지 확인
 ```
+
+### 실제 실행에서 — 드라이버가 CUDA 12.8 인 pod (2026-10-27)
+
+받은 RTX 3090 pod 는 드라이버가 CUDA 12.8 이었다. lock 의 cu13 torch 로는 GPU 를 못 본다. 그래서:
+
+- `uv sync --extra train` 뒤 torch 만 **cu126 휠로 바꿨다** — `torch==2.13.0+cu126`,
+  `torchvision==0.28.0+cu126`, 인덱스는 `https://download.pytorch.org/whl/cu126` **하나만**(PyPI 를
+  같이 주면 PyPI 휠을 먼저 집는다). 느린 망에서는 `UV_HTTP_TIMEOUT=300`.
+- cu13 `nvidia-*` 패키지를 지우지 않는다. cu12 패키지와 **파일을 공유**해서(`libcusparseLt` 등)
+  지우면 torch 가 깨진다. 깨졌으면 cu126 쪽을 `--reinstall` 한다.
+- 이후 **`uv run` 을 쓰지 않는다** — 실행할 때마다 lock 으로 다시 맞춰 cu13 torch 로 되돌린다.
+  `.venv/bin/python` 을 직접 부른다.
+- 저장소는 토큰 대신 **git bundle** 로 올렸다(`git bundle create … <base>..<branch>` → `scp` →
+  `git fetch <bundle> <branch>`). pod 에 자격 증명이 남지 않는다.
+- 디스크는 50GB 오버레이로 충분했다 — 최대 34GB(모델 22GB · venv 6.6GB · 데이터 2.6GB · 학습 산출물 2.5GB).
+- 긴 단계는 `tmux` 안에서 돌린다. 11단계는 `PIPELINE_EXIT=0` 을 기다렸다가 자동으로 이어 붙였다.
 
 ## 순서
 

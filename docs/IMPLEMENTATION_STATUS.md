@@ -1,6 +1,6 @@
 # 가림 구현 현황
 
-> 기준일: 2026-10-26 (이전 판 2026-09-07)
+> 기준일: 2026-10-27 — RunPod 교사·학습·평가 완료 (이전 판 2026-10-26)
 > 범위: 고정 자산 준비와 로컬 교사 추론을 포함한 현재 구현·실행 상태
 
 이 문서는 [DESIGN.md](DESIGN.md)의 기획을 현재 저장소 코드에 대응시킨 실행 현황이다.
@@ -12,24 +12,25 @@
 | 영역 | 상태 | 현재 산출물 | 아직 실행하지 않은 것 |
 |---|---|---|---|
 | P0/L0 런타임 | **구현 완료** | 세그먼트, 가역 정규화, 규칙 탐지, 병합, 정책, 볼트, API/CLI | 실 운영 트래픽 성능 측정 |
-| L1 런타임 계약 | **구현 완료 · CLI/프록시 연결** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드, `--l1-model-dir`, 프록시 스레드 간 공유(토크나이저 직렬화·스레드별 취소) | 학습된 가중치 |
+| L1 런타임 계약 | **구현 완료 · 학습 가중치로 확인** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드, `--l1-model-dir`, 프록시 스레드 간 공유. `train/artifacts/l1-onnx` 로 CLI 전 구간 통과(PERSON 마스킹 · 인젝션 classifier) | — |
 | 모델·데이터 고정 | **구현·로컬 검증 완료** | 활성 자산 18개, revision/라이선스 레지스트리, 원격 tree/LFS 검증, exact 파일 manifest, `uv.lock` | 새 머신에서 동일 자산 재현 |
 | 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | deepset 번역본 적용 |
 | 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
 | 번역 | **완료** | deepset 662행 — Gemini 3.8 Flash 50 + Claude 612(한도 초과로 전환, 행별 `method`), `train/translations/`, `deepset-ko-{train,test}` 적용 | — |
-| 교사·수동 라벨링 | **입력 확정 · 리허설 통과 / 실행은 RunPod** | 교사 풀 19,010행, 교사 입력 19,157행(train+validation, 2,048토큰 초과 38행 제외), `train/runpod_pipeline.py` 3~10단계 리허설 통과, deepset 외부 이진 gold 116행 | 교사 3종 실행(Gemma 4 는 GPU 필요). 로컬 두 교사만으로는 정족수상 합의 불가 |
-| L1 공동 학습 | **구현 완료** | SHA-256 입력 봉인, A.X 공유 백본+4개 헤드, 4:1 샘플링, soft/aux loss, 3 seed, 이중 early stopping | optimizer를 사용하는 실제 GPU 학습 |
-| 내보내기·평가 | **구현 완료** | FP32/QInt8 ONNX, 봉인 test 평가, 양자화 저하, latency/RSS 하네스 | 체크포인트 export와 수치 측정 |
+| 교사·수동 라벨링 | **완료(RTX 3090, 2026-10-27)** | 교사 3종 × 19,157행(기권 0) — kanana · Gemma 4 E2B · **Qwen3Guard-Gen-4B**(0.6B 가 한국어 탈옥을 못 봐 교체). 클래스별 2표 합의 14,020 수용 / 5,137 폐기(감사 기록) | 하드 네거티브 보존 규칙(RESULTS_L1 §5-②) — 다음 학습 전 사전 등록 |
+| L1 공동 학습 | **완료 — 3 seed × 5 epoch** | bf16, micro-batch 16×2. 검증 hmean 0.896 / **0.922** / 0.918 → seed 37 | SYSTEM_LEAK 75 · JAILBREAK 132 학습 행 — 다음 학습에서 보강 |
+| 내보내기·평가 | **완료** | QInt8 152MB · 양자화 저하 −0.0002 · 봉인 test 17,146행 · 외부 KoreanGuardrail 0.342/0.007 · TAB · 제품 경로 PII(`bench/l1_product_path.py`) — [RESULTS_L1.md](RESULTS_L1.md) | 노트북 지연 재측정(pod CPU 값만 있음) |
 | L2 | **구현 · Gemma 4 E2B 판정기 연결** | `garim/detect/l2.py` — 루프백 llama-server, 교사와 같은 정책 프롬프트, 3-스트림 분리, 파싱 실패 warn+degraded. 고정 revision → Q8_0 → Q4_K_M GGUF | interactive 에스컬레이션(§6.4.6 W1 게이트), kanana L2-fast |
-| RunPod 실행 | **절차 문서 완료** | `docs/RUNPOD.md` — 저장소만 올리고 코퍼스는 재생성(비트 동일 확인), 해시 대조 게이트 | Gemma 교사·CUDA 학습 실행, `pii_per_attack` 실측 결정 |
+| RunPod 실행 | **완료(2026-10-27)** | RTX 3090 · torch cu126(드라이버 CUDA 12.8). 실행 중 결함 셋을 고침(Gemma 설명 출력 · KDPII 앞 공백 · Qwen 교체) — `docs/RUNPOD.md`. 산출물 회수·sha256 대조 | — |
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
 | §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 키가 Free Tier(모델당 일 20회)로 확정, 유료 키 필요 |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
 | 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, **스트리밍은 모아서 복원한 뒤 SSE**(실모델 확인, `--refuse-streaming` 선택), 엄격 프로필(`config/policy.strict.yaml`), **`tool_calls` 인자 검사·복원**, 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
-현재 단계는 **학습 준비 코드와 로컬 고정 자산·코퍼스 준비 완료**다. 배포 가능한 L1
-가중치, 교사 3종 합의 결과, 최종 평가 gold와 학습 후 성능값은 아직 없다.
+현재 단계는 **첫 L1 학습·평가 완료**다(2026-10-27). 교사 3종 합의, seed 37 ONNX QInt8,
+봉인 test·외부 벤치 수치가 있다 — [RESULTS_L1.md](RESULTS_L1.md). 남은 것은 노트북 지연 재측정,
+가중치 공개 라이선스 검토, 그리고 RESULTS_L1 §5 결함을 고치는 **다음 학습의 사전 등록**이다.
 
 ## 구현된 구성요소
 
@@ -370,13 +371,13 @@ OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 �
 2. ✅ 공개 원천과 합성 split 코퍼스를 생성하고 누수·span 계약을 검사했다.
 3. ✅ deepset train/test를 번역하고 ID 완전성 게이트를 통과시켰다. 교사 입력 19,157행을 확정했고,
    `python train/runpod_pipeline.py --rehearse` 로 3~10단계 배선을 교사 대역으로 끝까지 돌렸다.
-4. 교사 입력에 교사 3종을 실행한다(CUDA). 로컬에서는 kanana 280행만 시험 실행됐다 — 재개 가능하다.
-5. `bench.teacher_agreement`의 생성기 일치도와 JAILBREAK rubber-stamp 게이트를 통과시킨다.
-6. 교사 불일치는 블라인드 검수하거나 `--drop-review`로 감사 기록과 함께 학습에서 뺀다.
+4. ✅ 교사 3종 × 19,157행(RTX 3090, 2026-10-27). JAILBREAK 교사를 Gen-0.6B → Gen-4B 로 교체했다(RUNPOD.md 6b).
+5. ✅ 6b 통과 — JAILBREAK 동의율 0.091(rubber-stamp 아님), 생성기 JAILBREAK 재현율 0.453.
+6. ✅ `--drop-review` — 5,137행 폐기(감사 기록). ⚠️ 폐기분에 생성기 NONE 의 하드 네거티브 379행이 들었다(RESULTS_L1 §5-②).
 7. ✅ 최종 공격 test는 deepset의 1:1 외부 이진 gold를 만들었다(`attack-external-gold-test.jsonl`, 116행).
-8. `finalize_training_inputs.py`와 `finalize_evaluation_inputs.py`로 학습·최종 test를 모두 봉인한다.
-9. 실제 입력 인자를 준 `preflight.py --stage training`과 `train_l1.py` dry-run을 통과시킨다.
-10. CUDA에서 3 seed 학습 후 FP32/QInt8 export·평가·지연/RSS 측정을 수행한다.
+8. ✅ 학습 130,221 레코드 · 평가 17,146 레코드 봉인.
+9. ✅ preflight · dry-run 통과(pod 리허설 포함).
+10. ✅ 3 seed 학습 → seed 37 → FP32/QInt8 export · 봉인 test 평가 · pod CPU 지연/RSS. 결과는 [RESULTS_L1.md](RESULTS_L1.md).
 
 4~10번은 `python train/runpod_pipeline.py --device cuda --train` 한 명령이다. RunPod 을 켜기
 전에 `--rehearse` 로 같은 경로를 교사 대역으로 먼저 돌린다(2026-10-26 통과). 단계표는
@@ -396,6 +397,10 @@ OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 �
 같은 질문을 클라우드와 온디바이스에 던진 비교가 된다.
 
 ## 학습 후에만 채울 항목
+
+2026-10-27 채웠다 — [RESULTS_L1.md](RESULTS_L1.md) §1·§3·§4·§8, 모델 카드는
+[MODEL_CARD_L1.md](MODEL_CARD_L1.md). 남은 것은 **기준 머신(노트북) 지연·RSS** 와 **가중치 공개
+라이선스 검토**다.
 
 - seed별 checkpoint와 선택 근거
 - FP32/QInt8 PII character recall/F1과 공격 macro recall/F1/FPR
