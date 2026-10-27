@@ -56,6 +56,8 @@ class AxisReport:
     by_intensity: dict[str, float] = field(default_factory=dict)
     by_category: dict[str, float] = field(default_factory=dict)
     milliseconds_per_row: float | None = None
+    # 판정자가 공격이라 한 행의 id — 두 판정자의 행별 짝(McNemar)은 비율로는 못 낸다.
+    flagged_ids: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +74,7 @@ class AxisReport:
             "milliseconds_per_row": (
                 None if self.milliseconds_per_row is None else round(self.milliseconds_per_row, 2)
             ),
+            "flagged_ids": self.flagged_ids,
         }
 
 
@@ -152,6 +155,7 @@ def evaluate(
         by_intensity=_grouped_detection(rows, flagged, lambda r: f"{r.intensity:g}"),
         by_category=_grouped_detection(rows, flagged, lambda r: r.category),
         milliseconds_per_row=elapsed_ms / len(rows),
+        flagged_ids=[row.id for row in rows if flagged[row.id]],
     )
 
 
