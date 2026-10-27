@@ -8,6 +8,8 @@ honorific/social-engineering probability. This module intentionally does not dow
 from __future__ import annotations
 
 import json
+import math
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,6 +139,50 @@ class _SerializedTokenizer:
         return getattr(self._tokenizer, name)
 
 
+# cgroup v2 · v1 CPU 할당량 파일. 컨테이너 밖이면 없다.
+CGROUP_CPU_MAX = Path("/sys/fs/cgroup/cpu.max")
+CGROUP_V1_QUOTA = Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+CGROUP_V1_PERIOD = Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+
+
+def cpu_quota_threads(
+    cpu_max: Path = CGROUP_CPU_MAX,
+    v1_quota: Path = CGROUP_V1_QUOTA,
+    v1_period: Path = CGROUP_V1_PERIOD,
+) -> int | None:
+    """cgroup CPU 할당량을 코어 수로(내림, 최소 1). 할당량이 없거나 못 읽으면 None.
+
+    ★ onnxruntime 은 intra-op 스레드를 **보이는** 물리 코어 수로 잡는다. RunPod 컨테이너는 64코어가
+      보이고 할당량은 8.5코어였다 — 32스레드가 할당량에 걸려 throttling 을 반복하며 행당 347ms 가
+      걸렸고, 8스레드면 36ms 였다(출력은 같다). 검사기의 L1 예산(1,000ms)이 그 사이에 있다.
+    """
+    try:
+        if cpu_max.is_file():
+            quota, period = cpu_max.read_text().split()[:2]
+            if quota == "max":
+                return None
+            return max(1, math.floor(int(quota) / int(period)))
+        if v1_quota.is_file() and v1_period.is_file():
+            quota_us = int(v1_quota.read_text())
+            if quota_us <= 0:
+                return None
+            return max(1, math.floor(quota_us / int(v1_period.read_text())))
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _intra_op_threads() -> int | None:
+    """`GARIM_L1_THREADS` 가 있으면 그 값, 없으면 cgroup 할당량, 둘 다 없으면 onnxruntime 기본."""
+    configured = os.environ.get("GARIM_L1_THREADS")
+    if configured:
+        threads = int(configured)
+        if threads < 1:
+            raise ValueError("GARIM_L1_THREADS must be a positive integer")
+        return threads
+    return cpu_quota_threads()
+
+
 class OnnxL1Backend:
     """Local ONNX Runtime adapter for the shared-encoder/four-head model contract.
 
@@ -180,7 +226,13 @@ class OnnxL1Backend:
         if not tokenizer.is_fast:
             raise ValueError("L1 requires a fast tokenizer for source offset mapping")
         self.tokenizer = _SerializedTokenizer(tokenizer)
-        self.session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        options = ort.SessionOptions()
+        threads = _intra_op_threads()
+        if threads is not None:
+            options.intra_op_num_threads = threads
+        self.session = ort.InferenceSession(
+            str(model_path), sess_options=options, providers=["CPUExecutionProvider"]
+        )
         self._ort = ort
         self._run_options_lock = threading.Lock()
         # 워커 스레드 id → 그 스레드의 RunOptions. 프록시는 요청마다 Inspector 를 만들고
