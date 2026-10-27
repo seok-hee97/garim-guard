@@ -2,6 +2,10 @@
 
 > 기준일: 2026-10-27 · RunPod RTX 3090(24GB) · 코드 `e59e43c`(학습) / `f390d25`(외부 벤치)
 > 짝 문서: [RESULTS.md](RESULTS.md) — **학습 전** 수치. 이 문서는 그 위에 L1 을 얹은 결과만 다룬다.
+> **갱신(2026-10-27)** — 2차 학습(R2)은 채택되지 않았다([RESULTS_L1_R2.md](RESULTS_L1_R2.md)). 그 측정 중
+> INT8 이 VNNI 없는 x86 에서 깨지는 결함을 찾아 배포 INT8 을 `reduce_range` 판으로 바꿨다. 이 문서의
+> INT8 수치는 원래 파일(`garim_l1.int8.u8s8.onnx`)로 잰 것이고, 새 판으로 다시 재도 KoreanGuardrail ·
+> KDPII · bc 음성이 같은 값으로 나왔다(RESULTS_L1_R2 §4-①).
 
 RESULTS.md 와 같은 규칙을 따른다 — **각 수치 옆에 그 수치가 지탱하지 못하는 것을 같이 적는다**
 (§7.6-2 "재현율 옆에 항상 FPR", §7.6-3 "자작 셋은 헤드라인이 아니다").
@@ -281,6 +285,9 @@ L1 시간 예산만 60초로 푼 벤치 정책으로 했고 degraded 문서는 0
 - **지연 99ms(128토큰)** — pod CPU(16코어 컨테이너)다. §7.1.3 의 노트북 기준이 아니다. 로컬
   M1 은 다른 실험이 돌고 있어(load 16, swap 21.5/22.5GB) 이번에 재지 않았다.
 - **KDPII 0.987** — 원천은 외부지만 train 과 같은 분포의 분할이다. 실 업무 텍스트 재현율이 아니다.
+- **VNNI 없는 x86 에서 잰 INT8 값** — 원래 INT8 은 AVX2 만 있는 CPU(Zen2 · Zen3 · Ice Lake 이전 Intel)에서
+  int16 포화로 판정이 깨진다(RESULTS_L1_R2 §4-①). R1 pod 의 CPU 는 기록하지 않았지만, Mac(ARM)과 행 단위까지
+  가까웠고 `reduce_range` 판으로 같은 값이 재현돼 그 결함이 드러나지 않은 기계였다고 본다.
 - **제품 경로 오탐의 행 단위 내역** — 남는 개체가 임계 바로 위라 CPU(x86 pod / ARM Mac)에 따라 T4 내역과
   보강 음성 행 수(62 ↔ 60)가 바뀐다. 비율과 방향만 쓴다.
 
@@ -289,7 +296,7 @@ L1 시간 예산만 60초로 푼 벤치 정책으로 했고 degraded 문서는 0
 | 경로 | 무엇 |
 |---|---|
 | `train/artifacts/l1/` | seed 별 체크포인트·학습 보고서, `three-seed-report.json` |
-| `train/artifacts/l1-onnx/` | FP32 · QInt8 ONNX, 토크나이저 — `garim --l1-model-dir` 로 바로 쓴다 |
+| `train/artifacts/l1-onnx/` | FP32 · INT8 ONNX, 토크나이저 — `garim --l1-model-dir` 로 바로 쓴다. INT8 은 `reduce_range` 판(`906f73ec…`), 이 문서의 수치를 낸 원래 파일은 `garim_l1.int8.u8s8.onnx`(`a0e39349…`) |
 | `train/artifacts/l1-eval.json` · `l1-bench.json` | 봉인 test 평가 · 지연 |
 | `train/artifacts/axis-b-l1.json` · `tab-l0.json` · `tab-l1.json` | 외부 벤치 |
 | `train/artifacts/axis-b-l1-600.json` | 교사와 같은 600 표본(`--sample 600`, seed 13) — Mac 에서 잼 |

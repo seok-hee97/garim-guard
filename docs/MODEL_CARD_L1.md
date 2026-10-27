@@ -10,6 +10,11 @@ tags: [token-classification, prompt-injection, pii, korean]
 
 > `train/MODEL_CARD_TEMPLATE.md` 를 이번 학습으로 채운 것. 측정하지 않은 칸은 비워 두고 그렇다고 적었다.
 > 수치의 근거와 유보는 [RESULTS_L1.md](RESULTS_L1.md).
+>
+> **갱신(2026-10-27)** — ① 배포 INT8 을 `reduce_range=True` 로 다시 양자화했다(가중치는 같다). 원래 INT8 은
+> VNNI 없는 x86(AMD Zen2 · Zen3, Ice Lake 이전 Intel)에서 int16 포화로 판정이 깨졌다. ② 2차 학습(R2)은
+> 사전 등록 판정에서 O1 · O4 미달로 채택되지 않았다 — 이 카드의 모델이 계속 배포 모델이다.
+> 둘 다 [RESULTS_L1_R2.md](RESULTS_L1_R2.md).
 
 ## 모델
 
@@ -21,7 +26,11 @@ tags: [token-classification, prompt-injection, pii, korean]
   RUNPOD.md 11단계에 적어 둔 그대로다. seed 간 차이(0.896 / 0.922 / 0.918)는 검증 소수 클래스
   (JAILBREAK 13 · SYSTEM_LEAK 8행)로 설명되는 크기라 37 이 본질적으로 낫다는 근거는 아니다.
 - 코드: 학습 `e59e43c`, 데이터 준비 `f0bbe9e`
-- 산출물: `garim_l1.int8.onnx`(152MB) · `garim_l1.fp32.onnx`(+ `.data`, 595MB) · 토크나이저 · `labels.json`
+- 산출물: `garim_l1.int8.onnx`(152MB, QInt8 per-channel · `reduce_range`, sha256 `906f73ec…`) ·
+  `garim_l1.fp32.onnx`(+ `.data`, 595MB) · 토크나이저 · `labels.json`. 아래 수치를 낸 원래 INT8 은
+  `garim_l1.int8.u8s8.onnx`(`a0e39349…`)로 남겼다 — 새 판으로 KoreanGuardrail 0.342 / 0.007 · KDPII
+  0.979 / 0.977 · bc 음성 오탐 63행(원래 62)이 재현됐다
+- 저장: HF `cycloevan/safeagent-kr`(model, 비공개) `l1/r1/`
 
 ## 학습 데이터와 고지
 
@@ -90,3 +99,6 @@ seed 평균은 **검증** 값이다 — test 는 배포 seed 하나만 쟀다. �
 - bc-pii-ko 문맥은 합성 번역체이므로 값만 사용했습니다(음성 평가는 별도).
 - RRN 및 일부 국내 식별자는 적법한 비생성기 실값 근거가 없습니다.
 - L2는 이 모델에 포함되지 않습니다.
+- **2차 학습으로 오탐을 줄이면 탐지가 같이 줄었다** — R2 는 처음 보는 정상 문장 오탐 0.439 → 0.000,
+  bc 음성 오탐 63 → 0 행을 냈지만 KoreanGuardrail 탐지율 0.342 → 0.316, KLUE PERSON 재현율 0.931 → 0.906
+  으로 내려가 채택되지 않았다(RESULTS_L1_R2 §3). 이 카드의 오탐 한계는 그대로 남아 있다.

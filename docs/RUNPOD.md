@@ -10,7 +10,7 @@
 | Qwen3Guard-**Gen** 4B | ❌ | Stream → Gen-0.6B → **Gen-4B** — 아래 참조. bf16 약 9GB |
 | R1/R2 gradient 학습 | ❌ | MPS 가 matmul 에서 죽는다. CUDA 가 필요하다 |
 
-## ★ R2 — 2차 학습 (2026-10-27 준비 완료, 아직 안 돌림)
+## ★ R2 — 2차 학습 (2026-10-27 실행 완료 · 불채택 — [RESULTS_L1_R2.md](RESULTS_L1_R2.md))
 
 무엇을 바꾸고 무엇으로 판정하는지는 [PREREG_L1_R2.md](PREREG_L1_R2.md) 에 학습 전에 고정했다.
 `runpod_pipeline.py` 는 이제 R2 경로다(R1 은 커밋 `e59e43c`). 아래 R1 절차와 다른 점만 적는다.
@@ -70,6 +70,28 @@ python train/benchmark_l1.py --model-dir train/artifacts/l1-r2-onnx --output tra
 가져올 것: `train/artifacts/l1-r2/` · `l1-r2-onnx/` · `r2/`, `data/training-input-manifest-r2.json` ·
 `data/evaluation-input-manifest-r2.json`, `data/corpus/teacher-*-r2.jsonl` · `data/corpus/resolved-r2/`,
 `data/teacher_agreement-r2.json`, pod 로그.
+
+### 실제 실행에서 — 위 11단계대로 가면 안 되는 이유 둘 (2026-10-27)
+
+3~10 은 위 절차 그대로 통과했다(해시 게이트 15개 일치 · 교사 재사용 17,734행 · 학습 약 3시간 20분).
+**11 에서 둘이 터졌고, 둘 다 코드에 반영해 다음부터는 위 명령 그대로 된다.**
+
+| # | 증상 | 원인 → 조치 |
+|---|---|---|
+| 1 | 첫 평가가 2시간 넘게 INT8 한 번을 못 끝냈다 | pod 의 cgroup CPU 할당량이 8.5코어인데 onnxruntime 이 보이는 물리 코어(32)만큼 스레드를 잡아 throttling. 346.9 → 35.7 ms/행(출력 동일). `OnnxL1Backend` 가 `GARIM_L1_THREADS` → 할당량 순으로 스레드를 정한다(`af350c4`). 확인: `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us` |
+| 2 | R1 을 다시 재니 Mac 기준선과 크게 달랐다(계좌 짝 R 1.0 → 0.404) | pod CPU(EPYC 7452)가 AVX2 만 있고 VNNI 가 없어 INT8 U8S8 곱이 int16 에서 포화. `quantize_joint_onnx` 가 `reduce_range=True` 로 양자화한다(`c2e7f2f`) — 이제 `export_l1.py` 출력이 곧 그 판이다. 확인: `grep -o -w 'avx512_vnni\|avx_vnni' /proc/cpuinfo` |
+
+R2 판정은 R1 · R2 를 각자의 FP32 에서 `reduce_range` 로 다시 양자화해 같은 pod 에서 쟀다(PREREG §8 마지막
+행). 실제로 돈 스크립트는 `data/runpod/2026-10-27-r2/final/logs/step11c-r2.sh` 이고, INT8 · FP32 대조와
+지연 벤치는 판정 지표를 먼저 내려고 뺐다.
+
+- **이 pod 는 드라이버가 CUDA 13.0** 이라 lock 의 cu13 torch 가 그대로 GPU 를 봤다 — 아래 "CUDA 12.8 pod"
+  의 torch 교체가 필요 없었다(`uv sync --python 3.11 --extra train --extra dev`).
+- **pod → Mac 다운로드 약 0.8MB/s, Mac → pod 업로드는 다운로드와 겹치면 단일 연결 20KB/s.** 152MB 를
+  8조각으로 나눠 병렬 `scp` 하니 약 190KB/s 였다. 큰 파일은 pod 에서 만들 수 있으면 pod 에서 만든다
+  (양자화는 기계가 달라도 바이트가 같다).
+- 회수물은 Mac `data/runpod/2026-10-27-r2/`(sha256 대조), 모델 · 데이터 전체는 HF 비공개 저장소
+  `cycloevan/safeagent-kr`(model · dataset)에 있다.
 
 ## ★ 올리는 것은 저장소뿐이다
 
