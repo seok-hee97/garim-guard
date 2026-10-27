@@ -15,7 +15,7 @@ gold 경로·범위, 7단계 template 분할, PolyGuard group 이 하위 데이�
     # 학습까지
     python train/runpod_pipeline.py --device cuda --train
 
-**이 파일은 R2 경로다**([PREREG_L1_R2.md](../docs/PREREG_L1_R2.md)). R1 은 커밋 `e59e43c` 의
+**이 파일은 R2 경로다**([PREREG_L1_R2.md](../docs/PREREG_L1_R2.md)). R1 은 커밋 `1cd63d1` 의
 이 파일로 재현한다. R2 에서 바뀐 단계 — 2b 가 R1 T4 대신 R2 합성(C1·C2·C4)과 그 홀드아웃을
 만들고, 3 이 PII 음성 범주를 병합하고, 6a 가 R1 교사 산출물 중 ID·텍스트가 같은 행을 재사용하며,
 6b·7 이 생성기 사이드카를 받는다(C3). 산출물 이름에 `-r2` 를 붙여 R1 파일을 덮지 않는다.

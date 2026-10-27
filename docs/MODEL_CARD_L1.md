@@ -25,7 +25,7 @@ tags: [token-classification, prompt-injection, pii, korean]
 - **배포 seed: 37** — 검증 `best_joint_recall_hmean` 최댓값(0.9219, epoch 3). 기준은 학습 전에
   RUNPOD.md 11단계에 적어 둔 그대로다. seed 간 차이(0.896 / 0.922 / 0.918)는 검증 소수 클래스
   (JAILBREAK 13 · SYSTEM_LEAK 8행)로 설명되는 크기라 37 이 본질적으로 낫다는 근거는 아니다.
-- 코드: 학습 `e59e43c`, 데이터 준비 `f0bbe9e`
+- 코드: 학습 `1cd63d1`, 데이터 준비 `0c014a7`
 - 산출물: `garim_l1.int8.onnx`(152MB, QInt8 per-channel · `reduce_range`, sha256 `906f73ec…`) ·
   `garim_l1.fp32.onnx`(+ `.data`, 595MB) · 토크나이저 · `labels.json`. 아래 수치를 낸 원래 INT8 은
   `garim_l1.int8.u8s8.onnx`(`a0e39349…`)로 남겼다 — 새 판으로 KoreanGuardrail 0.342 / 0.007 · KDPII

@@ -11,7 +11,7 @@
 ## 0. 판정 — 사전 등록 §4 표 그대로
 
 기준선은 같은 pod · 같은 세션 · 같은 양자화로 다시 잰 R1 이다. 판정은 `bench/r2_verdict.py`(통과선을
-결과 전에 코드로 고정, 커밋 `1e8932e`)가 냈다. 비율 옆 괄호는 family 단위 cluster bootstrap 95% 구간이다.
+결과 전에 코드로 고정, 커밋 `b584c43`)가 냈다. 비율 옆 괄호는 family 단위 cluster bootstrap 95% 구간이다.
 
 | # | 지표 | 셋 | R1 | **R2** | 통과선 | 판정 |
 |---|---|---|---:|---:|---|---|
@@ -109,7 +109,7 @@ KoreanGuardrail 기법별 탐지율:
 동적 양자화는 활성 U8 · 가중치 S8 이고, onnxruntime 은 VNNI 없는 AVX2 에서 이 곱을 `vpmaddubsw` 로
 계산해 int16 에서 포화한다. AMD Zen2 · Zen3, Ice Lake 이전 Intel 노트북이 해당한다.
 
-- `quantize_joint_onnx` 에 `reduce_range=True`(7비트 가중치) — 커밋 `c2e7f2f`. 같은 FP32 에서 Mac 과
+- `quantize_joint_onnx` 에 `reduce_range=True`(7비트 가중치) — 커밋 `3ef7481`. 같은 FP32 에서 Mac 과
   pod 가 바이트까지 같은 INT8 을 만든다(R2 `cd6e3fca…`).
 - R1 을 이 양자화로 다시 재도 R1 첫 pod 수치가 그대로 나왔다 — O1 0.342 / 0.007(같음), KDPII
   0.9793 / 0.9765(이전 0.9795 / 0.9768), bc 오탐 63행(이전 62). 7비트 가중치의 비용은 VNNI · ARM 에서 잴
@@ -124,7 +124,7 @@ pod 는 64코어가 보이지만 cgroup 할당량이 8.5코어였다. onnxruntim
 잡아 throttling 을 반복했고, 첫 평가는 2시간이 지나도록 INT8 한 번을 못 끝냈다. 같은 pod 40행 기준
 기본 346.9ms/행 → 8스레드 35.7ms/행, 출력은 같다. 행당 수백 ms 면 검사기의 L1 예산(1,000ms)을 꼬리
 행이 넘어 판정이 부하에 따라 바뀐다. `OnnxL1Backend` 가 `GARIM_L1_THREADS` → cgroup 할당량 순으로
-스레드를 정한다(커밋 `af350c4`). 판정 측정의 KoreanGuardrail 은 28~29ms/행이었다.
+스레드를 정한다(커밋 `21d11bc`). 판정 측정의 KoreanGuardrail 은 28~29ms/행이었다.
 
 ## 5. 판정에 쓰면 안 되는 수치
 

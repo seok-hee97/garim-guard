@@ -13,7 +13,7 @@
 ## ★ R2 — 2차 학습 (2026-10-27 실행 완료 · 불채택 — [RESULTS_L1_R2.md](RESULTS_L1_R2.md))
 
 무엇을 바꾸고 무엇으로 판정하는지는 [PREREG_L1_R2.md](PREREG_L1_R2.md) 에 학습 전에 고정했다.
-`runpod_pipeline.py` 는 이제 R2 경로다(R1 은 커밋 `e59e43c`). 아래 R1 절차와 다른 점만 적는다.
+`runpod_pipeline.py` 는 이제 R2 경로다(R1 은 커밋 `1cd63d1`). 아래 R1 절차와 다른 점만 적는다.
 
 **올리는 것이 둘 늘었다** — 저장소 밖 파일이지만 재생성하려면 GPU 가 다시 든다.
 
@@ -78,8 +78,8 @@ python train/benchmark_l1.py --model-dir train/artifacts/l1-r2-onnx --output tra
 
 | # | 증상 | 원인 → 조치 |
 |---|---|---|
-| 1 | 첫 평가가 2시간 넘게 INT8 한 번을 못 끝냈다 | pod 의 cgroup CPU 할당량이 8.5코어인데 onnxruntime 이 보이는 물리 코어(32)만큼 스레드를 잡아 throttling. 346.9 → 35.7 ms/행(출력 동일). `OnnxL1Backend` 가 `GARIM_L1_THREADS` → 할당량 순으로 스레드를 정한다(`af350c4`). 확인: `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us` |
-| 2 | R1 을 다시 재니 Mac 기준선과 크게 달랐다(계좌 짝 R 1.0 → 0.404) | pod CPU(EPYC 7452)가 AVX2 만 있고 VNNI 가 없어 INT8 U8S8 곱이 int16 에서 포화. `quantize_joint_onnx` 가 `reduce_range=True` 로 양자화한다(`c2e7f2f`) — 이제 `export_l1.py` 출력이 곧 그 판이다. 확인: `grep -o -w 'avx512_vnni\|avx_vnni' /proc/cpuinfo` |
+| 1 | 첫 평가가 2시간 넘게 INT8 한 번을 못 끝냈다 | pod 의 cgroup CPU 할당량이 8.5코어인데 onnxruntime 이 보이는 물리 코어(32)만큼 스레드를 잡아 throttling. 346.9 → 35.7 ms/행(출력 동일). `OnnxL1Backend` 가 `GARIM_L1_THREADS` → 할당량 순으로 스레드를 정한다(`21d11bc`). 확인: `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us` |
+| 2 | R1 을 다시 재니 Mac 기준선과 크게 달랐다(계좌 짝 R 1.0 → 0.404) | pod CPU(EPYC 7452)가 AVX2 만 있고 VNNI 가 없어 INT8 U8S8 곱이 int16 에서 포화. `quantize_joint_onnx` 가 `reduce_range=True` 로 양자화한다(`3ef7481`) — 이제 `export_l1.py` 출력이 곧 그 판이다. 확인: `grep -o -w 'avx512_vnni\|avx_vnni' /proc/cpuinfo` |
 
 R2 판정은 R1 · R2 를 각자의 FP32 에서 `reduce_range` 로 다시 양자화해 같은 pod 에서 쟀다(PREREG §8 마지막
 행). 실제로 돈 스크립트는 `data/runpod/2026-10-27-r2/final/logs/step11c-r2.sh` 이고, INT8 · FP32 대조와
@@ -266,7 +266,7 @@ python train/runpod_pipeline.py --rehearse
 
 | # | 단계 | 증상 | 원인 → 조치 |
 |---|---|---|---|
-| 1 | 6b | 기본 `--gold` 파일 없음 · `extra=17,787` | 사이드카가 분할별 두 파일로 갈렸고(25a3528), 하네스가 교사 산출물이 gold 와 **정확히** 같은 ID 이기를 요구했다 → 기본값 두 파일, gold ⊆ 교사 산출물·교사끼리 같은 ID 집합 요구 |
+| 1 | 6b | 기본 `--gold` 파일 없음 · `extra=17,787` | 사이드카가 분할별 두 파일로 갈렸고(4e23aca), 하네스가 교사 산출물이 gold 와 **정확히** 같은 ID 이기를 요구했다 → 기본값 두 파일, gold ⊆ 교사 산출물·교사끼리 같은 ID 집합 요구 |
 | 2 | 7 | `template 'benign-076' crosses dataset splits` | 버킷을 `group or template` 하나로 정해 group 여럿에 걸친 template 이 갈렸다(합성 300개 전부) → union-find 성분 단위 분할 |
 | 3 | 7 | 검증 분할의 PolyGuard 0행 | PolyGuardMix `group_id` 가 하위 데이터셋 이름이라 17,273행이 group 둘로 뭉쳤다 — 해시가 반대로 떨어졌다면 공격 데이터 84% 가 검증으로 빠졌다 → 행 단위 group |
 | 4 | 8 | `fingerprint crosses validation/train` | `네, 맞습니다.` 류가 KDPII(양 분할)와 PolyGuard 에 같이 있었다 → 공격 풀에서 PII 학습 문장 제거(`--blocked-other-task`) |

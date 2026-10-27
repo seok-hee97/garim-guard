@@ -2623,7 +2623,7 @@ unknown         0.xxx      0.xxx         69   ← prose 폴백 경로 검증
 
 | 브리프 요구 | 충족 방식 |
 |---|---|
-| 참고 솔루션 SecureBridge류 | 같은 범주(프롬프트 DLP)이되 **온프렘·오픈소스·검사 전용**으로 좁힘. 시장 분석(SecureBridge 기능 분해, 국내 8개 제품 비교 — **오탐률 공개 0건**, 규제 앵커 6종)은 커밋 `74e1ae7` 이전의 `docs/plan/MARKET_RESEARCH.md`에 있다. 구현 착수 시 정리하며 삭제했고 결론만 §9에 승계했다 |
+| 참고 솔루션 SecureBridge류 | 같은 범주(프롬프트 DLP)이되 **온프렘·오픈소스·검사 전용**으로 좁힘. 시장 분석(SecureBridge 기능 분해, 국내 8개 제품 비교 — **오탐률 공개 0건**, 규제 앵커 6종)은 커밋 `c4b4050` 이전의 `docs/plan/MARKET_RESEARCH.md`에 있다. 구현 착수 시 정리하며 삭제했고 결론만 §9에 승계했다 |
 | 개발언어 Python | 전 스택 Python (ONNX Runtime·llama.cpp 바인딩) |
 | **프로그램은 온디바이스 모델** | L0 규칙 + L1 소형 모델 + L2 로컬 LLM 전부 로컬. **외부 통신 0을 패킷 캡처로 증명** |
 | **Google 모델 선호 (gemma4)** | §4.1에 **충돌을 먼저 드러냈다** — Gemma 4는 분류 헤드가 없고, 분류 가능한 Gemma 파생(EmbeddingGemma·T5Gemma 2)은 Apache 2.0이 아니다. L1은 PII·ATK 공동 백본 `skt/A.X-Encoder-base`로 고정했고, **교사는 Gemma 4 E2B (`google/gemma-4-E2B-it`, Apache-2.0 · gated 아님)**를 병행한다(§6.2.2). L2의 한국어 Gemma 4 가드레일은 라이선스·독립 검증 미완료로 비활성이다. A.X 최종 채택은 W1 ONNX RSS·지연 게이트를 통과해야 한다 |

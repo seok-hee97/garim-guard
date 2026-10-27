@@ -5,7 +5,7 @@ Copyright 2026 Garim contributors
 
 ── 이전 저작물 고지 ────────────────────────────────────────
 이 저장소의 이전 프로젝트 SafeAgent-KR(`src/`, `eval/`, `data/`, `scripts/`,
-`report/`)은 `legacy-safeagent` 브랜치에 있다. 커밋 `9cdb4d7`까지 **MIT License**로
+`report/`)은 `legacy-safeagent` 브랜치에 있다. 커밋 `d143f2b`까지 **MIT License**로
 배포됐고, 그 시점까지의 배포본에 대한 MIT 허가는 철회되지 않는다. `main` 에는 그
 코드가 없다.
 

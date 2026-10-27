@@ -44,7 +44,7 @@ from garim.training.teachers import load_teacher_policy
 
 # 이 위를 넘으면 두 번째 표가 첫 번째 표를 그대로 따라 하는 셈이라 검증이 아니다.
 RUBBER_STAMP_THRESHOLD = 0.95
-# `make_teacher_input.py` 가 분할별로 남기는 사이드카. 25a3528 에서 한 파일이 둘로 갈렸다.
+# `make_teacher_input.py` 가 분할별로 남기는 사이드카. 4e23aca 에서 한 파일이 둘로 갈렸다.
 DEFAULT_GOLD = (
     "data/corpus/attack-generator-gold-train.json",
     "data/corpus/attack-generator-gold-validation.json",
@@ -147,7 +147,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"teachers not defined by {args.policy}: {sorted(unknown)}")
     # ★ 교사 풀은 생성기 행보다 크다 — PolyGuard·deepset 은 생성기 라벨이 없다. 초판은
     #   교사 산출물이 gold 와 **정확히** 같은 ID 를 덮어야 한다고 요구해서, 풀이 커진 뒤
-    #   (25a3528) 6b 단계가 GPU 교사 실행 직후 `extra=17,787` 로 멈추게 돼 있었다.
+    #   (4e23aca) 6b 단계가 GPU 교사 실행 직후 `extra=17,787` 로 멈추게 돼 있었다.
     #   요구할 것은 둘이다 — 교사끼리 같은 행을 봤는가, 생성기 행을 하나도 빠뜨리지 않았는가.
     gold_ids = set(gold)
     coverage = {name: set(rows) for name, rows in loaded.items()}
