@@ -124,7 +124,7 @@ python train/benchmark_l1.py --model-dir train/artifacts/l1-onnx --output train/
 | 꼬리말 번호가 라벨 구간을 알려 줬다 | 라벨과 무관한 난수 순열 |
 | INT8 이 VNNI 없는 x86 에서 int16 포화로 깨졌다 | `quantize_joint_onnx` 가 `reduce_range=True` |
 | onnxruntime 이 컨테이너 CPU 할당량을 넘는 스레드를 잡았다 | `OnnxL1Backend` 가 `GARIM_L1_THREADS` → cgroup 할당량 순으로 스레드 결정 |
-| HF 업로드가 Xet 경로에서 30KB/s 였다 | `HF_HUB_DISABLE_XET=1`(LFS) — 같은 회선에서 844KB/s |
+| HF 업로드가 Xet 경로에서 30KB/s 였다 | `tools/hf_publish.py` 가 LFS(`HF_HUB_DISABLE_XET=1`)로 올린다 — 같은 회선에서 844KB/s. 공개 · 비공개 갈래(합성 주민번호 파일은 비공개)도 이 스크립트가 정한다 |
 
 `tests/test_training_onnx_roundtrip.py` 는 고정 자산 없이 작은 인코더 · 토크나이저로 torch 모델 → ONNX →
 QInt8 → `OnnxL1Backend` 전 구간을 검증한다. 계약 검증이며 정확도 · 지연 측정이 아니다.

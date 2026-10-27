@@ -39,3 +39,4 @@ report/
 *.bak
 ~$*
 TEMP.md
+.hf-staging/
