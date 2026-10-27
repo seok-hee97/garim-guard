@@ -146,6 +146,11 @@ def quantize_joint_onnx(source: str | Path, destination: str | Path) -> Path:
             model_output=str(destination_path),
             weight_type=QuantType.QInt8,
             per_channel=True,
+            # ★ AVX2 · VNNI 없는 x86(Zen2 · Zen3 · Ice Lake 이전 Intel)에서 onnxruntime 의
+            #   U8S8 행렬곱은 `vpmaddubsw` 의 int16 포화로 값이 깨진다. RunPod EPYC 7452 에서
+            #   R1 · R2 INT8 이 FP32 와 33행 중 17~22행 다른 판정을 냈다(Mac 은 2행).
+            #   7비트 가중치(reduce_range)면 0행이었다.
+            reduce_range=True,
         )
     return destination_path
 
