@@ -10,6 +10,67 @@
 | Qwen3Guard-**Gen** 4B | ❌ | Stream → Gen-0.6B → **Gen-4B** — 아래 참조. bf16 약 9GB |
 | R1/R2 gradient 학습 | ❌ | MPS 가 matmul 에서 죽는다. CUDA 가 필요하다 |
 
+## ★ R2 — 2차 학습 (2026-10-27 준비 완료, 아직 안 돌림)
+
+무엇을 바꾸고 무엇으로 판정하는지는 [PREREG_L1_R2.md](PREREG_L1_R2.md) 에 학습 전에 고정했다.
+`runpod_pipeline.py` 는 이제 R2 경로다(R1 은 커밋 `e59e43c`). 아래 R1 절차와 다른 점만 적는다.
+
+**올리는 것이 둘 늘었다** — 저장소 밖 파일이지만 재생성하려면 GPU 가 다시 든다.
+
+| 로컬 → pod 같은 경로 | 왜 |
+|---|---|
+| `data/runpod/2026-10-27/corpus/attack-teacher-input.jsonl` · `teacher-{kanana,gemma4,qwen3guard_gen}.jsonl` | 6a 가 R1 교사 산출물 중 **ID 와 텍스트 sha256 이 둘 다 같은** 행을 재사용한다 — 17,734행(PolyGuardMix 17,220 · deepset 514). 교사를 새로 돌리는 것은 R2 합성 2,466행뿐이다. 교사 산출물에는 텍스트가 없고, 입력 파일은 공개 데이터와 식별자 없는 합성 공격문이다 |
+| `train/artifacts/l1-onnx/` 의 `garim_l1.int8.onnx` · `labels.json` · `tokenizer.json` · `tokenizer_config.json` | PREREG §5 — R1 을 R2 와 **같은 기계·같은 세션**에서 다시 잰 값이 판정 기준이다 |
+
+```
+1   python train/download_assets.py --execute
+2   python train/prepare_corpora.py --ack-sensitive-synthetic-identifiers --polyguard-limit 20000
+    (위 두 묶음을 scp)
+3~10 python train/runpod_pipeline.py --device cuda --train
+```
+
+대조용 해시(로컬 리허설, 2026-10-27) — 안 맞으면 학습하지 않는다. 새 평가 셋 넷의 해시는
+PREREG §9 에 있다.
+
+```
+9b2a343999143eaf9ccaf3c2733dd7b0f374f798f6d248862d7e7e70fc4f6ab0  data/merged/pii-train.jsonl
+439bd43945ebec79a7f11c025c67f622606214ed5347b71a430cec2abf422eec  data/merged/pii-validation.jsonl
+9f12d8307083e87b7d7e25a802f84979327ecd6b4eff40d069a76a7374c9655e  data/corpus/attack-teacher-input-r2.jsonl
+```
+
+로컬 리허설은 2b~7 을 그대로, 8~10 은 Qwen 항목을 뺀 임시 models manifest 로 통과했다(로컬 Qwen
+자산이 0.6B 라 8단계 자산 drift 검사에 걸린다 — R1 때와 같은 로컬 전용 실패). 평가 봉인 9개 파일
+17,115행, preflight ok, 학습 dry-run 64창.
+
+**11 — R2 판정.** seed 는 `train/artifacts/l1-r2/three-seed-report.json` 에서 같은 규칙으로 고른다.
+R1(`l1-onnx`)과 R2(`l1-r2-onnx`)를 **같은 명령으로 둘 다** 잰다.
+
+```
+S=<고른 seed>
+python train/export_l1.py --encoder-dir models/pinned/l1_ax_encoder \
+  --checkpoint train/artifacts/l1-r2/seed-$S/joint_l1.pt --output-dir train/artifacts/l1-r2-onnx
+python train/evaluate_l1.py --model-dir train/artifacts/l1-r2-onnx --baseline-model-file garim_l1.fp32.onnx \
+  --evaluation-manifest data/evaluation-input-manifest-r2.json --output train/artifacts/r2/l1-eval.json \
+  $(for f in pii-synthetic-test attack-synthetic-r2-test t4-r2-test t4-prime-r2-test attack-external-gold-test \
+      kdpii-test klue_eval-test bc_pii_augmented_negative-test pii-negative-r2-test; \
+    do printf -- '--input data/corpus/%s.jsonl ' $f; done)
+for M in l1-onnx l1-r2-onnx; do
+  python -m bench.r2_eval --l1-model-dir train/artifacts/$M --output train/artifacts/r2/$M-r2-eval.json   # O2·O3·O4·S4
+  python -m bench.l1_product_path --l1-model-dir train/artifacts/$M --output train/artifacts/r2/$M-product-path.json \
+    --input data/corpus/kdpii-test.jsonl --input data/corpus/klue_eval-test.jsonl \
+    --input data/corpus/bc_pii_augmented_negative-test.jsonl                                              # O3·O4
+  python -m bench.run_axis_b --benchmark data/raw/KoreanGuardrail/benchmark.jsonl --judge garim-l1 \
+    --l1-model-dir train/artifacts/$M --output train/artifacts/r2/$M-axis-b.json                          # O1·S1
+  python -m bench.run_axis_b --benchmark data/raw/KoreanGuardrail/benchmark.jsonl --sample 600 --judge garim-l1 \
+    --l1-model-dir train/artifacts/$M --output train/artifacts/r2/$M-axis-b-600.json                      # S5
+done
+python train/benchmark_l1.py --model-dir train/artifacts/l1-r2-onnx --output train/artifacts/r2/l1-bench.json
+```
+
+가져올 것: `train/artifacts/l1-r2/` · `l1-r2-onnx/` · `r2/`, `data/training-input-manifest-r2.json` ·
+`data/evaluation-input-manifest-r2.json`, `data/corpus/teacher-*-r2.jsonl` · `data/corpus/resolved-r2/`,
+`data/teacher_agreement-r2.json`, pod 로그.
+
 ## ★ 올리는 것은 저장소뿐이다
 
 코퍼스도 모델도 올리지 않는다. 둘 다 **재생성·재다운로드가 결정적**이기 때문이다.

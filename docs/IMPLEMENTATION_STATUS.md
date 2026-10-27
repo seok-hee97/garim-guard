@@ -17,7 +17,7 @@
 | 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | deepset 번역본 적용 |
 | 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
 | 번역 | **완료** | deepset 662행 — Gemini 3.8 Flash 50 + Claude 612(한도 초과로 전환, 행별 `method`), `train/translations/`, `deepset-ko-{train,test}` 적용 | — |
-| 교사·수동 라벨링 | **완료(RTX 3090, 2026-10-27)** | 교사 3종 × 19,157행(기권 0) — kanana · Gemma 4 E2B · **Qwen3Guard-Gen-4B**(0.6B 가 한국어 탈옥을 못 봐 교체). 클래스별 2표 합의 14,020 수용 / 5,137 폐기(감사 기록) | 하드 네거티브 보존 규칙(RESULTS_L1 §5-②) — 다음 학습 전 사전 등록 |
+| 교사·수동 라벨링 | **완료(RTX 3090, 2026-10-27)** | 교사 3종 × 19,157행(기권 0) — kanana · Gemma 4 E2B · **Qwen3Guard-Gen-4B**(0.6B 가 한국어 탈옥을 못 봐 교체). 클래스별 2표 합의 14,020 수용 / 5,137 폐기(감사 기록) | R2 — 생성기 행 합의 규칙(PREREG C3) 구현 완료, 새 합성 2,466행 교사 실행 |
 | L1 공동 학습 | **완료 — 3 seed × 5 epoch** | bf16, micro-batch 16×2. 검증 hmean 0.896 / **0.922** / 0.918 → seed 37 | SYSTEM_LEAK 75 · JAILBREAK 132 학습 행 — 다음 학습에서 보강 |
 | 내보내기·평가 | **완료** | QInt8 152MB · 양자화 저하 −0.0002 · 봉인 test 17,146행 · 외부 KoreanGuardrail 0.342/0.007 · TAB · 제품 경로 PII(`bench/l1_product_path.py`) — [RESULTS_L1.md](RESULTS_L1.md) | 노트북 지연 재측정(pod CPU 값만 있음) |
 | L2 | **구현 · Gemma 4 E2B 판정기 연결** | `garim/detect/l2.py` — 루프백 llama-server, 교사와 같은 정책 프롬프트, 3-스트림 분리, 파싱 실패 warn+degraded. 고정 revision → Q8_0 → Q4_K_M GGUF | interactive 에스컬레이션(§6.4.6 W1 게이트), kanana L2-fast |
@@ -29,8 +29,10 @@
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
 현재 단계는 **첫 L1 학습·평가 완료**다(2026-10-27). 교사 3종 합의, seed 37 ONNX QInt8,
-봉인 test·외부 벤치 수치가 있다 — [RESULTS_L1.md](RESULTS_L1.md). 남은 것은 노트북 지연 재측정,
-가중치 공개 라이선스 검토, 그리고 RESULTS_L1 §5 결함을 고치는 **다음 학습의 사전 등록**이다.
+봉인 test·외부 벤치 수치가 있다 — [RESULTS_L1.md](RESULTS_L1.md). RESULTS_L1 §5 결함을 고치는 **R2** 는
+사전 등록([PREREG_L1_R2.md](PREREG_L1_R2.md)) · 구현 · 새 홀드아웃 고정 · R1 기준선 · 로컬 리허설까지
+끝났고 RunPod 실행만 남았다([RUNPOD.md](RUNPOD.md) 첫 절). 그 밖에 남은 것은 노트북 지연 재측정과
+가중치 공개 라이선스 검토다.
 
 ## 구현된 구성요소
 
