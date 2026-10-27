@@ -230,15 +230,18 @@ def _require_local_corpus(*paths: str) -> None:
         pytest.skip(f"로컬 코퍼스 없음: {missing[0]}")
 
 
-def test_default_gold_matches_the_sidecars_the_pipeline_writes() -> None:
-    """기본값이 25a3528 이전 파일 이름을 가리키고 있었다 — 6b 는 `--gold` 를 안 준다.
+def test_default_gold_matches_the_r1_sidecars_and_r2_passes_its_own() -> None:
+    """기본값이 25a3528 이전 파일 이름을 가리키고 있었다(R1 의 6b 는 `--gold` 를 안 줬다).
 
-    `train/runpod_pipeline.py` 5단계(`make_teacher_input.py --gold`)가 쓰는 이름과 같아야 한다.
+    R2 는 사이드카 이름에 `-r2` 를 붙이므로 6b·7 이 그 경로를 명시적으로 넘긴다 — 기본값에
+    기대면 6b 가 R1 사이드카로 R2 교사 산출물을 재서 일치도가 조용히 틀린다.
     """
     from bench.teacher_agreement import DEFAULT_GOLD
 
     pipeline = Path("train/runpod_pipeline.py").read_text(encoding="utf-8")
-    assert 'f"attack-generator-gold-{split}.json"' in pipeline
+    assert 'f"attack-generator-gold-r2-{split}.json"' in pipeline
+    assert '*teacher_args, *gold_args' in pipeline
+    assert '*generator_args, "--output-dir"' in pipeline
     assert DEFAULT_GOLD == tuple(
         f"data/corpus/attack-generator-gold-{split}.json" for split in ("train", "validation")
     )

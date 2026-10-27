@@ -85,6 +85,7 @@ class TeacherDecision:
     label: AttackLabel | None
     status: Literal["accepted", "review"]
     votes: dict[AttackLabel, int]
+    reason: str | None = None
 
 
 def load_teacher_policy(path: str | Path = "train/teachers.yaml") -> TeacherPolicy:
@@ -97,8 +98,19 @@ def load_teacher_policy(path: str | Path = "train/teachers.yaml") -> TeacherPoli
 
 
 def resolve_teacher_label(
-    predictions: dict[str, TeacherPrediction], policy: TeacherPolicy
+    predictions: dict[str, TeacherPrediction],
+    policy: TeacherPolicy,
+    *,
+    generator_label: AttackLabel | None = None,
 ) -> TeacherDecision:
+    """클래스별 2표 합의. `generator_label` 은 생성기가 만든 행에만 준다(PREREG_L1_R2 C3).
+
+    ★ R1 에서 2표 합의가 생성기 정상문 두 문장을 통째로 폐기했다 — 교사 한쪽의 과탐이
+      불일치가 되고, 불일치는 폐기라 학생이 그 문장을 NONE 으로 한 번도 못 봤다(RESULTS_L1
+      §5-②). 정상이 되도록 쓴 행이므로 생성기가 NONE 에 한 표를 더한다. 공격 쪽은 투표하지
+      않는다 — 자작 공격이 교사 검증을 우회하면 안 된다. 대신 교사 합의가 생성기 라벨과
+      다르면 폐기한다. 은닉 때문에 교사가 못 읽은 자작 공격이 NONE 으로 학습되던 자리다.
+    """
     votes: dict[AttackLabel, int] = {label: 0 for label in ATTACK_LABELS}
     for teacher_name, prediction in predictions.items():
         teacher = policy.teachers.get(teacher_name)
@@ -109,9 +121,13 @@ def resolve_teacher_label(
             and prediction.confidence >= policy.minimum_confidence
         ):
             votes[prediction.label] += 1
+    if generator_label == "NONE":
+        votes["NONE"] += 1
 
     best_count = max(votes.values())
     winners = [label for label, count in votes.items() if count == best_count]
     if best_count < policy.minimum_votes or len(winners) != 1:
-        return TeacherDecision(None, "review", votes)
+        return TeacherDecision(None, "review", votes, "no_consensus")
+    if generator_label is not None and winners[0] != generator_label:
+        return TeacherDecision(None, "review", votes, "generator_conflict")
     return TeacherDecision(winners[0], "accepted", votes)

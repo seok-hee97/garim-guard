@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -82,7 +82,9 @@ def resolve_teacher_corpus(
     policy: TeacherPolicy,
     *,
     validation_percent: int = 10,
+    generator_labels: Mapping[str, AttackLabel] | None = None,
 ) -> tuple[list[CorpusRecord], list[CorpusRecord], list[dict[str, object]]]:
+    """`generator_labels` 는 생성기 사이드카(`attack-generator-gold-*.json`)다 — 그 행만 C3 규칙."""
     if not 0 <= validation_percent < 100:
         raise ValueError("validation_percent must be in [0, 100)")
     accepted: list[CorpusRecord] = []
@@ -105,6 +107,7 @@ def resolve_teacher_corpus(
                 f"{teacher}: {len(extra)} prediction IDs are not in the teacher pool"
             )
 
+    generator_labels = generator_labels or {}
     for record in materialized:
         if record.task != "attack" or record.attack_label is not None:
             raise ValueError(f"{record.id}: teacher pool must contain unlabeled attack rows")
@@ -123,10 +126,12 @@ def resolve_teacher_corpus(
             _validate_soft_targets(record.id, teacher, spec, artifact)
             row_artifacts[teacher] = artifact
 
+        generator_label = generator_labels.get(record.id)
         if missing:
             decision_label = None
             status = "review"
             votes = {label: 0 for label in ATTACK_LABELS}
+            reason: str | None = "missing_teacher"
         else:
             decision = resolve_teacher_label(
                 {
@@ -134,8 +139,10 @@ def resolve_teacher_corpus(
                     for name, item in row_artifacts.items()
                 },
                 policy,
+                generator_label=generator_label,
             )
             decision_label, status, votes = decision.label, decision.status, decision.votes
+            reason = decision.reason
 
         audit.append(
             {
@@ -143,6 +150,8 @@ def resolve_teacher_corpus(
                 "status": status,
                 "label": decision_label,
                 "votes": votes,
+                "reason": reason,
+                "generator_label": generator_label,
                 "missing_teachers": missing,
                 "predictions": {
                     name: {

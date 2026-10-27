@@ -32,9 +32,23 @@ def main() -> int:
             "§6.2.2 가 금지한 것은 NONE 흡수이지 폐기가 아니다 — 폐기 건수는 감사에 남는다."
         ),
     )
+    parser.add_argument(
+        "--generator-gold",
+        action="append",
+        default=[],
+        help=(
+            "생성기 라벨 사이드카(id → 라벨 JSON). 그 행만 PREREG_L1_R2 C3 규칙 — 생성기 NONE 은 "
+            "한 표, 생성기 공격은 교사 합의가 같을 때만 채택"
+        ),
+    )
     args = parser.parse_args()
 
     records = load_jsonl(args.input)
+    generator_labels: dict[str, str] = {}
+    for path in args.generator_gold:
+        for record_id, label in json.loads(Path(path).read_text(encoding="utf-8")).items():
+            if generator_labels.setdefault(record_id, label) != label:
+                raise ValueError(f"{record_id}: generator gold files disagree")
     policy = load_teacher_policy(args.policy)
     artifact_paths: dict[str, str] = {}
     for entry in args.teacher:
@@ -59,6 +73,7 @@ def main() -> int:
         artifacts,
         policy,
         validation_percent=args.validation_percent,
+        generator_labels=generator_labels,  # type: ignore[arg-type]
     )
     validate_corpus(accepted)
     output = Path(args.output_dir)
@@ -80,6 +95,7 @@ def main() -> int:
         json.dumps(
             {
                 "human_review": not args.drop_review,
+                "generator_rule": bool(generator_labels),
                 "accepted": len(accepted),
                 "unresolved": len(review),
                 "unresolved_path": str(review_path),

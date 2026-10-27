@@ -209,3 +209,26 @@ def test_teacher_resolution_rejects_prediction_ids_outside_pool() -> None:
             },
             load_teacher_policy(),
         )
+
+
+def test_generator_sidecar_applies_only_to_its_rows_and_is_audited() -> None:
+    rows = [
+        CorpusRecord(id=f"row-{name}", task="attack", text=f"설정 화면을 여는 방법 {name}",
+                     source="fixture", split="train", group_id=f"g-{name}")
+        for name in ("generator", "public")
+    ]
+    artifacts = {
+        "kanana": {row.id: _artifact(row.id, "kanana", "NONE") for row in rows},
+        "gemma4": {row.id: _artifact(row.id, "gemma4", "SYSTEM_LEAK") for row in rows},
+        "qwen3guard_gen": {row.id: _artifact(row.id, "qwen3guard_gen", "NONE") for row in rows},
+    }
+    accepted, review, audit = resolve_teacher_corpus(
+        rows, artifacts, load_teacher_policy(), validation_percent=0,
+        generator_labels={"row-generator": "NONE"},
+    )
+    assert [record.id for record in accepted] == ["row-generator"]
+    assert accepted[0].attack_label == "NONE"
+    assert [record.id for record in review] == ["row-public"]
+    by_id = {row["id"]: row for row in audit}
+    assert by_id["row-generator"]["generator_label"] == "NONE"
+    assert by_id["row-public"]["reason"] == "no_consensus"

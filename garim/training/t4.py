@@ -180,15 +180,24 @@ def generate_t4(holdout: Sequence[CorpusRecord]) -> list[CorpusRecord]:
                     )
                 )
                 index += 1
+    rows.extend(_benign_cells(benign, "t4", index))
+    return rows
+
+
+def _benign_cells(
+    benign: Sequence[CorpusRecord], prefix: str, start: int, *, record_family: bool = False
+) -> list[CorpusRecord]:
     # benign 은 은닉 벡터별로 100씩 — 같은 변환을 정상문에 걸어야 §7.1.1 의 FPR 이
     # "이 벡터에서 과탐하는가" 를 잰다. 정상문을 변환 없이 두면 벡터별 FPR 이 아니다.
+    rows: list[CorpusRecord] = []
+    index = start
     for code, technique in T4_HIDINGS:
         cell = f"NONE:{code}"
         for position in range(CELL_SIZE):
             base, text, applied = _mutate(benign, position, technique, benign=True)
             rows.append(
                 _emit(
-                    "t4",
+                    prefix,
                     index,
                     text,
                     "NONE",
@@ -197,12 +206,35 @@ def generate_t4(holdout: Sequence[CorpusRecord]) -> list[CorpusRecord]:
                         "attack_code": code,
                         "hiding": applied,
                         "base_id": base.id,
+                        # R1 T4 는 바이트 단위로 재현돼야 하므로 R2 호출에서만 적는다.
+                        **({"family": base.template_id} if record_family else {}),
                         "latin_seeded": technique == HOMOGLYPH,
                     },
                 )
             )
             index += 1
     return rows
+
+
+def generate_t4_benign(
+    holdout: Sequence[CorpusRecord], *, prefix: str = "t4r2"
+) -> list[CorpusRecord]:
+    """정상 7셀 × 100 = 700 — PREREG_L1_R2 의 `t4-r2-test`.
+
+    R2 는 공격 문장을 새로 쓰지 않으므로 공격 홀드아웃이 없다(PREREG §8). 공격 21셀은 만들 수
+    없고, 정상 셀만 만든다 — O2(정상 FPR)가 이것으로 판정한다. 셀의 독립 표본 수는 행 수가
+    아니라 `meta.family` 의 고유 수다.
+    """
+    benign = []
+    for record in holdout:
+        if record.split != "test":
+            raise ValueError(f"{record.id}: T4 must be built from the held-out split only")
+        if record.attack_label != "NONE":
+            raise ValueError(f"{record.id}: R2 holdout must contain benign rows only")
+        benign.append(record)
+    if not benign:
+        raise ValueError("holdout lacks benign base text")
+    return _benign_cells(benign, prefix, 0, record_family=True)
 
 
 # ── T4′ 축 밖 슬라이스 — 보조 헤드 A·B 전용 ─────────────────────────────
@@ -285,7 +317,9 @@ def distinct_bases_per_cell(rows: Sequence[CorpusRecord]) -> dict[str, int]:
     return {cell: len(ids) for cell, ids in sorted(bases.items())}
 
 
-def generate_t4_prime(holdout: Sequence[CorpusRecord]) -> list[CorpusRecord]:
+def generate_t4_prime(
+    holdout: Sequence[CorpusRecord], *, prefix: str = "t4p", record_family: bool = False
+) -> list[CorpusRecord]:
     """로마자 200 + 존댓말 200. 각 절반이 음성이라 보조 헤드가 임계를 배울 수 있다."""
     pool = [record for record in holdout if record.split == "test"]
     if len(pool) < CELL_SIZE:
@@ -304,7 +338,7 @@ def generate_t4_prime(holdout: Sequence[CorpusRecord]) -> list[CorpusRecord]:
             text = transform(base.text, position) if positive else base.text
             rows.append(
                 _emit(
-                    "t4p",
+                    prefix,
                     index,
                     text,
                     base.attack_label or "NONE",
@@ -313,6 +347,7 @@ def generate_t4_prime(holdout: Sequence[CorpusRecord]) -> list[CorpusRecord]:
                         "attack_code": code,
                         positive_field: 1.0 if positive else 0.0,
                         "base_id": base.id,
+                        **({"family": base.template_id} if record_family else {}),
                     },
                 )
             )
