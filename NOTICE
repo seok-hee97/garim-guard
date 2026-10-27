@@ -22,7 +22,7 @@ https://huggingface.co/datasets/deepset/prompt-injections)의 한국어 번역�
 (Gemini 3.8 Flash 50행 · Claude 612행). 원문은 저장소에 포함하지 않는다.
 
 ── 모델 · 데이터 고지 ──────────────────────────────────────
-학습된 가중치와 데이터는 이 저장소에 없다 — Hugging Face 의 `cycloevan/safeagent-kr`
-(model · dataset)에 있다. 가중치의 라이선스는 코드(Apache-2.0)와 따로 정하며, 학습에
-KLUE-NER(CC-BY-SA-4.0)가 쓰였다는 사실과 출처는 docs/MODEL_CARD_L1.md 에 적었다.
+학습된 가중치와 데이터는 이 저장소에 없다 — Hugging Face 의 `cycloevan/garim-guard`
+(model · dataset)에 있다. L1 가중치는 **CC-BY-SA-4.0** 으로 배포한다 — 학습에 쓴
+KLUE-NER(CC-BY-SA-4.0)의 ShareAlike 를 따른다. 학습 데이터 출처는 docs/MODEL_CARD_L1.md 에 적었다.
 L1 백본은 skt/A.X-Encoder-base(Apache-2.0), L2 판정기는 google/gemma-4-E2B-it 이다.

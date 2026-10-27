@@ -33,8 +33,8 @@
 ([PREREG_L1_R2.md](PREREG_L1_R2.md))대로 학습·판정했고, 오탐은 거의 없앴지만 외부 공격 탐지(O1)와
 KLUE 이름 재현율(O4)이 통과선에 못 미쳐 **채택하지 않았다**([RESULTS_L1_R2.md](RESULTS_L1_R2.md)). 그 측정 중
 INT8 이 VNNI 없는 x86 에서 깨지는 결함을 찾아 배포 INT8 을 `reduce_range` 판으로 바꿨다. 모델 · 데이터는
-HF 비공개 저장소 `cycloevan/safeagent-kr`(model · dataset)에 있다. 남은 것은 노트북 지연 재측정, 가중치 공개
-라이선스 검토, R3(새 사전 등록 — SYSTEM_LEAK 보강 · 검증 셋 교체) 여부 결정이다.
+HF `cycloevan/garim-guard`(model · dataset — L1 가중치 CC-BY-SA-4.0)에 있다. 남은 것은 노트북 지연 재측정과
+R3(새 사전 등록 — SYSTEM_LEAK 보강 · 검증 셋 교체) 여부 결정이다.
 
 ## 구현된 구성요소
 
@@ -403,8 +403,8 @@ OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 �
 ## 학습 후에만 채울 항목
 
 2026-10-27 채웠다 — [RESULTS_L1.md](RESULTS_L1.md) §1·§3·§4·§8, 모델 카드는
-[MODEL_CARD_L1.md](MODEL_CARD_L1.md). 남은 것은 **기준 머신(노트북) 지연·RSS** 와 **가중치 공개
-라이선스 검토**다.
+[MODEL_CARD_L1.md](MODEL_CARD_L1.md). 남은 것은 **기준 머신(노트북) 지연·RSS** 다. 가중치 라이선스는 CC-BY-SA-4.0 으로 정했다
+(2026-10-28, [MODEL_CARD_L1.md](MODEL_CARD_L1.md)).
 
 - seed별 checkpoint와 선택 근거
 - FP32/QInt8 PII character recall/F1과 공격 macro recall/F1/FPR

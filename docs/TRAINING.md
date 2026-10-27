@@ -3,7 +3,7 @@
 가림 L1(공유 인코더 + PII · 공격 · 보조 헤드)을 처음부터 다시 만드는 절차다. GPU 가 드는 단계(교사
 3종 추론 · 학습)의 실행 기록과 실제로 겪은 문제는 [RUNPOD.md](RUNPOD.md), 결과는
 [RESULTS_L1.md](RESULTS_L1.md) · [RESULTS_L1_R2.md](RESULTS_L1_R2.md) 에 있다. 학습된 가중치만 필요하면
-다시 만들 필요 없이 Hugging Face `cycloevan/safeagent-kr` 에서 받는다(README).
+다시 만들 필요 없이 Hugging Face `cycloevan/garim-guard` 에서 받는다(README).
 
 ## 0. 원칙
 

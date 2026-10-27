@@ -2,7 +2,7 @@
 language: [ko]
 library_name: onnxruntime
 base_model: skt/A.X-Encoder-base
-license: other
+license: cc-by-sa-4.0
 tags: [token-classification, prompt-injection, pii, korean]
 ---
 
@@ -30,7 +30,7 @@ tags: [token-classification, prompt-injection, pii, korean]
   `garim_l1.fp32.onnx`(+ `.data`, 595MB) · 토크나이저 · `labels.json`. 아래 수치를 낸 원래 INT8 은
   `garim_l1.int8.u8s8.onnx`(`a0e39349…`)로 남겼다 — 새 판으로 KoreanGuardrail 0.342 / 0.007 · KDPII
   0.979 / 0.977 · bc 음성 오탐 63행(원래 62)이 재현됐다
-- 저장: HF `cycloevan/safeagent-kr`(model, 비공개) `l1/r1/`
+- 저장: HF `cycloevan/garim-guard`(model) `l1/r1/`
 
 ## 학습 데이터와 고지
 
@@ -47,8 +47,11 @@ tags: [token-classification, prompt-injection, pii, korean]
 (`data/evaluation-input-manifest.json`). PII 병합 sha256 `0d62d35e…`(train) · `213d9685…`(validation),
 교사 입력 `fc305d71…`.
 
-KLUE-NER의 CC-BY-SA-4.0 학습 사실과 출처를 명시합니다. 가중치 라이선스에 대한
-법적 결론은 공개 전 별도로 검토하며 이 문서는 ShareAlike 전파 여부를 단정하지 않습니다.
+**가중치 라이선스: CC-BY-SA-4.0.** 학습 데이터에 KLUE-NER(CC-BY-SA-4.0)가 들어 있다. 학습된 가중치가 그
+데이터의 2차적 저작물인지는 법적으로 정리되지 않았지만, ShareAlike 가 전파된다고 보는 보수적 해석을 따랐다
+(KLUE 팀의 `klue/bert-base` 도 CC-BY-SA-4.0 이다). 상업적 이용 · 수정 · 재배포가 가능하고, 출처를 표시하며, 가중치를
+고쳐 배포하면 같은 라이선스로 배포한다. 코드는 Apache-2.0, L2 GGUF 는 원 모델(`google/gemma-4-E2B-it`)의
+라이선스를 따른다.
 
 ## 교사
 

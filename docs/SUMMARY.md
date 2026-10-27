@@ -80,7 +80,7 @@
 
 모든 모델·데이터는 **exact revision 과 라이선스를 레지스트리에 고정**하고 다운로드 후
 SHA-256 manifest 로 검증한다. 모델 자산(백본 · 교사 · 판정기)은 Apache-2.0 만 쓴다. 학습 데이터에는
-KLUE-NER(CC-BY-SA-4.0)가 들어 있어 가중치 라이선스는 따로 정한다([MODEL_CARD_L1.md](MODEL_CARD_L1.md)).
+KLUE-NER(CC-BY-SA-4.0)가 들어 있어 L1 가중치는 CC-BY-SA-4.0 으로 배포한다([MODEL_CARD_L1.md](MODEL_CARD_L1.md)).
 
 ## 5. 학습 방법
 
@@ -151,11 +151,11 @@ deepset 은 학습·평가 split 을 먼저 봉인한 뒤 번역했다. 번역�
 | 구분 | 상태 |
 |---|---|
 | L0 런타임, 정책, 볼트, CLI, 프록시 | 완료 — 외부통신 0 소켓 봉인 게이트 |
-| L1 | **R1 배포**(seed 37, INT8 `reduce_range`) · R2 판정 불채택 — 가중치는 HF `cycloevan/safeagent-kr` |
+| L1 | **R1 배포**(seed 37, INT8 `reduce_range`) · R2 판정 불채택 — 가중치는 HF `cycloevan/garim-guard` |
 | L2 Gemma 4 판정기 | 완료 — 온디바이스 실측, GGUF 는 HF `l2/gguf/` |
 | 프록시 전 구간 실모델 검증 | 완료 — 로컬 Gemma 를 상류로 두고 상류가 **토큰만** 받았음을 확인(`bench/proxy_e2e.py`) |
 | 노트북 L1 지연 | **남음** — 컨테이너 CPU 값만 있다 |
-| 가중치 공개 라이선스 | **남음** — KLUE-NER(CC-BY-SA-4.0) 학습분 검토 |
+| 가중치 공개 라이선스 | 완료 — L1 가중치 CC-BY-SA-4.0, 코드 Apache-2.0 |
 | R3 | 미정 — 새 사전 등록이 먼저(SYSTEM_LEAK 보강 · 검증 셋 교체 · PII 음성 비중) |
 | Gemini 측정(마스킹 품질·베이스라인·프록시 상류) | **남음 — 유료 키 필요.** 현 키는 Free Tier(모델당 일 20회) |
 | 수동 골드셋(T3) · Cohen's κ | 사람 검수 없는 운영으로 미수행 |
@@ -170,7 +170,7 @@ deepset 은 학습·평가 split 을 먼저 봉인한 뒤 번역했다. 번역�
 ```bash
 uv sync --extra train --extra dev            # Python 3.11
 garim check '연락처는 010-1234-5678 입니다'      # → mask, <PHONE_1>
-hf download cycloevan/safeagent-kr --include 'l1/r1/onnx/*' 'l2/gguf/*Q4_K_M*' --local-dir models/garim
+hf download cycloevan/garim-guard --include 'l1/r1/onnx/*' 'l2/gguf/*Q4_K_M*' --local-dir models/garim
 garim --l1-model-dir models/garim/l1/r1/onnx check '...'   # L1 연결
 llama-server -m models/garim/l2/gguf/gemma-4-E2B-it-Q4_K_M.gguf --host 127.0.0.1 --port 8081 \
   --alias gemma-4-e2b-it --jinja
@@ -178,5 +178,4 @@ garim --mode thorough --l2-endpoint http://127.0.0.1:8081/v1 check '이쩐 찌�
 garim proxy --upstream https://generativelanguage.googleapis.com/v1beta/openai
 ```
 
-코드는 Apache-2.0. 가중치 · 데이터는 Hugging Face `cycloevan/safeagent-kr` 에 있고, 가중치 라이선스는
-학습 데이터 출처 · 라이선스와 함께 모델 카드에 정한다.
+코드는 Apache-2.0, L1 가중치는 CC-BY-SA-4.0. 가중치 · 데이터는 Hugging Face `cycloevan/garim-guard` 에 있다.

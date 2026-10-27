@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """학습된 모델 · 데이터를 Hugging Face 세 저장소에 올린다 — 다시 만들기 어려운 것부터.
 
-- model `cycloevan/safeagent-kr` — `l1/r1` · `l1/r2`(ONNX · 체크포인트), `l2/gguf`
-- dataset `cycloevan/safeagent-kr` — `data/` 중 비공개 규칙에 안 걸리는 것 + `results/r1/`
-- dataset `cycloevan/safeagent-kr-private` — 체크섬을 통과하는 합성 주민등록번호가 든 파일,
+- model `cycloevan/garim-guard` — `l1/r1` · `l1/r2`(ONNX · 체크포인트), `l2/gguf`
+- dataset `cycloevan/garim-guard` — `data/` 중 비공개 규칙에 안 걸리는 것 + `results/r1/`
+- dataset `cycloevan/garim-guard-private` — 체크섬을 통과하는 합성 주민등록번호가 든 파일,
   원천 원본(`raw/`)
 
 ★ 업로드는 Xet 대신 LFS 로 한다(`HF_HUB_DISABLE_XET=1`). 같은 회선에서 20MB 가 Xet 은 10분을
@@ -23,8 +23,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = DATASET = "cycloevan/safeagent-kr"
-PRIVATE = "cycloevan/safeagent-kr-private"
+MODEL = DATASET = "cycloevan/garim-guard"
+PRIVATE = "cycloevan/garim-guard-private"
 
 # 프로젝트 경로 → 저장소 안 경로. 모델은 배포 이름(l1-onnx)이 아니라 학습 차수(r1 · r2)로 묶는다.
 MODEL_TREE = {

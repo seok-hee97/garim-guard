@@ -90,8 +90,8 @@ R2 판정은 R1 · R2 를 각자의 FP32 에서 `reduce_range` 로 다시 양자
 - **pod → Mac 다운로드 약 0.8MB/s, Mac → pod 업로드는 다운로드와 겹치면 단일 연결 20KB/s.** 152MB 를
   8조각으로 나눠 병렬 `scp` 하니 약 190KB/s 였다. 큰 파일은 pod 에서 만들 수 있으면 pod 에서 만든다
   (양자화는 기계가 달라도 바이트가 같다).
-- 회수물은 Mac `data/runpod/2026-10-27-r2/`(sha256 대조), 모델 · 데이터 전체는 HF 비공개 저장소
-  `cycloevan/safeagent-kr`(model · dataset)에 있다.
+- 회수물은 Mac `data/runpod/2026-10-27-r2/`(sha256 대조), 모델 · 데이터는 HF `cycloevan/garim-guard`(model · dataset,
+  합성 주민번호 파일과 원천은 비공개 `cycloevan/garim-guard-private`)에 있다.
 
 ## ★ 올리는 것은 저장소뿐이다
 
@@ -161,7 +161,7 @@ fc305d710e93efbd4dd59b49e1d8b792de6f1b2f1782f19fb468c62c456f4b9d  data/corpus/at
 
 ```
 pip install uv
-git clone https://github.com/seok-hee97/nipa-google-project.git && cd nipa-google-project
+git clone https://github.com/seok-hee97/garim-guard.git && cd garim-guard
 uv sync --python 3.11 --extra train --extra dev
 export HF_TOKEN=...
 nvidia-smi        # CUDA Version >= 13.0 인지 확인

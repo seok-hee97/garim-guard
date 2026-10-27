@@ -142,8 +142,8 @@ pod 는 64코어가 보이지만 cgroup 할당량이 8.5코어였다. onnxruntim
 | `train/artifacts/l1-r2-onnx/` | FP32 · INT8(`reduce_range`, 판정에 쓴 것) · INT8 원본(`.u8s8`) |
 | `train/artifacts/l1-onnx/` | **배포 R1** — INT8 이 `reduce_range` 판으로 바뀌었다 |
 | `data/runpod/2026-10-27-r2/` | 교사 원출력 · 합의 · 봉인 manifest · pod 로그 · `final/train/artifacts/r2/`(판정표 `verdict.json`, 지표 원본) |
-| HF `cycloevan/safeagent-kr`(model, 비공개) | 위 모델 전부 · Gemma 4 L2 GGUF. 구 SafeAgent-KR 은 `legacy-safeagent` 브랜치 |
-| HF `cycloevan/safeagent-kr`(dataset, 비공개) | `data/` 전체 · R1 결과 JSON |
+| HF `cycloevan/garim-guard`(model) | 위 모델 전부 · Gemma 4 L2 GGUF. 구 SafeAgent-KR 은 `legacy-safeagent` 브랜치 |
+| HF `cycloevan/garim-guard`(dataset) · `cycloevan/garim-guard-private` | `data/` · R1 결과 JSON. 합성 주민번호 파일 · 원천 원본은 비공개 저장소 |
 
 모든 회수 파일은 pod 와 sha256 을 대조했다. `data/` 에는 체크섬을 통과하는 합성 주민등록번호가 있어
 Git 밖에 둔다.
