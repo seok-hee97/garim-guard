@@ -1,6 +1,6 @@
 """Regression cover for the shipped confidentiality-marker recognizer.
 
-`docs/marker_probe.py` validates the §2.5 *scheme* with its own reference implementation,
+`docs/probes/marker_probe.py` validates the §2.5 *scheme* with its own reference implementation,
 so it kept reporting 100%/0% while `garim/detect/rules/markers.py` sat at 60%/40% with 22
 of the 25 dictionary terms missing. These tests call the shipped code.
 """

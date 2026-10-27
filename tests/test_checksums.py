@@ -46,7 +46,7 @@ def test_rrn_requires_date_sex_and_checksum() -> None:
 
 
 def _rrn_check_digit(front12: str) -> int:
-    """공표 알고리즘 — docs/checksum_probe.py:12-18 의 참조 구현과 동일.
+    """공표 알고리즘 — docs/probes/checksum_probe.py:12-18 의 참조 구현과 동일.
 
     이 테스트가 값을 **런타임에 생성**하는 이유: 체크섬 유효 주민번호는 실존 번호와
     우연히 일치할 수 있어(2세대 7.0e-3) DESIGN §5.3.5.1 이 저장소 커밋을 금지했다.

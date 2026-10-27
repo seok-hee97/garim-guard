@@ -4,11 +4,13 @@ Copyright 2026 Garim contributors
 이 저장소는 Apache License 2.0으로 배포된다 (LICENSE 참조).
 
 ── 이전 저작물 고지 ────────────────────────────────────────
-`src/`, `eval/`, `data/`, `scripts/`, `report/` 아래의 코드는 이 저장소의
-이전 프로젝트인 SafeAgent-KR의 산출물이고, 커밋 `9cdb4d7`까지 **MIT License**로
-배포됐다. 그 시점까지의 배포본에 대한 MIT 허가는 철회되지 않는다.
+이 저장소의 이전 프로젝트 SafeAgent-KR(`src/`, `eval/`, `data/`, `scripts/`,
+`report/`)은 `legacy-safeagent` 브랜치에 있다. 커밋 `9cdb4d7`까지 **MIT License**로
+배포됐고, 그 시점까지의 배포본에 대한 MIT 허가는 철회되지 않는다. `main` 에는 그
+코드가 없다.
 
-가림(`garim/`, `bench/`, `train/`, `docs/`)은 Apache License 2.0으로 배포된다.
+가림(`garim/`, `bench/`, `train/`, `tools/`, `tests/`, `docs/`)은 Apache License 2.0으로
+배포된다.
 Apache-2.0을 택한 이유는 특허 조항과, CredSweeper(MIT)·ONNX Runtime(MIT)·
 skt/A.X-Encoder-base(Apache-2.0) 임포트 결합이 전부 문제없기 때문이다.
 설계 근거는 docs/DESIGN.md §8.6.2에 있다.
@@ -18,3 +20,9 @@ skt/A.X-Encoder-base(Apache-2.0) 임포트 결합이 전부 문제없기 때문�
 https://huggingface.co/datasets/deepset/prompt-injections)의 한국어 번역이다.
 원 데이터의 라이선스(CC-BY-4.0)를 따르며, 행마다 `method` 필드에 번역 방법을 적었다
 (Gemini 3.8 Flash 50행 · Claude 612행). 원문은 저장소에 포함하지 않는다.
+
+── 모델 · 데이터 고지 ──────────────────────────────────────
+학습된 가중치와 데이터는 이 저장소에 없다 — Hugging Face 의 `cycloevan/safeagent-kr`
+(model · dataset)에 있다. 가중치의 라이선스는 코드(Apache-2.0)와 따로 정하며, 학습에
+KLUE-NER(CC-BY-SA-4.0)가 쓰였다는 사실과 출처는 docs/MODEL_CARD_L1.md 에 적었다.
+L1 백본은 skt/A.X-Encoder-base(Apache-2.0), L2 판정기는 google/gemma-4-E2B-it 이다.

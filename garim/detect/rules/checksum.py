@@ -29,7 +29,7 @@ def rrn_checksum_valid(value: str) -> bool:
     weights = (2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5)
     weighted = sum(int(digit) * weight for digit, weight in zip(number[:12], weights, strict=True))
     # ★ mod 11 을 빠뜨리면 진짜 주민번호의 89.5%를 통과시킨다.
-    #   초판이 `(11 - weighted) % 10` 이었다 — docs/checksum_probe.py:17 과 어긋났고,
+    #   초판이 `(11 - weighted) % 10` 이었다 — docs/probes/checksum_probe.py:17 과 어긋났고,
     #   그 결과 유효/무효 판정이 문자 그대로 뒤집혔다(무효를 block, 유효를 allow).
     #   tests/test_checksums.py 의 양성 단언이 이 회귀를 잡는다.
     #   ⚠️ 이 주석에 실제 번호 예시를 쓰지 마라 — tools/no_committed_pii.py 가 잡는다.

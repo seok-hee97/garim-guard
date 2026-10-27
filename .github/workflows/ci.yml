@@ -60,7 +60,7 @@ jobs:
           set -e
           for probe in checksum_probe fpr_probe josa_probe vault_probe \
                        normalize_probe offset_probe marker_probe roundtrip_probe; do
-            python "docs/${probe}.py"
+            python "docs/probes/${probe}.py"
           done
       # ★ 부록 A.3 의 두 프로브만 tiktoken 을 쓴다. 위 루프에 섞여 있어서
       #   "dependency-free" 라는 잡 이름 그대로 설치 없이 돌았고, 커밋 4b6d905
@@ -70,12 +70,12 @@ jobs:
       - name: Run tokenizer-dependent design probes (appendix A.3)
         run: |
           set -e
-          python docs/token_efficiency_probe.py
-          python docs/token_efficiency_fix.py
+          python docs/probes/token_efficiency_probe.py
+          python docs/probes/token_efficiency_fix.py
       - name: Assert interval-map baseline
-        run: python docs/offset_probe.py | grep -qE '^9/9 '
+        run: python docs/probes/offset_probe.py | grep -qE '^9/9 '
       - name: Assert generator-to-rule round trip
-        run: python docs/roundtrip_probe.py | grep -q '전건 통과'
+        run: python docs/probes/roundtrip_probe.py | grep -q '전건 통과'
 
   # ★ `dev` 는 pytest·ruff 뿐이라 `garim` 잡에서 torch 테스트가 통째로 skip 됐다.
   #   그 결과 JointL1Model·손실·엔진·ONNX 내보내기·OnnxL1Backend 가 로컬에서도

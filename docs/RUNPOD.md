@@ -155,19 +155,14 @@ fc305d710e93efbd4dd59b49e1d8b792de6f1b2f1782f19fb468c62c456f4b9d  data/corpus/at
 - **디스크 60GB 이상** — 고정 자산 약 17GB(교사 3종 15GB · 원천 데이터 2.5GB) + venv(torch·CUDA
   라이브러리) + 코퍼스·체크포인트·ONNX.
 - `HF_TOKEN` 이 필요하다(gated 아닌 저장소도 rate limit 때문에 있는 편이 낫다).
-- ⚠️ **기본 브랜치(`main`)는 구 프로젝트다.** 반드시 작업 브랜치를 받는다(2026-10-26 푸시됨).
-- ⚠️ **저장소는 비공개다.** pod 에서 clone 하려면 인증이 필요하다. 이 저장소 하나에 Contents
-  읽기 권한만 준 fine-grained 토큰을 만들어 `GITHUB_TOKEN` 으로 넣고, clone 직후 원격 URL 에서
-  토큰을 지운다(남겨 두면 `.git/config` 에 평문으로 남는다).
+- `main` 이 가림이다(2026-10-28 부터 — 이전 프로젝트는 `legacy-safeagent` 브랜치). 저장소가 비공개인
+  동안에는 pod 에 자격 증명을 남기지 않도록 **git bundle** 로 올린다(아래 "CUDA 12.8 pod" 절). 공개 후에는
+  그냥 clone 한다.
 
 ```
 pip install uv
-export GITHUB_TOKEN=...      # 읽기 전용, 이 저장소만
-git clone -b replan/genai-dlp-gateway \
-  "https://x-access-token:${GITHUB_TOKEN}@github.com/seok-hee97/nipa-google-project.git"
-cd nipa-google-project
-git remote set-url origin https://github.com/seok-hee97/nipa-google-project.git
-uv sync --extra train
+git clone https://github.com/seok-hee97/nipa-google-project.git && cd nipa-google-project
+uv sync --python 3.11 --extra train --extra dev
 export HF_TOKEN=...
 nvidia-smi        # CUDA Version >= 13.0 인지 확인
 ```
