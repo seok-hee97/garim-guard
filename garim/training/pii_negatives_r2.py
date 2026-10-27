@@ -24,6 +24,7 @@ import random
 import string
 from collections import defaultdict
 
+from garim.detect.rules import detect_common_pii, detect_kr_pii
 from garim.training.data import CorpusRecord, CorpusSpan, Split, validate_corpus
 from garim.training.hiding import (
     HANJA,
@@ -161,6 +162,17 @@ def _family_split(family: str) -> Split:
     return "validation" if bucket == 2 else "train"
 
 
+def _l0_silent(text: str) -> bool:
+    """L0 규칙이 PII 를 하나도 안 잡는가.
+
+    ★ 무작위 숫자는 10개 중 하나꼴로 사업자·법인번호 체크섬이나 Luhn 을 통과한다. L0 는 체크섬이
+      맞으면 문맥과 무관하게 잡도록 설계됐으므로(§3.2.3), 그런 음성은 L1 이 무엇을 배우든 제품
+      경로 오탐으로 남는다. R1 기준선에서 숫자 문맥 음성 test 의 4.6% 가 그랬고, 그러면 O3(≤ 2%)
+      는 통과할 수 없다. 이 범주가 재는 것은 L1 의 문맥 판단이므로 L0 가 잡는 모양은 뺀다.
+    """
+    return not (detect_kr_pii(text) + detect_common_pii(text))
+
+
 def _number(rng: random.Random, length: int, *, hyphen: bool) -> str:
     """음성 번호. 다른 PII 형식으로 읽힐 모양은 피한다 — 이 범주가 가르치려는 것은 문맥이다."""
     while True:
@@ -242,6 +254,8 @@ def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
             raise AssertionError(f"no numeric context family in split {split!r} to pair with")
         partner_family, partner_template = partners[pair_index % len(partners)]
         digits = _number(rng, rng.randint(10, 14), hyphen=False)
+        while not _l0_silent(partner_template.format(num=digits)):
+            digits = _number(rng, rng.randint(10, 14), hyphen=False)
         pair_id = f"pii2-acct-pair-{pair_index:04d}"
         start = template.index("{num}")
         positive = template.format(num=digits)
@@ -259,6 +273,8 @@ def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
     for local_index in range(NUMERIC_NEGATIVES - ACCOUNT_PAIRS):
         family, template = numeric[local_index % len(numeric)]
         number = _number(rng, rng.randint(8, 14), hyphen=local_index % 2 == 1)
+        while not _l0_silent(template.format(num=number)):
+            number = _number(rng, rng.randint(8, 14), hyphen=local_index % 2 == 1)
         records.append(
             _record(len(records), template.format(num=number), family,
                     "numeric_context_negative", extra={"paired": False})
@@ -270,17 +286,22 @@ def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
     for local_index in range(OBFUSCATED_NEGATIVES):
         family, template = obfuscated[local_index % len(obfuscated)]
         if family.startswith("pii-hash"):
-            text = template.format(
-                hex32=f"{rng.getrandbits(128):032x}",
-                hex40=f"{rng.getrandbits(160):040x}",
-                hex64=f"{rng.getrandbits(256):064x}",
-                b64=base64.b64encode(rng.randbytes(rng.randint(24, 48))).decode(),
-            )
+            text = ""
+            while not text or not _l0_silent(text):
+                text = template.format(
+                    hex32=f"{rng.getrandbits(128):032x}",
+                    hex40=f"{rng.getrandbits(160):040x}",
+                    hex64=f"{rng.getrandbits(256):064x}",
+                    b64=base64.b64encode(rng.randbytes(rng.randint(24, 48))).decode(),
+                )
             hiding = "none"
         else:
             text, hiding = _hidden(template, local_index // len(obfuscated))
         records.append(
             _record(len(records), text, family, "obfuscated_negative", extra={"hiding": hiding})
         )
+    noisy = [r.id for r in records if not r.spans and not _l0_silent(r.text)]
+    if noisy:
+        raise AssertionError(f"L0 fires on {len(noisy)} negative rows, e.g. {noisy[:3]}")
     validate_corpus(records)
     return records

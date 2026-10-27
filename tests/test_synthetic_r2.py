@@ -159,3 +159,23 @@ def test_r1_teacher_rows_are_reused_only_when_id_and_text_match(tmp_path: Path) 
     digest = hashlib.sha256(outputs["kanana"].read_bytes()).hexdigest()
     reuse_r1_teachers(current, source, outputs)  # 이미 있으면 건드리지 않는다
     assert hashlib.sha256(outputs["kanana"].read_bytes()).hexdigest() == digest
+
+
+def test_cluster_bootstrap_counts_families_not_rows() -> None:
+    from bench.r2_eval import cluster_bootstrap
+
+    # 한 family 가 행 100개를 가져도 표본은 family 둘이다.
+    units = [("a", 1.0, 1.0)] * 100 + [("b", 0.0, 1.0)] * 100
+    summary = cluster_bootstrap(units)
+    assert summary["value"] == 0.5 and summary["families"] == 2
+    assert summary["ci95"][0] == 0.0 and summary["ci95"][1] == 1.0
+    assert cluster_bootstrap(units) == summary  # seed 고정
+
+
+def test_negatives_never_trip_the_rule_layer(pii: list[CorpusRecord]) -> None:
+    """L0 가 잡는 음성은 L1 과 무관한 제품 경로 오탐이라 O3 를 판정 불가로 만든다."""
+    from garim.detect.rules import detect_common_pii, detect_kr_pii
+
+    for record in pii:
+        if not record.spans:
+            assert not detect_kr_pii(record.text) + detect_common_pii(record.text), record.id

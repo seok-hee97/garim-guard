@@ -162,11 +162,44 @@ PolyGuardMix · deepset 행의 교사 산출물은 R1 것을 다시 쓴다 — *
 | 날짜 | 무엇을 | 왜 | 그때 R2 test 를 봤는가 |
 |---|---|---|---|
 | 2026-10-27 | **C2 공격 쪽을 뺀다.** 생성기 공격 행은 R1 템플릿(클래스당 3개 × 어미 4종)을 그대로 쓰고 C1 의 family 분할·자기 문장 로마자/존댓말만 적용한다. 공격 family 는 train · validation 에만 둔다. 그래서 `attack-synthetic-r2-test` · `t4-r2-test` · `t4-prime-r2-test` 는 정상 행만으로 만들고(O2 는 그대로 잰다), **S2(새 T4 공격 macro recall)는 재지 않는다** — 공격 재현율은 외부 셋(O1 · S1 · S3)으로만 본다. SYSTEM_LEAK 보강은 R3 로 미룬다(공개 데이터 재라벨 경로) | 공격 문장을 이 저장소에서 대량으로 새로 쓰지 않기로 했다 | 아니오 — R2 데이터 생성 전 |
+| 2026-10-27 | **C4 음성 생성기가 L0 규칙이 잡는 모양을 뺀다.** 숫자 문맥 · 낯선 문자 구성 음성 문장은 L0(`detect_kr_pii` · `detect_common_pii`)가 PII 를 하나도 안 잡을 때만 쓴다. 새 셋 sha256 과 R1 기준선은 이 생성기로 다시 만든다 | 처음 생성본으로 R1 기준선을 재 보니 숫자 문맥 음성 test 의 51행(4.6%)이 무작위 숫자가 우연히 사업자·법인번호 체크섬이나 Luhn 을 통과해 **L0** 에 잡혔다. L0 는 체크섬이 맞으면 문맥과 무관하게 잡도록 설계됐으므로 L1 이 무엇을 배우든 O3(≤ 2%)를 통과할 수 없다 — 판정 셋의 구성 결함이다 | 아니오 — R1 기준선만 봤다. R2 는 학습 전 |
 
 ## 9. 고정 기록
 
-R2 학습 전에 채운다 — 새 평가 셋의 sha256 과 R1 기준선 수치의 위치.
+2026-10-27, R2 학습 전. 생성 코드는 이 표를 담은 커밋의 `garim/training/synthetic_r2.py` ·
+`pii_negatives_r2.py` · `benign_bank.py` 이고, `train/runpod_pipeline.py` 2b 가 같은 바이트를 다시 만든다.
 
-| 파일 | 행 | family | sha256 |
-|---|---:|---:|---|
-| | | | |
+| 파일 (`data/corpus/`) | 행 | family | sha256 | |
+|---|---:|---:|---|---|
+| `attack-synthetic-r2-test` | 534 | 28 | `b0fbeb033934bb7db57062de3a5500b58cfefd37095a4da4e27b01cbdd112573` | 새로 |
+| `t4-r2-test` | 700 | 27 | `248cfb7157e4cbee2b71d42b942c376b0fa0be2b694ec6afc2294d069d227a8b` | 새로 |
+| `t4-prime-r2-test` | 400 | 28 | `2d176c584d87e79e52ec54b3daadf69dffb832f5e8085a76c30913776bfd2240` | 새로 |
+| `pii-negative-r2-test` | 1,912 | 23 | `f3a4065ebcbd66ebf4ca09d2efba212a8ddb9dd494faaee249b7625be7faced6` | 새로 |
+| `pii-synthetic-test` | 2,295 | — | `ac79a53426134965e2f326ba95eadf58564e76c7e8d55428b7932606aa9c6e2a` | R1 봉인과 같음 |
+| `attack-external-gold-test` | 116 | — | `48831b61584a11edca0178038dbc9faba336f0169417a76af78f179e0e81728a` | R1 봉인과 같음 |
+| `kdpii-test` | 5,438 | — | `c76533d60df4a8b342f0d91765b459658b66614d135febca7f859f747e177cf1` | R1 봉인과 같음 |
+| `klue_eval-test` | 5,000 | — | `9055f7da9eecdeca941c62d379fe29ac58896813507da49219beffa54d494798` | R1 봉인과 같음 |
+| `bc_pii_augmented_negative-test` | 720 | — | `184b2c1791e650abbd4605825267cea4c6b50e144e13bad831a38c718f932f00` | R1 봉인과 같음 |
+
+### R1 기준선
+
+R1 = seed 37 · ONNX QInt8 · `config/policy.yaml`. 새 셋은 `python -m bench.r2_eval` 로 쟀다(구간은
+family 단위 bootstrap 95%). §5 대로 **판정의 비교 기준은 pod 에서 R2 와 같은 세션에 다시 잰 R1** 이고,
+아래 Mac 수치는 R2 학습 전에 고정해 두는 닻이다. O2 의 통과선(≤ 0.05)은 이 기준선을 보기 전에
+등록됐다.
+
+| # | 지표 | R1 | 기계 |
+|---|---|---|---|
+| O1 | KoreanGuardrail 탐지율 / 과방어율 | 0.342 / 0.007 | pod x86 |
+| O2 | `t4-r2-test` 정상 FPR | **0.370** [0.286, 0.448] · 27 family | Mac arm64 |
+| O3 | `pii-negative-r2-test` 음성 오탐 행 | **0.533** [0.352, 0.716] · 20 family — 숫자 문맥 0.645 · 낯선 문자 0.309 | Mac arm64 |
+| O3 | bc-pii-ko 보강 음성 오탐 행 | 0.086 (62/720) | pod x86 |
+| O4 | KDPII P / R · KLUE PERSON R | 0.980 / 0.977 · 0.932 | pod x86 |
+| O4 | 계좌 짝 양성 R | 1.000 · 3 family | Mac arm64 |
+| S1 | KoreanGuardrail A2 탐지율 | 0.146 | pod x86 |
+| S4 | `t4-r2-test` PII 오탐 행 | 0.013 [0.000, 0.044] | Mac arm64 |
+| S5 | KoreanGuardrail 600 표본 | 0.327 / 0.003 | Mac arm64 |
+
+O2 0.370 은 R1 의 T4 정상 FPR(0.169)의 두 배다 — 학습에서 본 적 없는 정상 문장에서 R1 이 이만큼
+과탐한다. 셀별로 어절 쪼개기 0.93 · 동형 문자 0.60 · 한자 0.38 · 자모 0.37 · 영폭 0.31 · b64 0.00 ·
+된소리 0.00.
