@@ -231,7 +231,7 @@ def _require_local_corpus(*paths: str) -> None:
 
 
 def test_default_gold_matches_the_r1_sidecars_and_r2_passes_its_own() -> None:
-    """기본값이 4e23aca 이전 파일 이름을 가리키고 있었다(R1 의 6b 는 `--gold` 를 안 줬다).
+    """기본값이 cdb56fe 이전 파일 이름을 가리키고 있었다(R1 의 6b 는 `--gold` 를 안 줬다).
 
     R2 는 사이드카 이름에 `-r2` 를 붙이므로 6b·7 이 그 경로를 명시적으로 넘긴다 — 기본값에
     기대면 6b 가 R1 사이드카로 R2 교사 산출물을 재서 일치도가 조용히 틀린다.

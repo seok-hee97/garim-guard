@@ -1,6 +1,6 @@
 # 가림 측정 결과 — L1 학습 후
 
-> 기준일: 2026-10-27 · RunPod RTX 3090(24GB) · 코드 `1cd63d1`(학습) / `a74e077`(외부 벤치)
+> 기준일: 2026-10-27 · RunPod RTX 3090(24GB) · 코드 `6a4b841`(학습) / `7f9cab4`(외부 벤치)
 > 짝 문서: [RESULTS.md](RESULTS.md) — **학습 전** 수치. 이 문서는 그 위에 L1 을 얹은 결과만 다룬다.
 > **갱신(2026-10-27)** — 2차 학습(R2)은 채택되지 않았다([RESULTS_L1_R2.md](RESULTS_L1_R2.md)). 그 측정 중
 > INT8 이 VNNI 없는 x86 에서 깨지는 결함을 찾아 배포 INT8 을 `reduce_range` 판으로 바꿨다. 이 문서의
@@ -54,8 +54,8 @@ T4·합성 test 는 일반화 지표가 아니다), 12자리 운송장번호를 
 | L1 학습 3 seed × 5 epoch | 약 2시간 40분 · epoch 당 약 10분 | bf16 autocast, micro-batch 16 × 2 = 논리 32, 8.4GB |
 | 봉인 test 평가(INT8 + FP32) | 약 50분 | pod CPU 16코어 |
 
-첫 실행 둘은 멈췄다 — Gemma 교사가 범주 이름 대신 설명을 옮겨 적었고(`5f8f50f`), KDPII span 하나가
-앞 공백을 물어 학습 첫 줄에서 창 정렬이 실패했다(`0c014a7`). 두 번째는 교사 3종을 다 돌린 뒤에야
+첫 실행 둘은 멈췄다 — Gemma 교사가 범주 이름 대신 설명을 옮겨 적었고(`d9090e7`), KDPII span 하나가
+앞 공백을 물어 학습 첫 줄에서 창 정렬이 실패했다(`ebbb7a0`). 두 번째는 교사 3종을 다 돌린 뒤에야
 드러났기 때문에 PII 학습·검증 전체를 교사보다 먼저 인코딩하는 3b 단계를 넣었다.
 
 ## 2. 교사 — Gen-0.6B 를 Gen-4B 로 바꿨다
@@ -309,10 +309,10 @@ L1 시간 예산만 60초로 푼 벤치 정책으로 했고 degraded 문서는 0
 `l1/r1/onnx/` · `l1/r1/checkpoints/`, HF dataset `cycloevan/garim-guard` 의 `results/r1/`(평가 JSON) ·
 `runpod/2026-10-27/`(교사 원출력 · 감사 · manifest · pod 로그)다.
 
-R1 은 학습 코드 커밋 `1cd63d1` 에서 재현한다 — 지금 `main` 의 `runpod_pipeline.py` 는 R2 경로다.
+R1 은 학습 코드 커밋 `6a4b841` 에서 재현한다 — 지금 `main` 의 `runpod_pipeline.py` 는 R2 경로다.
 
 ```bash
-git checkout 1cd63d1
+git checkout 6a4b841
 python train/runpod_pipeline.py --device cuda --train          # 3b ~ 10
 bash data/runpod/2026-10-27/logs/step11.sh                     # RUNPOD.md 11 (dataset 의 같은 경로)
 python -m bench.run_axis_b --benchmark data/raw/KoreanGuardrail/benchmark.jsonl \

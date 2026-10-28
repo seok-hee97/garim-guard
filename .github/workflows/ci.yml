@@ -63,7 +63,7 @@ jobs:
             python "docs/probes/${probe}.py"
           done
       # ★ 부록 A.3 의 두 프로브만 tiktoken 을 쓴다. 위 루프에 섞여 있어서
-      #   "dependency-free" 라는 잡 이름 그대로 설치 없이 돌았고, 커밋 3daeaed
+      #   "dependency-free" 라는 잡 이름 그대로 설치 없이 돌았고, 커밋 859182f
       #   이후 이 잡은 계속 exit 1 이었다. 의존성이 있는 것을 없는 척하지 않는다.
       - name: Install tokenizer probe dependency
         run: python -m pip install 'tiktoken>=0.7,<1'
