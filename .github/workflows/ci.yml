@@ -8,13 +8,18 @@ on:
 
 jobs:
   garim:
-    name: garim core (unit, lint, privacy)
+    name: garim core (unit, lint, privacy) — Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    # 유니코드 판이 Python 마이너마다 다르다 — 정규화 골든을 판마다 돌린다(DESIGN §8.6.2).
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
         run: python -m pip install -e '.[dev]'

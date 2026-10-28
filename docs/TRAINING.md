@@ -19,7 +19,7 @@
 ## 1. 환경과 자산
 
 ```bash
-uv sync --extra train --extra dev          # Python 3.11
+uv sync --python 3.11 --extra train --extra dev   # 학습 재현은 3.11
 python train/preflight.py --stage implementation
 
 python train/download_assets.py            # 계획만 출력 — revision · 저장 위치 확인

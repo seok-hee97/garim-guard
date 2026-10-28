@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from importlib.resources import files
 from pathlib import Path
 from typing import Literal
 
@@ -163,12 +164,25 @@ class PolicyConfig(BaseModel):
     custom_patterns: list[CustomPattern] = Field(default_factory=list)
 
 
+# 패키지에 들어 있는 내장 프로필 — pip 설치에는 저장소의 `config/` 가 없다.
+BUILTIN_PROFILES = frozenset({"strict"})
+
+
 def load_policy(path: str | Path | None = None) -> PolicyConfig:
+    """정책 파일을 읽는다. `"strict"` 처럼 내장 프로필 이름도 받는다.
+
+    같은 이름의 파일이 있으면 파일이 이긴다 — 사용자가 둔 것을 내장값으로 덮지 않는다.
+    """
     if path is None:
         return PolicyConfig()
     policy_path = Path(path)
     try:
-        payload = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+        if not policy_path.exists() and str(path) in BUILTIN_PROFILES:
+            source = files("garim.policy").joinpath("profiles", f"{path}.yaml")
+            text = source.read_text(encoding="utf-8")
+        else:
+            text = policy_path.read_text(encoding="utf-8")
+        payload = yaml.safe_load(text)
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f"cannot load policy {policy_path}: {exc}") from exc
     if not isinstance(payload, dict):

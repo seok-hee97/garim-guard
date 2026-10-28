@@ -41,7 +41,8 @@ HF `cycloevan/garim-guard`(model · dataset — L1 가중치 CC-BY-SA-4.0)에 �
 
 ### 1. 재현 가능한 환경과 자산 게이트
 
-- Python 3.11과 학습 의존성을 [pyproject.toml](../pyproject.toml), [uv.lock](../uv.lock)에 고정했다.
+- 의존성을 [pyproject.toml](../pyproject.toml), [uv.lock](../uv.lock)에 고정했다. 런타임은 Python 3.11 ~ 3.14(CI 가
+  판마다 돈다), 학습 재현은 3.11 이다(DESIGN §8.6.2).
 - [models.yaml](../train/models.yaml)은 L1 A.X 백본과 교사 3종을 exact revision으로 고정한다.
 - [sources.yaml](../train/sources.yaml)은 12개 학습·평가·값 사전 소스의 용도와 라이선스를 고정한다.
 - [download_assets.py](../train/download_assets.py)는 기본적으로 계획만 출력하며 `--execute`가
@@ -357,7 +358,7 @@ OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 �
   차단은 SSE 가 아니라 400 JSON(OpenAI SDK 는 스트림을 읽기 전에 상태로 예외를 낸다). 로컬
   Gemma 를 상류로 둔 `bench/proxy_e2e.py --stream` 에서 상류는 토큰만 받았고 클라이언트가 이어
   붙인 문자열은 원문으로 복원됐다. 대가는 첫 글자 지연(응답 전체만큼).
-- **엄격 프로필 `config/policy.strict.yaml`.** 기본은 공격 `warn` 유지(L1 오탐률 측정 전).
+- **엄격 프로필 `garim/policy/profiles/strict.yaml`(`--policy strict`).** 기본은 공격 `warn` 유지(L1 오탐률 측정 전).
   게이트웨이로 막아야 하는 배치용 — 인젝션(직접·간접)·시스템 프롬프트 유출·기밀 표식 `block`,
   탈옥·일반 고엔트로피는 `warn`. L1 평가에서 공격 오탐률이 §7.1.1 목표(≤ 0.02) 안이면 그때
   기본값 상향을 다시 정한다.

@@ -11,19 +11,20 @@ import unicodedata
 
 import pytest
 
-from garim.normalize.chain import _CONFUSABLE, CONFUSABLES_UNICODE_VERSION, normalize
+from garim.normalize.chain import _CONFUSABLE, VERIFIED_UNICODE_VERSIONS, normalize
 
 
-def test_runtime_unicode_matches_the_pinned_confusables_version() -> None:
-    """① NFKC 와 ③ homoglyph 가 같은 Unicode 판을 써야 한다.
+def test_runtime_unicode_is_one_of_the_verified_versions() -> None:
+    """① NFKC 와 ③ homoglyph 가 서로를 무효화하지 않는다고 확인한 판에서만 돈다.
 
-    다른 판이면 두 단계가 서로를 무효화한다 — ① 이 이미 접은 문자를 ③ 이 또 바꾸거나,
-    ③ 이 기대한 문자가 ① 에서 다른 것으로 접힌다. §3.2.4 의 구간 맵 골든 테스트도
-    NFKC 확장 문자 집합(1,237자)에 매달려 있다.
+    다른 판이면 ① 이 이미 접은 문자를 ③ 이 또 바꾸거나, ③ 이 기대한 문자가 ① 에서 다른
+    것으로 접힐 수 있다. §3.2.4 의 구간 맵 골든 테스트도 NFKC 확장 문자 집합(1,237자)에
+    매달려 있다. ★ 처음에는 14.0.0 하나와 같은지만 봤다 — 3.12 ~ 3.14 의 판은 전 코드
+    포인트 비교 뒤 목록에 넣었다(`garim/normalize/chain.py` 주석).
     """
-    assert unicodedata.unidata_version == CONFUSABLES_UNICODE_VERSION, (
-        f"런타임 unidata {unicodedata.unidata_version} 가 고정값 "
-        f"{CONFUSABLES_UNICODE_VERSION} 와 다르다 — §2.3.1 ③ 과 §3.2.4 골든을 같이 다시 떠라"
+    assert unicodedata.unidata_version in VERIFIED_UNICODE_VERSIONS, (
+        f"런타임 unidata {unicodedata.unidata_version} 는 검증하지 않은 판이다 — NFKC 를 "
+        "14.0.0 과 전 코드 포인트에서 비교하고 §2.3.1 ③ · §3.2.4 골든을 확인한 뒤 목록에 넣어라"
     )
 
 

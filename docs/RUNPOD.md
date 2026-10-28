@@ -136,8 +136,8 @@ fc305d710e93efbd4dd59b49e1d8b792de6f1b2f1782f19fb468c62c456f4b9d  data/corpus/at
 
 ## 환경
 
-- **Python 3.11** — `requires-python = ">=3.11,<3.12"` 이다. 3.12 이미지를 고르면 `uv sync`
-  가 거부한다.
+- **Python 3.11** — R1 · R2 는 3.11 에서 돌았고 재현도 3.11 로 한다. 실행 당시 `requires-python` 은
+  `">=3.11,<3.12"` 여서 3.12 이미지는 `uv sync` 가 거부했다(2026-10-28 부터 런타임은 3.11 ~ 3.14 허용).
 - **드라이버가 CUDA 13 을 지원하는 pod** — `uv.lock` 의 torch 2.13.0 은 `manylinux_2_28_x86_64`
   휠이고 CUDA 13 런타임(`nvidia-*-cu13`)을 끌고 온다. pod 의 `nvidia-smi` 가 `CUDA Version`
   13.0 이상을 보여야 한다. RunPod 생성 화면의 CUDA 버전 필터로 고른다. 아니면 torch 가 GPU 를
