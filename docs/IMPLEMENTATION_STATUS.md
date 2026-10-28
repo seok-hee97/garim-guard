@@ -1,6 +1,6 @@
 # 가림 구현 현황
 
-> 기준일: 2026-10-28 — R1 배포 · R2 판정(불채택) · GitHub · HF 공개 · PyPI `garim-guard` 0.1.2 (이전 판 2026-10-27)
+> 기준일: 2026-10-28 — R1 배포 · R2 판정(불채택) · GitHub · HF 공개 · PyPI `garim-guard` 0.1.3 (이전 판 2026-10-27)
 > 범위: 고정 자산 준비와 로컬 교사 추론을 포함한 현재 구현·실행 상태
 
 이 문서는 [DESIGN.md](DESIGN.md)의 기획을 현재 저장소 코드에 대응시킨 실행 현황이다.
@@ -13,7 +13,7 @@
 |---|---|---|---|
 | P0/L0 런타임 | **구현 완료** | 세그먼트, 가역 정규화, 규칙 탐지, 병합, 정책, 볼트, API/CLI | 실 운영 트래픽 성능 측정 |
 | L1 런타임 계약 | **구현 완료 · 학습 가중치로 확인** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드, `--l1-model-dir`, 프록시 스레드 간 공유. `train/artifacts/l1-onnx` 로 CLI 전 구간 통과(PERSON 마스킹 · 인젝션 classifier) | — |
-| 외부 모델 연결 | **구현 완료(main, 미출시)** | `--l1-backend` · `--l2-backend`(`모듈:함수` · `파일.py:함수`), `garim.backends.load_backend`, bench 의 `--l1-backend`, 예시 셋(`examples/backends/`) · 계약 문서([INTEGRATION.md](INTEGRATION.md)) | 실제 외부 NER · 분류기로 bench 측정 |
+| 외부 모델 연결 | **구현 완료(0.1.3)** | `--l1-backend` · `--l2-backend`(`모듈:함수` · `파일.py:함수`), `garim.backends.load_backend`, bench 의 `--l1-backend`, 예시 셋(`examples/backends/`) · 계약 문서([INTEGRATION.md](INTEGRATION.md)) | 실제 외부 NER · 분류기로 bench 측정 |
 | 모델·데이터 고정 | **구현·로컬 검증 완료** | 활성 자산 18개, revision/라이선스 레지스트리, 원격 tree/LFS 검증, exact 파일 manifest, `uv.lock` | 새 머신에서 동일 자산 재현 |
 | 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | — |
 | 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
