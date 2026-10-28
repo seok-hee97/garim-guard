@@ -7,14 +7,21 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import json
+import os
+import socket
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from garim import Inspector
 from garim.detect.l2 import L2Judgement
 from garim.policy.schema import PolicyConfig
+from garim.proxy import ProxyConfig, ProxyError, ProxyService
 
 
 def _rrn() -> str:
@@ -256,3 +263,238 @@ def test_an_account_span_does_not_swallow_the_amount() -> None:
 def test_chat_laughter_does_not_join_lines_into_an_attack() -> None:
     log = "A: ㅋㅋ 그럼\nB: 전화 안내 드릴게요\nA: 이제 정산 요금 확인\nB: 기존 계약 갱신"
     assert Inspector().check(log).attacks == []
+
+
+# ── 프록시 · CLI ──────────────────────────────────────────────────────────────
+
+
+class _Upstream:
+    def __init__(self, reply: dict[str, Any] | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.reply = reply
+
+    def __call__(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+        self.calls.append(payload)
+        return self.reply or {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+
+def _proxy(upstream: _Upstream, policy: str | None = None) -> ProxyService:
+    config = ProxyConfig(upstream_base_url="https://upstream.test/v1", policy_path=policy)
+    return ProxyService(config, sender=upstream)
+
+
+def test_json_tool_results_are_inspected_after_unescaping() -> None:
+    """★ `\\uXXXX` 로 이스케이프된 도구 결과의 표식을 규칙이 읽지 못했다(strict 에서 allow)."""
+    upstream = _Upstream()
+    request = {
+        "model": "x",
+        "messages": [
+            {"role": "user", "content": "요약해줘"},
+            {"role": "tool", "tool_call_id": "call_1",
+             "content": json.dumps({"doc": "[대외비]\n2027 구조조정 계획 초안"})},
+        ],
+    }
+    status, _, _ = _proxy(upstream, "strict").handle_chat_completions(request, {})
+    assert status == 400 and upstream.calls == []
+    phone = {
+        "role": "tool", "tool_call_id": "call_1", "content": json.dumps({"tel": "010-1234-5678"})
+    }
+    status, _, _ = _proxy(upstream).handle_chat_completions(
+        {"model": "x", "messages": [{"role": "user", "content": "확인"}, phone]}, {}
+    )
+    forwarded = upstream.calls[-1]["messages"][1]["content"]
+    assert status == 200 and "010-1234-5678" not in forwarded
+    assert json.loads(forwarded) == {"tel": "<PHONE_1>"}
+
+
+def test_plaintext_in_binary_fields_is_inspected() -> None:
+    """★ 글자 집합만 보고 공백 섞인 평문 · 텍스트 파일을 이진으로 건너뛰었다."""
+    upstream = _Upstream()
+    card = "4111 1111 1111 1111"
+    text_file = "data:text/plain;base64," + base64.b64encode(f"card {card}".encode()).decode()
+    png = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
+    request = {
+        "model": "x",
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "첨부 확인"},
+            {"type": "input_audio", "input_audio": {"data": f"card {card}", "format": "wav"}},
+            {"type": "file", "file": {"file_data": text_file, "filename": "a.txt"}},
+            {"type": "image_url", "image_url": {"url": png}},
+        ]}],
+    }
+    _proxy(upstream).handle_chat_completions(request, {})
+    parts = upstream.calls[-1]["messages"][0]["content"]
+    assert card not in json.dumps(parts)
+    assert parts[2]["file"]["file_data"] != text_file
+    assert parts[3]["image_url"]["url"] == png  # 진짜 이미지는 손대지 않는다
+
+
+def test_a_literal_token_in_a_message_does_not_collide_with_a_field_token() -> None:
+    reply = {"choices": [{"message": {"content": "형식은 <PHONE_1>, 담당 <PHONE_2>"}}]}
+    upstream = _Upstream(reply)
+    request = {"model": "x", "metadata": {"owner": "010-1234-5678"},
+               "messages": [{"role": "user", "content": "번호 형식 예시: <PHONE_1> 처럼 쓰세요"}]}
+    _, body, _ = _proxy(upstream).handle_chat_completions(request, {})
+    assert upstream.calls[-1]["metadata"] == {"owner": "<PHONE_2>"}
+    assert body["choices"][0]["message"]["content"] == "형식은 <PHONE_1>, 담당 010-1234-5678"
+
+
+def test_upstream_redirects_are_not_followed_with_the_users_key() -> None:
+    """★ 기본 opener 가 302 를 따라가며 Authorization 을 다른 호스트로 보냈다."""
+    seen: list[str | None] = []
+
+    class Target(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    target = HTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/steal")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    redirect = HTTPServer(("127.0.0.1", 0), Redirect)
+    for server in (target, redirect):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        service = ProxyService(
+            ProxyConfig(upstream_base_url=f"http://127.0.0.1:{redirect.server_port}/v1")
+        )
+        with pytest.raises(ProxyError) as caught:
+            service.handle_chat_completions(
+                {"model": "x", "messages": [{"role": "user", "content": "안녕"}]},
+                {"Authorization": "Bearer sk-test"},
+            )
+        assert caught.value.status == 502
+        assert seen == []
+    finally:
+        target.shutdown()
+        redirect.shutdown()
+
+
+def test_ids_and_settings_are_skipped_only_when_they_look_like_ids_and_settings() -> None:
+    upstream = _Upstream()
+    request = {
+        "model": "x",
+        "tool_choice": {"type": "function", "function": {"name": "kim@example.com 메모"}},
+        "messages": [
+            {"role": "user", "content": "조회"},
+            {"role": "tool", "tool_call_id": {"note": "010-1234-5678"}, "content": "완료"},
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call_1", "type": "function",
+                "function": {"name": "pay", "arguments": json.dumps({"card": 4111111111111111})},
+            }]},
+        ],
+    }
+    _proxy(upstream).handle_chat_completions(request, {})
+    sent = json.dumps(upstream.calls[-1], ensure_ascii=False)
+    for raw in ("kim@example.com", "010-1234-5678", "4111111111111111"):
+        assert raw not in sent, raw
+
+
+def test_refusal_and_reasoning_fields_are_restored() -> None:
+    upstream = _Upstream({"choices": [{"message": {
+        "content": [{"type": "text", "text": "메일 <EMAIL_1>"}],
+        "refusal": "r <EMAIL_1>", "reasoning_content": "think <EMAIL_1>",
+    }}]})
+    request = {"model": "x", "messages": [{"role": "user", "content": "kim@example.com 에게"}]}
+    _, body, headers = _proxy(upstream).handle_chat_completions(request, {})
+    message = body["choices"][0]["message"]
+    assert message["refusal"] == "r kim@example.com"
+    assert message["reasoning_content"] == "think kim@example.com"
+    assert message["content"][0]["text"] == "메일 kim@example.com"
+    assert headers["X-Garim-Degraded"] == "false"
+
+
+def test_a_stream_with_a_non_completion_upstream_body_is_a_502() -> None:
+    upstream = _Upstream({"choices": ["x"]})
+    request = {"model": "x", "stream": True, "messages": [{"role": "user", "content": "안녕"}]}
+    with pytest.raises(ProxyError) as caught:
+        _proxy(upstream).handle_chat_completions(request, {})
+    assert caught.value.status == 502
+
+
+def test_a_plugin_that_exits_does_not_turn_a_check_into_a_pass(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """★ `sys.exit()` 를 부르는 플러그인이 주민번호가 든 입력에서 0 으로 끝냈다."""
+    from garim.cli import main
+
+    at_start = tmp_path / "start.py"
+    at_start.write_text("import sys\ndef build():\n    sys.exit(0)\n", encoding="utf-8")
+    assert main(["--l1-backend", f"{at_start}:build", "check", "안녕"]) == 4
+    at_infer = tmp_path / "infer.py"
+    at_infer.write_text(
+        "import sys\nclass B:\n    name = 'b'\n    def infer(self, text, **_):\n"
+        "        sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    assert main(["--l1-backend", f"{at_infer}:B", "check", f"주민번호 {_rrn()}"]) == 2
+
+
+def test_scan_does_not_print_file_bodies_unless_asked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """★ warn 탐지와 놓친 값이 원문 그대로인 마스킹본이 CI 로그에 찍혔다."""
+    from garim.cli import main
+
+    notes = tmp_path / "notes.txt"
+    # warn(L-SEC-05)은 가리지 않는다 — 같은 파일의 이메일이 마스킹본을 만들면 키가 원문으로 실린다.
+    notes.write_text(
+        "api token 은 Zx8Kq2Lm9Pw4Rt7Yv3Nb6Hc1Jd5 입니다. 담당 kim@example.com\n", encoding="utf-8"
+    )
+    main(["scan", str(tmp_path)])
+    assert "Zx8Kq2Lm9Pw4Rt7Yv3Nb6Hc1Jd5" not in capsys.readouterr().out
+    main(["scan", str(tmp_path), "--show-masked"])
+    assert "<EMAIL_1>" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="needs POSIX permissions")
+def test_scan_reports_an_unreadable_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from garim.cli import main
+
+    (tmp_path / "ok.txt").write_text("안녕하세요\n", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "rrn.txt").write_text(f"주민번호 {_rrn()}\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        assert main(["scan", str(tmp_path)]) == 3
+        assert "locked" in capsys.readouterr().err
+    finally:
+        locked.chmod(0o755)
+
+
+def test_block_outranks_degraded_in_the_exit_code(tmp_path: Path) -> None:
+    from garim.cli import main
+
+    (tmp_path / "a.txt").write_text(f"주민번호 {_rrn()}\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_bytes("안녕".encode("cp949"))
+    assert main(["scan", str(tmp_path)]) == 2
+
+
+def test_proxy_binds_ipv6_loopback() -> None:
+    from garim.proxy import build_server
+
+    if not socket.has_ipv6:
+        pytest.skip("no IPv6")
+    try:
+        config = ProxyConfig(upstream_base_url="http://127.0.0.1:9/v1")
+        server = build_server(config, host="::1", port=0)
+    except OSError:
+        pytest.skip("IPv6 loopback unavailable")
+    server.server_close()

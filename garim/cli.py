@@ -124,6 +124,12 @@ def _build_parser() -> argparse.ArgumentParser:
     scan = subparsers.add_parser("scan", help="파일 또는 디렉터리 검사")
     scan.add_argument("path")
     scan.add_argument("--json", action="store_true", dest="as_json")
+    scan.add_argument(
+        "--show-masked",
+        action="store_true",
+        help="파일의 마스킹본을 출력한다. 기본은 탐지 목록만 — warn 탐지와 놓친 값은 원문 그대로라 "
+        "CI 로그에 남는다",
+    )
 
     # §1.1 세 번째 사용 방식 — 앱 코드를 고치지 않고 `base_url` 만 바꿔 끼운다.
     proxy = subparsers.add_parser("proxy", help="OpenAI 호환 로컬 프록시 실행")
@@ -158,16 +164,33 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _exit_code(result: CheckResult) -> int:
+    # ★ 전수 검토 — degraded(3)가 block(2)을 가려서, 2 에만 실패하는 게이트가 주민번호가 든
+    #   10만 자 입력 · 깨진 인코딩 파일이 섞인 디렉터리를 통과시켰다. block 이 먼저다.
+    if result.verdict == "block":
+        return 2
     if result.degraded:
         return 3
-    return {"allow": 0, "mask": 0, "warn": 1, "block": 2}[result.verdict]
+    return {"allow": 0, "mask": 0, "warn": 1}[result.verdict]
 
 
-def _print_result(result: CheckResult, *, as_json: bool, prefix: str | None = None) -> None:
+# 여러 결과를 합칠 때의 무게 — block(2) > degraded(3) > warn(1) > allow · mask(0).
+_EXIT_WEIGHT = {0: 0, 1: 1, 3: 2, 2: 3}
+
+
+def _heavier(left: int, right: int) -> int:
+    return left if _EXIT_WEIGHT[left] >= _EXIT_WEIGHT[right] else right
+
+
+def _print_result(
+    result: CheckResult, *, as_json: bool, prefix: str | None = None, show_masked: bool = True
+) -> None:
     if as_json:
         payload = result.public_dict()
         if prefix is not None:
             payload["path"] = prefix
+        if not show_masked:
+            payload.pop("masked_text", None)
+            payload.pop("masked_segments", None)
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return
     heading = f"{prefix}: " if prefix else ""
@@ -177,7 +200,7 @@ def _print_result(result: CheckResult, *, as_json: bool, prefix: str | None = No
             f"  {finding.code} segment={finding.segment_idx} span={finding.span} "
             f"confidence={finding.confidence:.2f} rule={finding.rule}"
         )
-    if result.masked_text is not None:
+    if show_masked and result.masked_text is not None:
         print(result.masked_text)
 
 
@@ -191,16 +214,34 @@ def _is_scan_target(relative: Path) -> bool:
     return not name.startswith(".") and Path(name).suffix.lower() in _TEXT_SUFFIXES
 
 
-def _iter_files(path: Path) -> list[Path]:
+def _iter_files(path: Path) -> tuple[list[Path], list[str], int]:
+    """검사할 파일, 읽지 못한 디렉터리, 형식 필터로 뺀 파일 수.
+
+    ★ 전수 검토 — `rglob` 은 열 수 없는 하위 디렉터리를 조용히 건너뛰어, 권한 없는 디렉터리의
+      주민번호 파일을 두고도 0 을 냈다. 읽지 못한 디렉터리는 검사하지 못한 것으로 알린다.
+    """
     if path.is_file():
-        return [path]
+        return [path], [], 0
     if not path.is_dir():
         raise ValueError(f"path does not exist: {path}")
-    return sorted(
-        candidate
-        for candidate in path.rglob("*")
-        if candidate.is_file() and _is_scan_target(candidate.relative_to(path))
-    )
+    files: list[Path] = []
+    errors: list[str] = []
+    excluded = 0
+
+    def unreadable(error: OSError) -> None:
+        errors.append(f"{error.filename}: {type(error).__name__}")
+
+    for directory, subdirectories, names in os.walk(path, onerror=unreadable):
+        subdirectories[:] = sorted(name for name in subdirectories if not name.startswith("."))
+        for name in names:
+            candidate = Path(directory) / name
+            if not candidate.is_file():
+                continue
+            if _is_scan_target(candidate.relative_to(path)):
+                files.append(candidate)
+            else:
+                excluded += 1
+    return sorted(files), errors, excluded
 
 
 def _windows(text: str, limit: int) -> list[tuple[int, str]]:
@@ -320,20 +361,28 @@ def main(argv: list[str] | None = None) -> int:
                 l1_backend=l1_backend,
                 l2_backend=l2_backend,
             )
+            # L2 는 thorough 에서만 돈다 — interactive 배너에 L2 를 적으면 거짓이다(전수 검토).
             layers = "+".join(
                 name
                 for name, present in (
                     ("L0", True),
                     ("L1", l1_backend is not None),
-                    ("L2", l2_backend is not None),
+                    ("L2", l2_backend is not None and args.mode == "thorough"),
                 )
                 if present
             )
+            bound_host, bound_port = server.server_address[:2]
+            display_host = f"[{bound_host}]" if ":" in str(bound_host) else bound_host
             print(
-                f"garim proxy: http://{args.host}:{args.port}/v1 -> {args.upstream} "
+                f"garim proxy: http://{display_host}:{bound_port}/v1 -> {args.upstream} "
                 f"(mode={args.mode}, layers={layers})",
                 file=sys.stderr,
             )
+            if l2_backend is not None and args.mode != "thorough":
+                print(
+                    "garim proxy: warning — L2 is configured but runs only with --mode thorough",
+                    file=sys.stderr,
+                )
             if args.host not in _LOOPBACK_HOSTS:
                 # 프록시는 인증 없이 받은 요청을 사용자의 Authorization 헤더째 상류로 보낸다.
                 print(
@@ -351,9 +400,16 @@ def main(argv: list[str] | None = None) -> int:
 
         highest = 0
         seen = 0
-        skipped: list[str] = []
         root = Path(args.path).resolve()
-        for path in _iter_files(Path(args.path)):
+        targets, unreadable, excluded = _iter_files(Path(args.path))
+        skipped: list[str] = [f"{entry} (directory)" for entry in unreadable]
+        if excluded:
+            print(
+                f"garim: {excluded} files not inspected — not a text type garim scans "
+                "(see README for the list)",
+                file=sys.stderr,
+            )
+        for path in targets:
             seen += 1
             if root.is_dir() and not path.resolve().is_relative_to(root):
                 # ★ 파일 심볼릭 링크를 따라 스캔 루트 밖(`../outside/private.conf`)을 읽고
@@ -373,11 +429,13 @@ def main(argv: list[str] | None = None) -> int:
                 skipped.append(f"{path}: {type(exc).__name__}")
                 continue
             result = _check_file(inspector, source, args.mode)
-            _print_result(result, as_json=args.as_json, prefix=str(path))
-            highest = max(highest, _exit_code(result))
+            _print_result(
+                result, as_json=args.as_json, prefix=str(path), show_masked=args.show_masked
+            )
+            highest = _heavier(highest, _exit_code(result))
         for entry in skipped:
             print(f"garim: skipped (not inspected) {entry}", file=sys.stderr)
-        if seen and seen == len(skipped):
+        if (seen or unreadable) and seen + len(unreadable) == len(skipped):
             # 파일은 있었는데 한 건도 검사하지 못했다 — 통과라고 말할 근거가 없다.
             print(
                 f"garim: inspected 0 of {seen} files; refusing to report success",
@@ -387,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
         if skipped:
             # ★ 일부만 읽은 경우는 0 이 나왔다. CP949 한글 파일 하나가 검사되지 않아도
             #   나머지가 깨끗하면 CI 게이트가 통과했다 — 검사가 불완전하면 degraded(3)다.
-            return max(highest, 3)
+            return _heavier(highest, 3)
         if not seen:
             print(f"garim: no files to inspect under {args.path}", file=sys.stderr)
         return highest

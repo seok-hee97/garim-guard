@@ -75,9 +75,17 @@ garim scan ./prompts
 소스에서 설치하려면 `git clone https://github.com/seok-hee97/garim-guard.git && cd garim-guard && pip install -e '.[l1]'`.
 정책 예시(`config/policy.yaml`) · 평가 하네스(`bench/`) · 학습 코드 실행은 소스 저장소가 필요하다.
 
-종료 코드는 `0` allow · mask, `1` warn, `2` block, `3` degraded(일부 파일을 읽지 못한 scan 포함), `4` 실행 오류
-(잘못된 인자, 정책 · 모델 로드 실패, 한 파일도 검사하지 못함)다 — `garim scan` 을 CI 게이트로 쓸 수 있다. 디렉터리 scan 은 숨은
-디렉터리를 건너뛰되 `.env` 파일은 검사한다.
+종료 코드는 다음과 같다. `garim scan` 을 CI 게이트로 쓸 수 있다.
+
+- `0` allow · mask
+- `1` warn
+- `2` block — degraded 보다 우선한다
+- `3` degraded — 일부 파일이나 디렉터리를 읽지 못한 scan 포함
+- `4` 실행 오류 — 잘못된 인자, 정책 · 모델 로드 실패, 한 파일도 검사하지 못함
+
+디렉터리 scan 은 숨은 디렉터리를 건너뛰되 `.env` 파일은 검사한다. 형식 필터로 뺀 파일 수는 알린다. 탐지 목록만
+출력하고, 파일의 마스킹본은 `--show-masked` 를 줄 때만 출력한다. warn 탐지와 놓친 값은 마스킹본에 원문 그대로라
+CI 로그에 남기 때문이다.
 
 ### L1 모델 붙이기
 
@@ -123,10 +131,15 @@ macOS 의 python.org 빌드에서 L0 만 설치(`pip install garim-guard`)했다
 있다 — `pip install certifi` 로 해결한다(`[l1]` 설치에는 이미 들어 있다). 루프백이 아닌 `--host` 로 띄우면
 경고를 낸다 — 그 포트에 닿는 누구나 사용자의 키로 요청을 보낼 수 있다.
 
-- 본문뿐 아니라 요청에 실린 문자열 값을 전부 검사 · 마스킹한다 — 도구 인자, `tools` 설명, `prediction`, `user`,
-  메시지 `name`, 파일 이름, URL, 값 안의 JSON 키 등. 빼는 것은 모델 설정 값, 대화를 잇는 ID(`tool_call_id` 등),
-  이미지 · 오디오 · 파일의 이진 본문(base64 · `data:` URL)이다. 응답에서는 토큰을 원문으로 복원한다. 받는 경로는
-  `POST /v1/chat/completions` 하나다.
+- 본문뿐 아니라 요청에 실린 문자열 값을 전부 검사 · 마스킹한다.
+  - 도구 인자, JSON 으로 된 도구 결과(`\uXXXX` 를 푼 값), `tools` 설명, `prediction`, `user`, 메시지 `name`,
+    파일 이름, URL, 값 안의 JSON 키, 10자리 이상의 숫자 등이다.
+  - 빼는 것은 셋이다. 모양이 맞는 모델 설정 값, 모양이 맞는 대화 ID(`tool_call_id` 등), 그리고 이진 본문이다.
+    이진 본문은 base64 로 끝까지 풀리고 이미지 · 오디오 · PDF 같은 알려진 형식으로 시작할 때만 이진으로 본다.
+    텍스트 파일을 감싼 `data:text/plain` 은 검사한다.
+  - 응답에서는 `content` · `refusal` · 추론 본문 · 도구 인자의 토큰을 원문으로 복원한다.
+  - 상류의 리다이렉트는 따라가지 않는다. 따라가면 사용자의 키가 다른 호스트로 간다.
+  - 받는 경로는 `POST /v1/chat/completions` 하나다.
 - 스트리밍(`stream: true`)은 상류에 스트리밍 없이 요청해 전문을 복원한 뒤 SSE 로 돌려준다 — 조각째
   복원하면 `<PHONE_1>` 이 청크 경계에서 깨진다. 거부가 필요하면 `--refuse-streaming`.
 - 공격 · 기밀 표식 · 형식을 모르는 고엔트로피 시크릿(`L-SEC-05`)은 기본 정책에서 `warn`(전달하고
@@ -158,7 +171,8 @@ outbound = result.masked_segments        # 외부 API 로 보낼 것
 정책(`allow / mask / warn / block`)과 임계는 YAML 로 넘길 때만 바뀐다 — CLI 는 `--policy`, 라이브러리는
 `Inspector(경로)`. 넘기지 않으면 내장 기본값으로 돌며, 그 판정은 [`config/policy.yaml`](https://github.com/seok-hee97/garim-guard/blob/main/config/policy.yaml) 과
 같다(파일에만 사용자 패턴 예시 `EMP-\d{6}` 가 있다). 바꿀 때는 이 파일을 복사해 고친 뒤 넘긴다. 엄격 프로필은
-패키지에 들어 있어 이름(`strict`)으로 넘긴다.
+패키지에 들어 있어 이름(`strict`)으로 넘긴다. 이 이름은 늘 내장 프로필이다. 같은 이름의 파일을 쓰려면 `./strict`
+처럼 경로로 준다.
 
 ### 다른 모델 연결
 

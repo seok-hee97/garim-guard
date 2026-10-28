@@ -29,8 +29,10 @@ def resident_candidate_valid(value: str) -> bool:
         return False
     century = 1900 if digits[6] in "12" else 2000
     try:
-        date(century + int(digits[:2]), int(digits[2:4]), int(digits[4:6]))
+        born = date(century + int(digits[:2]), int(digits[2:4]), int(digits[4:6]))
     except ValueError:
+        return False
+    if born > date.today():  # 미래 생년은 주민번호가 아니다 — garim 의 rrn_date_sex_valid 와 같다
         return False
     weights = (2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5)
     total = sum(

@@ -15,7 +15,8 @@ PyPI 패키지 `garim-guard` 에는 검사 로직과 학습 · 내보내기 보�
 
 - L1 은 모든 모드에서, L2 는 `--mode thorough` 에서만 돈다.
 - 붙인 모델이 실행 중에 실패하거나 시간 예산을 넘기면, L0 판정은 그대로 남고 `degraded=true` 와 사유가
-  붙는다. 시작할 때 실패하면(파일 없음 · import 오류 · 계약 위반) 검사하지 않고 종료 코드 `4` 로 끝난다.
+  붙는다. 실행 중의 `sys.exit()` 도 실패로 본다. 시작할 때 실패하면(파일 없음 · import 오류 · `sys.exit()` ·
+  계약 위반) 검사하지 않고 종료 코드 `4` 로 끝난다.
 - 사번처럼 형식이 정해진 번호는 모델 없이 정책 YAML 의 `custom_patterns`(정규식)로 잡는다.
 
 ## 1. 로컬 LLM 을 판정기로 (L2)
@@ -102,7 +103,9 @@ garim --l1-backend my_package.garim_plugin:build proxy --upstream https://api.op
 - **스레드 안전해야 한다.** 프록시는 요청마다 다른 스레드에서 같은 객체를 부른다. 보장하지 못하면 내부에서
   `threading.Lock` 으로 감싼다.
 - **시간 예산이 있다.** `limits.l1_timeout_ms`(기본 1000ms)를 넘기면 그 청크는 L0 로만 판정되고
-  `degraded`(`l1_timeout`)다. CPU 에서 느린 모델이면 정책에서 예산을 늘린다.
+  `degraded`(`l1_timeout`)다. CPU 에서 느린 모델이면 정책에서 예산을 늘린다. 예산을 넘겨 버려졌는데 아직
+  도는 추론이 백엔드 하나에 2개 쌓이면 새 추론을 시작하지 않는다(`l1_busy`). `cancel_current` 를 구현하면
+  버려진 추론을 멈출 수 있다.
 - **파일 경로 형식은 그 파일 하나만 올린다.** `sys.path` 를 건드리지 않으므로, 여러 파일로 된 백엔드는
   패키지로 만들어 설치(`pip install -e .`)하거나 `PYTHONPATH` 에 둔다.
 

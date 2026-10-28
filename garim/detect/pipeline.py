@@ -430,7 +430,9 @@ class DetectionPipeline:
             except L1BusyError:
                 degraded = True
                 degraded_reasons.append("l1_busy")
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:
+                # ★ 전수 검토 — 백엔드가 `sys.exit()` 를 부르면 검사 전체가 끝나 CLI 가 0 으로
+                #   나갔다(주민번호가 든 입력에서도). 백엔드 경계에서는 SystemExit 도 실패다.
                 degraded = True
                 degraded_reasons.append(f"l1_error:{type(exc).__name__}")
             l1_ms = (perf_counter() - l1_started) * 1000

@@ -42,7 +42,9 @@ def load_backend(spec: str, *, layer: Literal["L1", "L2"]) -> L1Backend | L2Back
         raise ValueError(f"{layer} backend {spec!r}: no callable {attribute!r} in {target}")
     try:
         backend = factory()
-    except Exception as exc:  # 사용자 코드의 경계 — 무엇이 나든 시작하지 않는다
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # 사용자 코드의 경계 — `sys.exit()` 를 포함해 무엇이 나든
         raise RuntimeError(
             f"{layer} backend {spec!r} failed to start: {type(exc).__name__}: {exc}"
         ) from exc
@@ -59,7 +61,9 @@ def _import(target: str, layer: str) -> ModuleType:
             return importlib.import_module(target)
         except ImportError as exc:
             raise ValueError(f"cannot import {layer} backend module {target!r}: {exc}") from exc
-        except Exception as exc:
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:
             raise RuntimeError(
                 f"{layer} backend module {target!r} failed to import: "
                 f"{type(exc).__name__}: {exc}"
@@ -78,7 +82,9 @@ def _import(target: str, layer: str) -> ModuleType:
     sys.modules[name] = module  # dataclass 등은 모듈이 sys.modules 에 있어야 한다
     try:
         module_spec.loader.exec_module(module)
-    except Exception as exc:
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
         del sys.modules[name]
         raise RuntimeError(
             f"{layer} backend file {target!r} failed to import: {type(exc).__name__}: {exc}"

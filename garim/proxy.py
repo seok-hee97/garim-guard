@@ -27,10 +27,12 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import math
 import re
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -157,8 +159,13 @@ def _with_text(content: Any, replacement: str) -> Any:
     return updated if injected else content
 
 
-def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
-    """`messages` 배열을 검사 단위로 옮긴다. 순서와 개수는 1:1 로 보존한다."""
+def segments_from_messages(
+    messages: list[dict[str, Any]], *, structured: frozenset[int] = frozenset()
+) -> list[Segment]:
+    """`messages` 배열을 검사 단위로 옮긴다. 순서와 개수는 1:1 로 보존한다.
+
+    `structured` 에 든 메시지는 본문이 JSON 이다 — 필드 검사가 푼 값을 보므로 여기서는 비운다.
+    """
     if not isinstance(messages, list) or not messages:
         raise ProxyError(400, "messages must be a non-empty array")
     segments: list[Segment] = []
@@ -170,7 +177,8 @@ def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
         if origin is None:
             # 모르는 역할을 `user` 로 접으면 신뢰 등급을 임의로 올리는 셈이다.
             raise ProxyError(400, f"messages[{index}] has an unsupported role: {role!r}")
-        segments.append(Segment(_text_of(message.get("content")), origin=origin))
+        text = "" if index in structured else _text_of(message.get("content"))
+        segments.append(Segment(text, origin=origin))
     return segments
 
 
@@ -187,13 +195,47 @@ _UNSCANNED_REQUEST_KEYS = frozenset({
 # 그리고 값 전체가 base64 일 때만 건너뛴다. ★ 3차 검토: 어느 깊이에서든 `data:` 로 시작하는
 # 문자열과 `file_data` 키를 건너뛰었더니 도구 인자 `{"note": "data:;base64, 주민번호 …"}` 가
 # 그대로 나갔다.
+#   ★ 전수 검토(2026-10-28) — 글자 집합만 봐서 공백 섞인 영숫자 평문(`card 4111 1111 …`)도
+#   "base64" 였고, `data:text/plain;base64,…` 처럼 텍스트 파일도 이진으로 건너뛰었다. 이제 공백
+#   없는 base64 로 끝까지 풀리고, 텍스트 MIME 이 아니며, 풀린 바이트가 알려진 이진 형식(이미지 ·
+#   오디오 · PDF · 압축 문서)으로 시작할 때만 건너뛴다. 그 밖에는 문자열로 검사한다.
 _BINARY_PARTS = (("image_url", "url"), ("input_audio", "data"), ("file", "file_data"))
-_DATA_URL = re.compile(r"data:[^,;]*;base64,[A-Za-z0-9+/=\s]*")
-_BASE64 = re.compile(r"(?:data:[^,;]*;base64,)?[A-Za-z0-9+/=\s]*")
+_DATA_URL = re.compile(r"data:(?P<mime>[^,;]*);base64,(?P<body>.*)", re.DOTALL)
+_TEXT_MIME = re.compile(r"(?:text/|application/(?:json|xml|x-yaml|yaml|csv|javascript))", re.I)
+_BINARY_MAGIC = (
+    b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"%PDF", b"PK\x03\x04", b"OggS", b"fLaC", b"ID3",
+    b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\x1a\x45\xdf\xa3", b"BM", b"II*\x00", b"MM\x00*",
+)
 # 메시지의 프로토콜 키 — 이 키 이름은 검사하지 않는다.
 _HANDLED_MESSAGE_KEYS = frozenset(
     {"role", "content", "tool_calls", "function_call", "tool_call_id"}
 )
+# 대화를 잇는 ID 는 이 모양의 문자열일 때만 건너뛴다 — dict · 긴 문자열이면 검사한다(전수 검토).
+_PROTOCOL_ID = re.compile(r"[\w\-:.]{1,128}")
+_SETTING_NAME = re.compile(r"[\w\-:./]{1,128}")
+
+
+def _expected_setting(key: str, value: Any) -> bool:
+    """검사하지 않는 최상위 설정 키가 정말 설정 모양인가. 아니면 문자열 리프를 검사한다."""
+    if value is None or isinstance(value, bool | int | float):
+        return True
+    if isinstance(value, str):
+        return bool(_SETTING_NAME.fullmatch(value))
+    if key == "stream_options" and isinstance(value, dict):
+        return all(isinstance(item, bool) for item in value.values())
+    if key == "logit_bias" and isinstance(value, dict):
+        return all(
+            str(name).isdigit() and isinstance(item, int | float) for name, item in value.items()
+        )
+    if key == "modalities" and isinstance(value, list):
+        return all(isinstance(item, str) and _SETTING_NAME.fullmatch(item) for item in value)
+    if key == "tool_choice" and isinstance(value, dict):
+        def names(node: Any) -> bool:
+            if isinstance(node, dict):
+                return all(_SETTING_NAME.fullmatch(str(k)) and names(v) for k, v in node.items())
+            return not isinstance(node, str) or bool(_SETTING_NAME.fullmatch(node))
+        return names(value)
+    return False
 # 필드 값을 한 세그먼트로 이을 때의 경계. 규칙이 잡는 문자 집합 밖이라 스팬이 넘지 않는다.
 _FIELD_SEPARATOR = "\n\ue000\n"
 
@@ -255,10 +297,36 @@ def _parse_arguments(index: int, arguments: Any) -> Any:
     return _Arguments(arguments, parsed)
 
 
-def _working_copy(payload: dict[str, Any]) -> dict[str, Any]:
-    """상류로 보낼 사본. 도구 인자는 검사하는 동안 파싱된 값으로 둔다."""
+def _structured_content(index: int, content: Any) -> _Arguments | None:
+    """JSON 객체 · 배열인 메시지 본문 — 도구 결과는 대개 `json.dumps` 로 만든다.
+
+    ★ 전수 검토(2026-10-28) — 도구 인자는 `\\uXXXX` 를 풀어 검사했지만 `role: "tool"` 본문은 그대로
+      검사해서, 한글이 이스케이프된 도구 결과(`"[\\ub300\\uc678\\ube44]…"`)의 표식 · 이름을 규칙이
+      읽지 못했다(strict 에서도 allow).
+    """
+    if not isinstance(content, str) or content.lstrip()[:1] not in ("{", "["):
+        return None
+    try:
+        parsed = json.loads(content, object_pairs_hook=_unique_object)
+    except _RepeatedKeyError as exc:
+        raise ProxyError(
+            400, f"messages[{index}] content repeats a JSON key; request was not forwarded"
+        ) from exc
+    except ValueError:
+        return None
+    return _Arguments(content, parsed) if isinstance(parsed, dict | list) else None
+
+
+def _working_copy(payload: dict[str, Any]) -> tuple[dict[str, Any], frozenset[int]]:
+    """상류로 보낼 사본과 본문이 JSON 인 메시지 번호. 도구 인자 · JSON 본문은 검사하는 동안
+    파싱된 값으로 둔다."""
     working = copy.deepcopy(payload)
+    structured: set[int] = set()
     for index, message in enumerate(working["messages"]):
+        content = _structured_content(index, message.get("content"))
+        if content is not None:
+            message["content"] = content
+            structured.add(index)
         calls = message.get("tool_calls")
         if calls is not None and not isinstance(calls, list):
             raise ProxyError(400, f"messages[{index}].tool_calls must be an array")
@@ -267,21 +335,40 @@ def _working_copy(payload: dict[str, Any]) -> dict[str, Any]:
         for function in functions:
             if isinstance(function, dict) and "arguments" in function:
                 function["arguments"] = _parse_arguments(index, function["arguments"])
-    return working
+    return working, frozenset(structured)
+
+
+def _binary_payload(value: str, *, require_data_url: bool) -> bool:
+    """정말 이진 본문인가 — 건너뛰어도 되는가."""
+    match = _DATA_URL.fullmatch(value)
+    if match is not None:
+        if _TEXT_MIME.match(match.group("mime")):
+            return False
+        body = match.group("body")
+    elif require_data_url:
+        return False  # `image_url.url` 의 http(s) 주소는 문자열로 검사한다
+    else:
+        body = value
+    try:
+        raw = base64.b64decode(body, validate=True)
+    except ValueError:  # binascii.Error 포함 — 공백 · 다른 글자가 섞였다
+        return False
+    head = raw[:16]
+    return head.startswith(_BINARY_MAGIC) or (
+        head[:4] == b"RIFF" and head[8:12] in (b"WAVE", b"WEBP", b"AVI ")
+    ) or head[4:8] == b"ftyp"
 
 
 def _without_binary(part: Any) -> Any:
-    """검사용 보기 — 내용 파트의 base64 본문만 뺀다. 경로는 원래 파트와 같다."""
+    """검사용 보기 — 내용 파트의 이진 본문만 뺀다. 경로는 원래 파트와 같다."""
     if not isinstance(part, dict):
         return part
     view = dict(part)
     for outer, inner in _BINARY_PARTS:
         holder = view.get(outer)
         value = holder.get(inner) if isinstance(holder, dict) else None
-        if isinstance(value, str):
-            binary = _DATA_URL.fullmatch(value) if inner == "url" else _BASE64.fullmatch(value)
-            if binary:
-                view[outer] = {k: v for k, v in holder.items() if k != inner}
+        if isinstance(value, str) and _binary_payload(value, require_data_url=inner == "url"):
+            view[outer] = {k: v for k, v in holder.items() if k != inner}
     return view
 
 
@@ -291,6 +378,10 @@ def _collect(node: Any, path: tuple[Any, ...], origin: Origin, out: list[_Leaf])
     elif isinstance(node, str):
         if node:
             out.append(_Leaf(path, node, origin))
+    elif isinstance(node, int) and not isinstance(node, bool) and abs(node) >= 10**9:
+        # ★ 숫자 리프는 검사하지 않아 `{"card": 4111111111111111}` 이 그대로 나갔다(전수 검토).
+        #   10자리 이상만 본다 — 가리면 그 자리는 토큰 문자열이 된다.
+        out.append(_Leaf(path, str(node), origin))
     elif isinstance(node, dict):
         for key, value in node.items():
             # 키도 상류로 가는 문자열이다 — `{"contacts": {"010-…": "김철수"}}` 의 번호는
@@ -318,7 +409,9 @@ def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
     """
     leaves: list[_Leaf] = []
     for key, value in working.items():
-        if key not in _UNSCANNED_REQUEST_KEYS:
+        if key == "messages":
+            continue
+        if key not in _UNSCANNED_REQUEST_KEYS or not _expected_setting(key, value):
             # 요청 최상위 필드는 개발자가 채우는 설정이다. 모르는 키는 이름도 검사한다.
             leaves.append(_Leaf((_KeyName(key),), key, "system"))
             _collect(value, (key,), "system", leaves)
@@ -328,8 +421,10 @@ def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
             path: tuple[Any, ...] = ("messages", index, key)
             if key not in _HANDLED_MESSAGE_KEYS:
                 leaves.append(_Leaf(("messages", index, _KeyName(key)), key, origin))
-            if key in {"role", "tool_call_id"} or (key == "content" and isinstance(value, str)):
+            if key == "role" or (key == "content" and isinstance(value, str)):
                 continue  # 본문 문자열은 메시지 세그먼트가 검사한다
+            if key == "tool_call_id" and isinstance(value, str) and _PROTOCOL_ID.fullmatch(value):
+                continue
             if key == "content" and isinstance(value, list):
                 for part_index, part in enumerate(value):
                     if _is_text_part(part):
@@ -337,7 +432,8 @@ def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
                     _collect(_without_binary(part), (*path, part_index), origin, leaves)
             elif key == "tool_calls" and isinstance(value, list):
                 for call_index, call in enumerate(value):
-                    if isinstance(call, dict):
+                    call_id = call.get("id") if isinstance(call, dict) else None
+                    if isinstance(call_id, str) and _PROTOCOL_ID.fullmatch(call_id):
                         call = {k: v for k, v in call.items() if k != "id"}
                     _collect(call, (*path, call_index), origin, leaves)
             else:
@@ -375,8 +471,15 @@ def _assign(root: Any, path: tuple[Any, ...], value: str) -> None:
 
 
 def _restore_argument_strings(working: dict[str, Any]) -> None:
-    """파싱해 둔 인자를 문자열로 되돌린다. 가린 것이 없으면 원래 바이트 그대로다."""
+    """파싱해 둔 인자 · JSON 본문을 문자열로 되돌린다. 가린 것이 없으면 원래 바이트 그대로다."""
     for message in working["messages"]:
+        content = message.get("content")
+        if isinstance(content, _Arguments):
+            message["content"] = (
+                json.dumps(content.value, ensure_ascii=False)
+                if content.changed
+                else content.original
+            )
         calls = message.get("tool_calls") or []
         functions = [call.get("function") for call in calls if isinstance(call, dict)]
         functions.append(message.get("function_call"))
@@ -440,6 +543,11 @@ def _blocked_body(results: list[tuple[CheckResult, Any]], verdict: str) -> dict[
     }
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
 class ProxyService:
     """검사 → (허용 시) 상류 전달 → 복원. 전송은 `sender` 로 주입해 테스트한다."""
 
@@ -447,33 +555,29 @@ class ProxyService:
         self,
         config: ProxyConfig,
         *,
-        inspector: Inspector | None = None,
         sender: Any = None,
         l1_backend: L1Backend | None = None,
         l2_backend: L2Backend | None = None,
     ) -> None:
         self.config = config
-        if inspector is not None:
-            self._inspector_factory = lambda: inspector
-        else:
-            # 모델은 프로세스에 한 번만 올린다. 볼트는 요청마다 새로 만들어야 하므로
-            # (다른 요청의 원문이 이 응답에 복원되면 안 된다) Inspector 는 요청마다,
-            # 백엔드는 공유다. 공유를 견디는 조건은 `OnnxL1Backend` 가 진다.
-            if l1_backend is None and config.l1_model_dir is not None:
-                from garim.detect.l1 import OnnxL1Backend
+        # 모델은 프로세스에 한 번만 올린다. 볼트는 요청마다 새로 만들어야 하므로
+        # (다른 요청의 원문이 이 응답에 복원되면 안 된다) Inspector 는 요청마다,
+        # 백엔드는 공유다. 공유를 견디는 조건은 `OnnxL1Backend` 가 진다.
+        # ★ 전수 검토 — `inspector=` 인자로 Inspector 하나를 넘기면 모든 요청이 볼트 하나를 나눠
+        #   써서 앞 요청의 번호가 뒤 요청 응답에 복원됐다. 그 인자를 없앴다.
+        if l1_backend is None and config.l1_model_dir is not None:
+            from garim.detect.l1 import OnnxL1Backend
 
-                l1_backend = OnnxL1Backend(
-                    config.l1_model_dir, model_filename=config.l1_model_file
-                )
+            l1_backend = OnnxL1Backend(config.l1_model_dir, model_filename=config.l1_model_file)
 
-            def trusted_inspector() -> Inspector:
-                policy = load_policy(config.policy_path)
-                # Unlike the library API, the proxy parsed the protocol-level role itself.
-                # This is the one place where DESIGN §2.5b allows origin trust.
-                policy.origin_policy.trust_declared = True
-                return Inspector(policy, l1_backend=l1_backend, l2_backend=l2_backend)
+        def trusted_inspector() -> Inspector:
+            policy = load_policy(config.policy_path)
+            # Unlike the library API, the proxy parsed the protocol-level role itself.
+            # This is the one place where DESIGN §2.5b allows origin trust.
+            policy.origin_policy.trust_declared = True
+            return Inspector(policy, l1_backend=l1_backend, l2_backend=l2_backend)
 
-            self._inspector_factory = trusted_inspector
+        self._inspector_factory = trusted_inspector
         self._sender = sender or self._send_upstream
 
     def _send_upstream(self, path: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
@@ -484,12 +588,19 @@ class ProxyService:
             headers={"Content-Type": "application/json", **headers},
             method="POST",
         )
+        # ★ 전수 검토 — 기본 opener 는 3xx 를 따라가며 사용자의 Authorization 을 다른 호스트
+        #   (https → http 포함)로 그대로 보냈다. 리다이렉트는 따라가지 않는다.
+        opener = urllib.request.build_opener(
+            _NoRedirect, urllib.request.HTTPSHandler(context=https_context())
+        )
         try:
-            with urllib.request.urlopen(  # noqa: S310
-                request, timeout=self.config.timeout_seconds, context=https_context()
-            ) as response:
+            with opener.open(request, timeout=self.config.timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            if not 400 <= exc.code < 600:
+                raise ProxyError(
+                    502, f"upstream answered {exc.code}; redirects are not followed"
+                ) from exc
             # 상류의 오류 본문을 넘긴다 — 없으면 할당량 초과(429)·과부하(503)·키 오류를
             # 앱에서 구분할 수 없다. 상류가 받은 것은 이미 마스킹된 요청이므로 그 응답에
             # 원문이 실릴 자리는 없다.
@@ -511,14 +622,19 @@ class ProxyService:
             raise ProxyError(400, "streaming is not supported: masked tokens cannot be restored")
 
         messages = payload.get("messages")
-        segments = segments_from_messages(messages)
+        segments_from_messages(messages)  # 모양 검사 — 실제 세그먼트는 JSON 본문을 가린 뒤 만든다
         try:
-            working = _working_copy(payload)
+            working, structured = _working_copy(payload)
             groups = _field_groups(_field_leaves(working))
         except RecursionError as exc:
             raise ProxyError(400, "request is nested too deeply") from exc
+        segments = segments_from_messages(messages, structured=structured)
         inspector = self._inspector_factory()
-        # 두 검사가 볼트를 나눠 쓴다 — 필드에 있는 `<PHONE_1>` 같은 글자도 본문 마스킹 전에 피한다.
+        # 두 검사가 볼트를 나눠 쓴다 — 본문 · 필드에 있는 `<PHONE_1>` 같은 글자를 어느 검사보다
+        # 먼저 피한다. ★ 전수 검토: 필드 쪽만 미리 피해서, 본문의 `<PHONE_1>` 과 필드 번호의
+        # 토큰이 같아졌다.
+        for segment in segments:
+            inspector.vault.reserve_literals(segment.text)
         for _, group in groups:
             for leaf in group:
                 inspector.vault.reserve_literals(leaf.text)
@@ -570,8 +686,12 @@ class ProxyService:
         _restore_argument_strings(outbound)
         if result.masked_segments is not None:
             outbound["messages"] = [
-                {**message, "content": _with_text(message.get("content"), text)}
-                for message, text in zip(outbound["messages"], result.masked_segments, strict=True)
+                message
+                if index in structured
+                else {**message, "content": _with_text(message.get("content"), text)}
+                for index, (message, text) in enumerate(
+                    zip(outbound["messages"], result.masked_segments, strict=True)
+                )
             ]
         masked = result.masked_segments is not None or (
             fields is not None and fields.masked_segments is not None
@@ -582,6 +702,9 @@ class ProxyService:
             outbound["stream"] = False
             outbound.pop("stream_options", None)
         upstream = self._sender("/chat/completions", outbound, headers)
+        if stream and not _completion_shaped(upstream):
+            # SSE 로 다시 쪼갤 수 없다 — 연결을 끊는 대신 502 로 알린다(전수 검토).
+            raise ProxyError(502, "upstream returned a body that is not a chat completion")
         if masked:
             upstream, restore_missing = _restore_choices(upstream, inspector.vault)
             if restore_missing:
@@ -593,6 +716,35 @@ class ProxyService:
                     reasons.append("vault_restore_miss")
                 response_headers["X-Garim-Degraded-Reasons"] = ",".join(reasons)
         return 200, upstream, response_headers
+
+
+def _completion_shaped(response: Any) -> bool:
+    choices = response.get("choices") if isinstance(response, dict) else None
+    return isinstance(choices, list) and all(isinstance(choice, dict) for choice in choices)
+
+
+def _restore_text_fields(message: dict[str, Any], vault: Any) -> bool:
+    """`content` · `refusal` · `reasoning_content`(문자열 또는 `text` 파트 배열)을 복원한다.
+
+    ★ 전수 검토 — `content` 문자열만 복원해서 `refusal` · 추론 본문 · 파트 배열의 토큰이 남았고,
+      없는 토큰으로도 보고되지 않았다.
+    """
+    missing = False
+    for key in ("content", "refusal", "reasoning_content"):
+        value = message.get(key)
+        if isinstance(value, str):
+            message[key], key_missing = vault.restore_with_status(value)
+            missing = missing or key_missing
+        elif isinstance(value, list):
+            parts = []
+            for part in value:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text, part_missing = vault.restore_with_status(part["text"])
+                    missing = missing or part_missing
+                    part = {**part, "text": text}
+                parts.append(part)
+            message[key] = parts
+    return missing
 
 
 def _restore_choices(response: Any, vault: Any) -> tuple[Any, bool]:
@@ -610,9 +762,7 @@ def _restore_choices(response: Any, vault: Any) -> tuple[Any, bool]:
             restored.append(choice)
             continue
         message = dict(message)
-        if isinstance(message.get("content"), str):
-            message["content"], content_missing = vault.restore_with_status(message["content"])
-            missing = missing or content_missing
+        missing = _restore_text_fields(message, vault) or missing
         # ★ 인자도 돌아오는 길이다. 초판은 `content` 만 복원해서, 모델이 마스킹된 번호로
         #   함수를 부르면 앱의 도구가 `{"to": "<PHONE_1>"}` 을 받았다.
         if isinstance(message.get("tool_calls"), list):
@@ -656,8 +806,9 @@ def to_sse(response: dict[str, Any], *, include_usage: bool = False) -> str:
         events.append({"index": index, "delta": {"role": message.get("role", "assistant")},
                        "finish_reason": None})
         delta: dict[str, Any] = {}
-        if isinstance(message.get("content"), str):
-            delta["content"] = message["content"]
+        for key in ("content", "refusal", "reasoning_content"):
+            if isinstance(message.get(key), str):
+                delta[key] = message[key]
         if isinstance(message.get("tool_calls"), list):
             delta["tool_calls"] = [
                 {"index": call_index, **call}
@@ -724,14 +875,19 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """★ 프롬프트 원문이 접근 로그로 새지 않게 기본 로깅을 끈다(§3.2)."""
 
+    def _send_headers(self, headers: dict[str, str]) -> None:
+        # ★ 전수 검토 — 사유에 한글 예외 이름(`l1_error:모델오류`)이 들어가면 `send_header` 가
+        #   UnicodeEncodeError 로 죽어, 상류에 이미 보낸 요청의 응답이 사라졌다.
+        for key, value in headers.items():
+            self.send_header(key, value.encode("ascii", "backslashreplace").decode("ascii"))
+
     def _reply_sse(self, body: str, headers: dict[str, str]) -> None:
         encoded = body.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Length", str(len(encoded)))
-        for key, value in headers.items():
-            self.send_header(key, value)
+        self._send_headers(headers)
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -740,8 +896,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
-        for key, value in headers.items():
-            self.send_header(key, value)
+        self._send_headers(headers)
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -770,7 +925,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (ValueError, RecursionError):
+            # UnicodeDecodeError · JSONDecodeError · 4,300자리 넘는 정수(ValueError) · 깊은 중첩.
+            # ★ 전수 검토 — 뒤의 둘은 응답 없이 연결이 끊겼다.
             self._reply(400, {"error": {"message": "body is not valid JSON"}}, {})
             return
         if not isinstance(payload, dict):
@@ -794,7 +951,12 @@ class _Handler(BaseHTTPRequestHandler):
         if status == 200 and payload.get("stream"):
             options = payload.get("stream_options")
             include_usage = isinstance(options, dict) and bool(options.get("include_usage"))
-            self._reply_sse(to_sse(body, include_usage=include_usage), headers)
+            try:
+                rendered = to_sse(body, include_usage=include_usage)
+            except Exception as exc:  # 끊지 말고 알린다
+                self._reply(502, {"error": {"message": f"cannot stream: {type(exc).__name__}"}}, {})
+                return
+            self._reply_sse(rendered, headers)
             return
         self._reply(status, body, headers)
 
@@ -810,4 +972,10 @@ def build_server(
     """기본값은 `127.0.0.1` 이다 — 다른 `host` 를 넘기면 그 주소에 그대로 바인드한다."""
     service = ProxyService(config, l1_backend=l1_backend, l2_backend=l2_backend)
     handler = type("GarimProxyHandler", (_Handler,), {"service": service})
-    return ThreadingHTTPServer((host, port), handler)
+    # ★ 전수 검토 — `::1` 을 루프백으로 받으면서 IPv4 전용 서버로 열어 시작하지 못했다.
+    server_class = _IPv6Server if ":" in host else ThreadingHTTPServer
+    return server_class((host, port), handler)
+
+
+class _IPv6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6

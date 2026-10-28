@@ -21,8 +21,23 @@ OUTBOUND = (
     "train/translate_with_gemini.py",  # deepset 번역 — 공개 데이터만
 )
 # L2 판정기(`garim/detect/l2.py`)는 목록에 없다 — 루프백만 받고(생성 시점 거부) TLS 가 없다.
-_URLOPEN = re.compile(r"urlopen\(")
-_WITH_CONTEXT = re.compile(r"urlopen\((?:[^()]|\([^()]*\))*context=https_context\(\)", re.S)
+# 프록시 왕복 하네스도 루프백의 가림 프록시만 부른다. 둘 다 환경 변수 프록시를 끈 opener 다.
+LOOPBACK_ONLY = ("garim/detect/l2.py", "bench/proxy_e2e.py")
+# 프록시는 리다이렉트를 따르지 않으려고 `build_opener(…, HTTPSHandler(context=…))` 를 쓴다.
+_URLOPEN = re.compile(r"urlopen\(|build_opener\(")
+
+
+def _call_arguments(source: str, start: int) -> str:
+    """`start` 의 여는 괄호부터 짝이 맞는 닫는 괄호까지."""
+    depth = 0
+    for index in range(start, len(source)):
+        if source[index] == "(":
+            depth += 1
+        elif source[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    return source[start:]
 
 
 def test_context_verifies_by_default() -> None:
@@ -46,9 +61,13 @@ def test_every_outbound_call_uses_the_shared_context(path: str) -> None:
     다음 사람이 다섯 번째를 또 놓치므로 자리 목록째 고정한다.
     """
     source = Path(path).read_text(encoding="utf-8")
-    calls = len(_URLOPEN.findall(source))
-    guarded = len(_WITH_CONTEXT.findall(source))
-    assert calls and calls == guarded, f"{path}: urlopen {calls}회 중 {guarded}회만 검증 컨텍스트"
+    sites = list(_URLOPEN.finditer(source))
+    guarded = sum(
+        "context=https_context()" in _call_arguments(source, site.end() - 1) for site in sites
+    )
+    assert sites and len(sites) == guarded, (
+        f"{path}: 나가는 호출 {len(sites)}회 중 {guarded}회만 검증 컨텍스트"
+    )
 
 
 def test_no_unlisted_call_site() -> None:
@@ -59,4 +78,5 @@ def test_no_unlisted_call_site() -> None:
         for path in Path(directory).rglob("*.py")
         if _URLOPEN.search(path.read_text(encoding="utf-8"))
     }
+    found -= set(LOOPBACK_ONLY)
     assert found == set(OUTBOUND), f"목록 밖 호출 자리: {sorted(found - set(OUTBOUND))}"
