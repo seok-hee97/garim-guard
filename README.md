@@ -89,8 +89,9 @@ garim scan ./prompts
 - `3` degraded — 일부 파일이나 디렉터리를 읽지 못한 scan 포함
 - `4` 실행 오류 — 잘못된 인자, 정책 · 모델 로드 실패, 한 파일도 검사하지 못함
 
-디렉터리 scan 은 숨은 디렉터리를 건너뛰되 `.env` 파일은 검사한다. PDF · DOCX · XLSX · PPTX · HWPX 는 글을 꺼내
-검사하고, 꺼내지 못하면 검사하지 못한 파일(3)로 알린다. 형식 필터로 뺀 파일 수는 알린다. 탐지 목록만
+디렉터리 scan 은 숨은 디렉터리를 건너뛰되 `.env` 파일은 검사한다. PDF · DOCX · XLSX · PPTX · HWPX · ODF 는
+글을 꺼내 검사한다. 꺼내지 못하면(글이 없는 문서 포함) 검사하지 못한 파일(3)로 알리고, 가려야 할 값이 나오면
+프록시와 같이 `attachments.unmaskable`(기본 block → 2)을 따른다. 형식 필터로 뺀 파일 수는 알린다. 탐지 목록만
 출력하고, 파일의 마스킹본은 `--show-masked` 를 줄 때만 출력한다. warn 탐지와 놓친 값은 마스킹본에 원문 그대로라
 CI 로그에 남기 때문이다.
 
@@ -145,11 +146,16 @@ macOS 의 python.org 빌드에서 L0 만 설치(`pip install garim-guard`)했다
   - 빼는 것은 모양이 맞는 모델 설정 값과 모양이 맞는 대화 ID(`tool_call_id` 등)다.
   - 첨부는 base64 로 풀어 본다.
     - 텍스트(UTF-8 · CP949 · UTF-16)면 푼 글을 검사하고, 가렸으면 다시 인코딩해 보낸다.
-    - 문서(PDF · DOCX · XLSX · PPTX · HWPX)면 글을 꺼내 검사한다. 문서 안은 가릴 수 없으므로, 가려야 할
-      값이 나오면 정책 `attachments.unmaskable`(기본 `block`)을 따른다. PDF 는 `garim-guard[docs]` 가 있을
-      때만 읽는다.
-    - 글을 꺼내지 못한 첨부(이미지 · 오디오 · 레거시 HWP/DOC · 암호 걸린 PDF)는 정책
-      `attachments.uninspected`(기본 `allow`, 엄격 프로필 `warn`)를 따른다. 이미지 안의 글자(OCR)는 읽지 않는다.
+    - 문서(PDF · DOCX · XLSX · PPTX · HWPX · ODF)면 글을 꺼내 검사한다. 본문 · 표 · 메모 · 차트 · 문서 속성 ·
+      대체 텍스트 · PDF 양식 필드와 주석까지 읽는다. 문서 안은 가릴 수 없으므로, 가려야 할 값이 나오면 정책
+      `attachments.unmaskable`(기본 `block`)을 따른다. PDF 는 `garim-guard[docs]` 가 있을 때만 별도
+      프로세스에서 시간 제한을 두고 읽는다.
+    - 문서인데 읽지 못하면(너무 큼 · 깨짐 · 암호 · 시간 초과 · `[docs]` 없는 PDF) 정책
+      `attachments.unreadable`(기본 `block`)을 따른다. 일부러 크게 · 깨지게 만든 문서로 검사를 비껴가지 못하게
+      기본값을 막음으로 둔다.
+    - 글을 꺼낼 수 없는 첨부(이미지 · 오디오 · 레거시 HWP/DOC · 글이 없는 문서 · `file_id` 만 있는 파일 · 원격
+      이미지 주소)는 정책 `attachments.uninspected`(기본 `allow`, 엄격 프로필 `warn`)를 따른다. 이미지 안의
+      글자(OCR)는 읽지 않는다.
   - 도구 인자 · 설정 필드의 숫자 값은 검사하지 않는다. 타임스탬프 · ID 가 체크섬에 우연히 맞아 차단되기
     때문이다.
   - 응답에서는 `content` · `refusal` · 추론 본문 · 도구 인자의 토큰을 원문으로 복원한다.

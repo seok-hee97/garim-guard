@@ -79,4 +79,5 @@ custom_patterns:
 # 첨부(이미지 등)는 경고와 함께 보낸다 — 막으려면 `uninspected: block`.
 attachments:
   unmaskable: block
+  unreadable: block
   uninspected: warn

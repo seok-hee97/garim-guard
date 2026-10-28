@@ -242,7 +242,141 @@ def test_scan_reads_documents_and_reports_unreadable_ones(
     assert main(["scan", str(tmp_path)]) == 2
     assert "hr.docx: block" in capsys.readouterr().out
     (tmp_path / "hr.docx").unlink()
-    (tmp_path / "broken.xlsx").write_bytes(b"PK\x03\x04 not really a zip")
+    (tmp_path / "broken.xlsx").write_bytes(
+        b"PK\x03\x04\xff\xfe\x00 broken"
+    )  # 문서도 텍스트도 아니다
     (tmp_path / "ok.txt").write_text("안녕하세요\n", encoding="utf-8")
     assert main(["scan", str(tmp_path)]) == 3
     assert "broken.xlsx" in capsys.readouterr().err
+
+
+# ── 재검토(2026-10-29)에서 찾은 결함 ──────────────────────────────────────────
+
+
+def _proxy_status(request: dict[str, Any], policy: str | None = None) -> tuple[int, dict[str, Any]]:
+    upstream = _Upstream()
+    status, body, headers = _proxy(upstream, policy).handle_chat_completions(request, {})
+    return status, headers
+
+
+def test_oversized_or_partly_broken_documents_fail_closed() -> None:
+    """★ 일부러 크게 · 깨지게 만든 문서가 "검사 못 함 → 허용" 으로 주민번호를 내보냈다."""
+    padded = _docx(f"주민번호 {_rrn()}", "가" * 2_100_000)
+    status, headers = _proxy_status(_request(padded, "application/octet-stream"))
+    assert status == 400 and "attachment_unreadable" in headers["X-Garim-Degraded-Reasons"]
+    buffer = io.BytesIO(_docx(f"주민번호 {_rrn()}"))
+    broken = bytearray(
+        _zip({"word/document.xml": "<w:t>본문</w:t>", "word/header9.xml": "<w:t>x</w:t>"})
+    )
+    data_start = broken.find(b"word/header9.xml") + len(b"word/header9.xml")
+    broken[data_start + 1] ^= 0xFF  # 멤버의 압축 데이터를 깬다(CRC 불일치 · 압축 오류)
+    result = extract_document(bytes(broken))
+    assert result is not None and result.reason == "unreadable"
+    assert buffer  # 같은 문서라도 깨진 멤버가 있으면 믿지 않는다
+
+
+def test_a_document_without_text_is_uninspected_not_clean(tmp_path: Path) -> None:
+    pytest.importorskip("pypdf")
+    image_only = _pdf("").replace(b"BT /F1 12 Tf 10 100 Td () Tj ET", b"q Q" + b" " * 27)
+    status, headers = _proxy_status(
+        _request(image_only, "application/pdf"), _policy(tmp_path, uninspected="block")
+    )
+    assert status == 400 and "attachment_not_inspected" in headers["X-Garim-Degraded-Reasons"]
+
+
+def test_a_warn_level_finding_does_not_cancel_unmaskable_block() -> None:
+    """★ 같은 문서의 기밀 표식(warn) 하나가 연락처를 그대로 보내게 했다."""
+    status, headers = _proxy_status(
+        _request(_docx("대외비", "연락처 010-1234-5678"), "application/x")
+    )
+    assert status == 400 and "attachment_unmaskable" in headers["X-Garim-Degraded-Reasons"]
+
+
+def test_text_that_looks_like_a_pdf_is_still_inspected() -> None:
+    """★ `%PDF` 로 시작하는 텍스트 첨부가 문서 판정에 걸려 검사 없이 나갔다."""
+    memo = f"%PDF 메모\n주민번호 {_rrn()}".encode()
+    assert _proxy_status(_request(memo, "text/plain"))[0] == 400
+
+
+def test_spreadsheet_cells_and_hwpx_inline_tags_are_separated() -> None:
+    xlsx = _zip(
+        {
+            "xl/workbook.xml": "<w/>",
+            "xl/sharedStrings.xml": "<sst><si><t>연락처</t></si></sst>",
+            "xl/worksheets/sheet1.xml": (
+                '<row><c t="s"><v>0</v></c><c><v>12</v></c>'
+                '<c t="inlineStr"><is><t>010-1234-5678</t></is></c></row>'
+            ),
+        }
+    )
+    text = extract_document(xlsx).text or ""
+    assert "12\t010-1234-5678" in text and "연락처" in text
+    hwpx = _zip(
+        {
+            "Contents/content.hpf": "<h/>",
+            "Contents/section0.xml": f'<hp:t>주민번호<hp:tab width="4000"/>{_rrn()}</hp:t>',
+        }
+    )
+    assert extract_document(hwpx).text == f"주민번호\t{_rrn()}"
+
+
+def test_text_node_scanning_is_linear() -> None:
+    """★ `<w:t ` 를 이어 붙인 80KB XML 에 24초 — 글자 노드 정규식이 제곱이었다."""
+    import time
+
+    bomb = _zip({"word/document.xml": "<w:t " * 40_000})
+    started = time.perf_counter()
+    extract_document(bomb)
+    assert time.perf_counter() - started < 2
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "input_file", "file_data": "DATA:application/octet-stream;BASE64,{b64}"},
+        {"type": "image_url", "image_url": "data:application/octet-stream;base64,{b64}"},
+    ],
+)
+def test_other_attachment_shapes_are_inspected(part: dict[str, Any]) -> None:
+    """★ 고정된 세 자리만 봐서 `input_file` · 문자열 `image_url` · 대문자 스킴이 비껴갔다."""
+    b64 = base64.b64encode(_docx(f"주민번호 {_rrn()}")).decode()
+    filled = {
+        key: value.format(b64=b64) if isinstance(value, str) else value
+        for key, value in part.items()
+    }
+    request = {"model": "x", "messages": [{"role": "user", "content": [filled]}]}
+    assert _proxy_status(request)[0] == 400
+
+
+def test_file_references_and_short_plaintext_follow_the_right_rule(tmp_path: Path) -> None:
+    policy = _policy(tmp_path, uninspected="block")
+    reference = {
+        "model": "x",
+        "messages": [
+            {"role": "user", "content": [{"type": "file", "file": {"file_id": "file-abc123"}}]}
+        ],
+    }
+    assert _proxy_status(reference, policy)[0] == 400
+    short = {
+        "model": "x",
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "file", "file": {"file_data": "4111111111111111"}}],
+            }
+        ],
+    }
+    status, headers = _proxy_status(short, policy)
+    assert (
+        status == 200 and headers["X-Garim-Verdict"] == "mask"
+    )  # 원문으로 검사하고 첨부로 세지 않는다
+
+
+def test_scan_treats_maskable_document_values_as_unmaskable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from garim.cli import main
+
+    (tmp_path / "contacts.docx").write_bytes(_docx("연락처 010-1234-5678"))
+    assert main(["scan", str(tmp_path)]) == 2
+    assert "unmaskable document" in capsys.readouterr().err

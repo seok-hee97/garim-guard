@@ -161,12 +161,16 @@ class AttachmentPolicy(BaseModel):
     - `unmaskable` — 문서 첨부(PDF · DOCX · XLSX · PPTX · HWPX)에서 꺼낸 글에 가려야 할 값이
       나왔을 때.
       문서 안은 가릴 수 없으므로 막거나(`block`) 경고하고 그대로 보낸다(`warn`).
-    - `uninspected` — 글을 꺼내지 못한 첨부(이미지 · 레거시 HWP/DOC · 암호 걸린 PDF · `[docs]` 없이
-      받은 PDF). `allow` 는 지금처럼 보내고, `warn` 은 경고와 함께 보내고, `block` 은 막는다.
+    - `unreadable` — 문서인데 읽지 못했을 때(너무 큼 · 깨짐 · 암호 · 시간 초과 · `[docs]` 없이 받은
+      PDF). 기본은 막는다 — 일부러 크게 · 깨지게 만든 문서가 검사를 비껴가지 못하게(재검토).
+    - `uninspected` — 글을 꺼낼 수 없는 첨부(이미지 · 오디오 · 레거시 HWP/DOC · 글이 없는 문서 ·
+      `file_id` 만 있는 파일 · 원격 이미지 주소). `allow` 는 그대로 보내고, `warn` 은 경고와 함께
+      보내고, `block` 은 막는다.
     """
 
     model_config = ConfigDict(extra="forbid")
     unmaskable: Literal["block", "warn"] = "block"
+    unreadable: Literal["allow", "warn", "block"] = "block"
     uninspected: Literal["allow", "warn", "block"] = "allow"
 
 

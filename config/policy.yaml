@@ -55,9 +55,11 @@ custom_patterns:
     regex: 'EMP-\d{6}'
     mode: mask
 
-# 프록시 첨부(내장 기본값과 같다). `unmaskable` — 문서(PDF · DOCX · XLSX · PPTX · HWPX)에서 꺼낸 글에
-# 가려야 할 값이 나왔을 때 block | warn. `uninspected` — 글을 꺼내지 못한 첨부(이미지 등)에
-# allow | warn | block.
+# 프록시 첨부(내장 기본값과 같다).
+# - unmaskable: 문서(PDF · DOCX · XLSX · PPTX · HWPX · ODF)에서 꺼낸 글에 가려야 할 값이 나왔을 때 — block | warn
+# - unreadable: 문서인데 읽지 못했을 때(너무 큼 · 깨짐 · 암호 · 시간 초과 · [docs] 없는 PDF) — allow | warn | block
+# - uninspected: 글을 꺼낼 수 없는 첨부(이미지 · 오디오 · 글 없는 문서 · file_id) — allow | warn | block
 attachments:
   unmaskable: block
+  unreadable: block
   uninspected: allow

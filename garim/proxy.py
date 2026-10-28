@@ -40,7 +40,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from garim.api import Inspector
-from garim.attachments import Extraction, extract_document
+from garim.attachments import (
+    TEXT_FALLBACK_REASONS,
+    UNREADABLE_REASONS,
+    Extraction,
+    extract_document,
+)
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
 from garim.models import CheckResult, Origin, Segment
@@ -220,7 +225,10 @@ _UNSCANNED_REQUEST_KEYS = frozenset(
 #   (`4111111111111111`)이 이진처럼 보일 수 있다. ★ 재검토: 파일 서명 목록으로 가르던 판은 `BM`
 #   으로 시작하는 텍스트를 건너뛰었고, 서명이 목록에 없는 큰 첨부(HWP · 줄바꿈 base64)를 막았다.
 _BINARY_PARTS = (("image_url", "url"), ("input_audio", "data"), ("file", "file_data"))
-_DATA_URL = re.compile(r"(?P<prefix>data:(?P<mime>[^,]*?)(?:;[^,;]*)*?;base64,)(?P<body>.*)", re.S)
+# 대소문자를 가리지 않는다 — `DATA:` · `;BASE64,` 도 data URL 이다(재검토).
+_DATA_URL = re.compile(
+    r"(?P<prefix>data:(?P<mime>[^,]*?)(?:;[^,;]*)*?;base64,)(?P<body>.*)", re.S | re.I
+)
 _SHORT_PAYLOAD = 256
 
 
@@ -258,11 +266,16 @@ def _decoded_text(raw: bytes) -> tuple[str, str] | None:
     return None
 
 
-def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedText | Extraction:
+def _classify_payload(
+    value: str, *, require_data_url: bool, budget: list[int] | None = None
+) -> str | _EncodedText | Extraction:
     """`"plain"`(문자열로 검사) · `"binary"`(글을 꺼내지 못한 이진) · `_EncodedText`(푼 글을 검사해
     가린다) · `Extraction`(문서에서 꺼낸 글 — 탐지에만 쓴다).
 
     문서를 텍스트보다 먼저 본다 — ASCII 로만 된 PDF 를 텍스트로 보고 다시 인코딩하면 파일이 깨진다.
+    문서처럼 보이지만 읽지 못했고 바이트가 텍스트로 읽히면, 그 텍스트를 탐지용으로 검사한다
+    (★ 재검토: `%PDF` 로 시작하는 메모 · `[docs]` 없이 받은 ASCII PDF 가 검사 없이 나갔다).
+    `budget` 은 요청 하나에서 문서로부터 꺼낼 남은 글자 수다.
     """
     match = _DATA_URL.fullmatch(value)
     if match is not None:
@@ -283,8 +296,19 @@ def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedTe
         return "plain"
     if not raw:
         return "plain"
-    document = extract_document(raw)
+    remaining = budget[0] if budget is not None else None
+    document = (
+        extract_document(raw, max_chars=max(remaining, 0) + 1)
+        if remaining is not None
+        else extract_document(raw)
+    )
     if document is not None:
+        if document.text is None and document.reason in TEXT_FALLBACK_REASONS:
+            fallback = _decoded_text(raw)
+            if fallback is not None:
+                document = Extraction(document.kind, fallback[0], "raw_text")
+        if document.text is not None and budget is not None:
+            budget[0] -= len(document.text)
         return document
     decoded = _decoded_text(raw)
     if decoded is not None:
@@ -420,34 +444,64 @@ class _Attachment:
     reason: str | None = None
 
 
-def _prepare_part(part: Any, attachments: list[_Attachment], message: int, origin: Origin) -> Any:
+def _prepare_part(
+    part: Any,
+    attachments: list[_Attachment],
+    message: int,
+    origin: Origin,
+    budget: list[int] | None = None,
+) -> Any:
     """내용 파트의 첨부를 검사할 꼴로 바꾼다. 경로는 원래 파트와 같다.
 
     - 텍스트 첨부는 제자리에서 `_EncodedText` 가 되어 다른 값처럼 가린다.
     - 문서는 꺼낸 글을 `attachments` 에 담고, 보기에서 본문을 뺀다 — 탐지만 하고 가리지 않는다.
-    - 글을 꺼내지 못한 이진은 `attachments` 에 담는다. 짧은 값은 보기에 남겨 원문도 검사한다
-      (base64 글자만으로 된 평문이 이진처럼 보일 수 있다). 원격 이미지 주소도 내용은 못 본다.
+    - 글을 꺼내지 못한 큰 이진은 `attachments` 에 담는다. 짧은 값은 원문으로 검사하고 첨부로 세지
+      않는다(base64 글자만으로 된 평문이 이진처럼 보일 수 있다). 원격 이미지 주소 · `file_id` 만
+      있는 파일도 내용을 못 본 첨부다.
+
+    ★ 재검토 — 고정된 세 자리만 봐서 `input_file` · 문자열 `image_url` · 대문자 `DATA:` 가
+      추출도 첨부 정책도 비껴갔다.
     """
     if not isinstance(part, dict):
         return part
-    view = dict(part)
+    # (값을 든 dict, 키, 보기에서 지울 바깥 키 또는 None, http(s) 주소가 올 수 있는 자리인가)
+    slots: list[tuple[dict[str, Any], str, str | None, bool]] = []
     for outer, inner in _BINARY_PARTS:
         holder = part.get(outer)
-        value = holder.get(inner) if isinstance(holder, dict) else None
-        if not isinstance(value, str):
-            continue
-        kind = _classify_payload(value, require_data_url=inner == "url")
+        if isinstance(holder, dict) and isinstance(holder.get(inner), str):
+            slots.append((holder, inner, outer, inner == "url"))
+        elif outer == "image_url" and isinstance(holder, str):
+            slots.append((part, outer, None, True))
+    if part.get("type") == "input_file" and isinstance(part.get("file_data"), str):
+        slots.append((part, "file_data", None, False))
+    reference = part.get("file") if isinstance(part.get("file"), dict) else part
+    if (
+        (reference is not part or part.get("type") == "input_file")
+        and not isinstance(reference.get("file_data"), str)
+        and (reference.get("file_id") or reference.get("file_url"))
+    ):
+        attachments.append(_Attachment(message, origin, "file", None, "file_reference"))
+    hidden: list[tuple[str | None, str]] = []
+    for container, key, outer, url_slot in slots:
+        value = container[key]
+        kind = _classify_payload(value, require_data_url=url_slot, budget=budget)
         if isinstance(kind, _EncodedText):
-            holder[inner] = kind
+            container[key] = kind
         elif isinstance(kind, Extraction):
             attachments.append(_Attachment(message, origin, kind.kind, kind.text, kind.reason))
-            view[outer] = {k: v for k, v in holder.items() if k != inner}
+            hidden.append((outer, key))
         elif kind == "binary":
-            attachments.append(_Attachment(message, origin, outer, None, "binary"))
             if len(value) > _SHORT_PAYLOAD:
-                view[outer] = {k: v for k, v in holder.items() if k != inner}
-        elif outer == "image_url" and value.startswith(("http://", "https://")):
-            attachments.append(_Attachment(message, origin, "image_url", None, "remote"))
+                attachments.append(_Attachment(message, origin, outer or key, None, "binary"))
+                hidden.append((outer, key))
+        elif url_slot and value.lower().startswith(("http://", "https://")):
+            attachments.append(_Attachment(message, origin, outer or key, None, "remote"))
+    view = dict(part)  # 텍스트 첨부가 `_EncodedText` 로 바뀐 뒤에 만든다
+    for outer, key in hidden:
+        if outer is None:
+            view.pop(key, None)
+        else:
+            view[outer] = {k: v for k, v in part[outer].items() if k != key}
     return view
 
 
@@ -473,7 +527,9 @@ def _collect(node: Any, path: tuple[Any, ...], origin: Origin, out: list[_Leaf])
 
 
 def _field_leaves(
-    working: dict[str, Any], attachments: list[_Attachment] | None = None
+    working: dict[str, Any],
+    attachments: list[_Attachment] | None = None,
+    budget: list[int] | None = None,
 ) -> list[_Leaf]:
     """본문(`content` 의 텍스트) 밖에서 상류로 가는 문자열을 전부 모은다.
 
@@ -510,7 +566,7 @@ def _field_leaves(
                     if _is_text_part(part):
                         part = {k: v for k, v in part.items() if k != "text"}
                     prepared = _prepare_part(
-                        part, attachments if attachments is not None else [], index, origin
+                        part, attachments if attachments is not None else [], index, origin, budget
                     )
                     _collect(prepared, (*path, part_index), origin, leaves)
             elif key == "tool_calls" and isinstance(value, list):
@@ -561,10 +617,15 @@ def _restore_argument_strings(working: dict[str, Any]) -> None:
     for message in working["messages"]:
         content = message.get("content")
         for part in content if isinstance(content, list) else []:
-            for outer, inner in _BINARY_PARTS:
-                holder = part.get(outer) if isinstance(part, dict) else None
-                if isinstance(holder, dict) and isinstance(holder.get(inner), _EncodedText):
-                    holder[inner] = holder[inner].render()
+            if not isinstance(part, dict):
+                continue
+            for key, value in list(part.items()):
+                if isinstance(value, _EncodedText):
+                    part[key] = value.render()
+                elif isinstance(value, dict):
+                    for inner, item in list(value.items()):
+                        if isinstance(item, _EncodedText):
+                            value[inner] = item.render()
         calls = message.get("tool_calls") or []
         functions = [call.get("function") for call in calls if isinstance(call, dict)]
         functions.append(message.get("function_call"))
@@ -600,7 +661,10 @@ def _leaf_message(group: list[_Leaf], offset: int) -> int | None:
 
 
 def _blocked_body(
-    results: list[tuple[CheckResult, Any]], verdict: str, extra_reasons: set[str] = frozenset()
+    results: list[tuple[CheckResult, Any]],
+    verdict: str,
+    extra_reasons: set[str] = frozenset(),
+    attachments: list[_Attachment] = (),
 ) -> dict[str, Any]:
     """`results` 는 (검사 결과, 세그먼트 · 오프셋 → (메시지 세그먼트 번호, 메시지 번호)) 쌍이다.
 
@@ -611,7 +675,8 @@ def _blocked_body(
             "type": "garim_blocked",
             "message": "가림이 이 요청을 차단했습니다. 상류로 전달하지 않았습니다.",
             "verdict": verdict,
-            "degraded": any(result.degraded for result, _ in results),
+            "degraded": any(result.degraded for result, _ in results)
+            or bool({"attachment_unreadable", "attachment_not_inspected"} & set(extra_reasons)),
             "degraded_reasons": sorted(
                 {reason for result, _ in results for reason in result.degraded_reasons}
                 | set(extra_reasons)
@@ -626,6 +691,11 @@ def _blocked_body(
                 for result, locate in results
                 for finding in (*result.leaks, *result.attacks)
                 for segment, message in [locate(finding.segment_idx, finding.span[0])]
+            ],
+            # 막은 까닭이 된 첨부 — 어느 메시지의 무엇인지(값은 싣지 않는다).
+            "attachments": [
+                {"message": item.message, "kind": item.kind, "reason": item.reason or "unmaskable"}
+                for item in attachments
             ],
         }
     }
@@ -711,13 +781,16 @@ class ProxyService:
 
         messages = payload.get("messages")
         segments = segments_from_messages(messages)
+        inspector = self._inspector_factory()
         attachments: list[_Attachment] = []
+        # 요청 하나에서 문서로부터 꺼낼 글자 수 — 검사 상한을 넘기면 어차피 막는다(재검토: 작은
+        # 첨부 여러 개가 수 GB 의 글을 메모리에 쌓을 수 있었다).
+        budget = [inspector.policy.config.limits.max_input_chars + 1]
         try:
             working = _working_copy(payload)
-            groups = _field_groups(_field_leaves(working, attachments))
+            groups = _field_groups(_field_leaves(working, attachments, budget))
         except RecursionError as exc:
             raise ProxyError(400, "request is nested too deeply") from exc
-        inspector = self._inspector_factory()
         # 두 검사가 볼트를 나눠 쓴다 — 본문 · 필드에 있는 `<PHONE_1>` 같은 글자를 어느 검사보다
         # 먼저 피한다. ★ 전수 검토: 필드 쪽만 미리 피해서, 본문의 `<PHONE_1>` 과 필드 번호의
         # 토큰이 같아졌다.
@@ -748,8 +821,11 @@ class ProxyService:
             )
         verdicts = [item.verdict for item, _ in checked]
         extra_reasons: set[str] = set()
-        # 첨부 — 문서는 꺼낸 글을 따로 검사하고(가릴 수는 없다), 글을 못 꺼낸 첨부는 정책을 따른다.
+        # 첨부 — 문서는 꺼낸 글을 따로 검사하고(가릴 수는 없다), 읽지 못한 문서 · 글을 꺼낼 수 없는
+        # 첨부는 정책을 따른다.
         attachment_policy = inspector.policy.config.attachments
+        flagged: list[_Attachment] = []
+        attachment_degraded = False
         documents = [item for item in attachments if item.text]
         if documents:
             documents_result = inspector.check(
@@ -762,17 +838,37 @@ class ProxyService:
                     lambda segment, offset: (None, documents[segment].message),
                 )
             )
-            document_verdict = documents_result.verdict
-            if document_verdict == "mask":
-                document_verdict = attachment_policy.unmaskable
+            # 문서는 가리지 않으므로 요청의 판정이 `mask` 가 되지는 않는다. 대신 가려야 할 값이
+            # 하나라도 있으면 정책을 건다 — ★ 재검토: 판정이 정확히 mask 일 때만 걸어서, 같은 문서의
+            # 기밀 표식(warn) 하나가 연락처를 그대로 보내게 했다.
+            document_verdict = (
+                "allow" if documents_result.verdict == "mask" else documents_result.verdict
+            )
+            masked = documents_result.masked_segments
+            if masked is not None:
+                document_verdict = max(
+                    document_verdict, attachment_policy.unmaskable, key=SEVERITY.__getitem__
+                )
                 extra_reasons.add("attachment_unmaskable")
+                flagged.extend(
+                    item for item, text in zip(documents, masked, strict=True) if text != item.text
+                )
             verdicts.append(document_verdict)
-        uninspected = [item for item in attachments if item.text is None]
-        if uninspected and attachment_policy.uninspected != "allow":
-            verdicts.append(attachment_policy.uninspected)
-            extra_reasons.add("attachment_not_inspected")
+        unreadable = [i for i in attachments if i.text is None and i.reason in UNREADABLE_REASONS]
+        uninspected = [
+            i for i in attachments if i.text is None and i.reason not in UNREADABLE_REASONS
+        ]
+        for items, setting, reason in (
+            (unreadable, attachment_policy.unreadable, "attachment_unreadable"),
+            (uninspected, attachment_policy.uninspected, "attachment_not_inspected"),
+        ):
+            if items and setting != "allow":
+                verdicts.append(setting)
+                extra_reasons.add(reason)
+                attachment_degraded = True  # 검사가 다 되지 않았다
+                flagged.extend(items)
         verdict = max(verdicts, key=SEVERITY.__getitem__)
-        degraded = any(item.degraded for item, _ in checked)
+        degraded = any(item.degraded for item, _ in checked) or attachment_degraded
         reasons = sorted(
             {reason for item, _ in checked for reason in item.degraded_reasons} | extra_reasons
         )
@@ -784,7 +880,7 @@ class ProxyService:
             response_headers["X-Garim-Degraded-Reasons"] = ",".join(reasons)
 
         if verdict == "block":
-            return 400, _blocked_body(checked, verdict, extra_reasons), response_headers
+            return 400, _blocked_body(checked, verdict, extra_reasons, flagged), response_headers
 
         outbound = working
         if fields is not None and fields.masked_segments is not None:

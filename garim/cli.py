@@ -12,7 +12,7 @@ from typing import NoReturn
 
 from garim._version import __version__
 from garim.api import Inspector
-from garim.attachments import DOCUMENT_SUFFIXES, extract_document
+from garim.attachments import DOCUMENT_SUFFIXES, TEXT_FALLBACK_REASONS, extract_document
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
 from garim.models import CheckResult
@@ -421,14 +421,26 @@ def main(argv: list[str] | None = None) -> int:
                 if path.stat().st_size > _MAX_SCAN_BYTES:
                     skipped.append(f"{path}: larger than {_MAX_SCAN_BYTES // (1024 * 1024)}MB")
                     continue
-                if path.suffix.lower() in DOCUMENT_SUFFIXES:
-                    # 문서는 글을 꺼내 검사한다 — 꺼내지 못하면 검사하지 못한 파일이다.
-                    extraction = extract_document(path.read_bytes())
-                    if extraction is None or extraction.text is None:
+                document = path.suffix.lower() in DOCUMENT_SUFFIXES
+                if document:
+                    # 문서는 글을 꺼내 검사한다 — 꺼내지 못하면(글이 없는 문서 포함) 검사하지 못한
+                    # 파일이다. 문서처럼 보이지만 텍스트인 파일은 그 텍스트를 본다(프록시와 같다).
+                    raw = path.read_bytes()
+                    extraction = extract_document(raw)
+                    if extraction is not None and extraction.text is not None:
+                        source = extraction.text
+                    else:
                         reason = extraction.reason if extraction is not None else "not a document"
-                        skipped.append(f"{path}: {reason}")
-                        continue
-                    source = extraction.text
+                        fallback = None
+                        if extraction is None or reason in TEXT_FALLBACK_REASONS:
+                            try:
+                                fallback = raw.decode("utf-8")
+                            except UnicodeDecodeError:
+                                fallback = None
+                        if fallback is None:
+                            skipped.append(f"{path}: {reason}")
+                            continue
+                        source = fallback
                 else:
                     source = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
@@ -442,7 +454,13 @@ def main(argv: list[str] | None = None) -> int:
             _print_result(
                 result, as_json=args.as_json, prefix=str(path), show_masked=args.show_masked
             )
-            highest = _heavier(highest, _exit_code(result))
+            code = _exit_code(result)
+            if document and result.masked_text is not None:
+                # 문서 안은 가릴 수 없다 — 프록시와 같이 `attachments.unmaskable` 을 따른다.
+                setting = inspector.policy.config.attachments.unmaskable
+                print(f"garim: {path}: unmaskable document → {setting}", file=sys.stderr)
+                code = _heavier(code, {"block": 2, "warn": 1}[setting])
+            highest = _heavier(highest, code)
         for entry in skipped:
             print(f"garim: skipped (not inspected) {entry}", file=sys.stderr)
         if (seen or unreadable) and seen + len(unreadable) == len(skipped):
