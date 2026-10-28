@@ -62,12 +62,14 @@ R1 기준선([RESULTS_L1_R2 §0](https://github.com/seok-hee97/garim-guard/blob/
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/seok-hee97/garim-guard.git && cd garim-guard
-python -m pip install -e '.[l1]'        # Python 3.11 ~ 3.14. L0 만 쓸 때는 기본 설치(-e .)
+pip install 'garim-guard[l1]'           # Python 3.11 ~ 3.14. L0 만 쓸 때는 pip install garim-guard
 garim check '연락처는 010-1234-5678 입니다'          # → mask: 연락처는 <PHONE_1> 입니다
 printf '검사할 프롬프트' | garim check --json
 garim scan ./prompts
 ```
+
+소스에서 설치하려면 `git clone https://github.com/seok-hee97/garim-guard.git && cd garim-guard && pip install -e '.[l1]'`.
+정책 예시(`config/policy.yaml`) · 평가 하네스(`bench/`) · 학습 코드 실행은 소스 저장소가 필요하다.
 
 종료 코드는 `0` allow · mask, `1` warn, `2` block, `3` degraded(일부 파일을 읽지 못한 scan 포함), `4` 실행 오류
 (정책 · 모델 로드 실패, 한 파일도 검사하지 못함)다 — `garim scan` 을 CI 게이트로 쓸 수 있다. 디렉터리 scan 은 숨은
@@ -113,7 +115,7 @@ garim proxy --upstream https://generativelanguage.googleapis.com/v1beta/openai  
 # 앱은 base_url=http://127.0.0.1:8080/v1 만 바꾼다. Authorization 헤더는 그대로 상류로 간다.
 ```
 
-macOS 의 python.org 빌드에서 L0 만 설치(`-e .`)했다면 상류 HTTPS 가 `CERTIFICATE_VERIFY_FAILED` 로 실패할 수
+macOS 의 python.org 빌드에서 L0 만 설치(`pip install garim-guard`)했다면 상류 HTTPS 가 `CERTIFICATE_VERIFY_FAILED` 로 실패할 수
 있다 — `pip install certifi` 로 해결한다(`[l1]` 설치에는 이미 들어 있다). 루프백이 아닌 `--host` 로 띄우면
 경고를 낸다 — 그 포트에 닿는 누구나 사용자의 키로 요청을 보낼 수 있다.
 

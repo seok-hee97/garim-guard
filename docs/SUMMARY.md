@@ -168,7 +168,7 @@ deepset 은 학습·평가 split 을 먼저 봉인한 뒤 번역했다. 번역�
 ## 10. 실행
 
 ```bash
-python -m pip install -e '.[l1]'             # Python 3.11 ~ 3.14, 저장소 루트에서
+pip install 'garim-guard[l1]'                # Python 3.11 ~ 3.14 (PyPI)
 garim check '연락처는 010-1234-5678 입니다'      # → mask, <PHONE_1>
 hf download cycloevan/garim-guard l1/r1/onnx/garim_l1.int8.onnx l1/r1/onnx/labels.json \
   l1/r1/onnx/tokenizer.json l1/r1/onnx/tokenizer_config.json \
