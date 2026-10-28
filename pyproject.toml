@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "garim-guard"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local-first Korean prompt DLP inspector — masks PII, secrets and confidential markers and flags prompt attacks before text reaches an external LLM API"
 readme = "README.md"
 # 상한은 유니코드 판을 검증한 마이너까지다 — 새 판은 NFKC 를 비교한 뒤 연다(DESIGN §8.6.2).
@@ -75,6 +75,7 @@ bench = [
 Homepage = "https://github.com/seok-hee97/garim-guard"
 Documentation = "https://github.com/seok-hee97/garim-guard/blob/main/docs/README.md"
 Issues = "https://github.com/seok-hee97/garim-guard/issues"
+Changelog = "https://github.com/seok-hee97/garim-guard/blob/main/CHANGELOG.md"
 Models = "https://huggingface.co/cycloevan/garim-guard"
 
 [project.scripts]
