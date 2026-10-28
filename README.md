@@ -160,6 +160,21 @@ outbound = result.masked_segments        # 외부 API 로 보낼 것
 같다(파일에만 사용자 패턴 예시 `EMP-\d{6}` 가 있다). 바꿀 때는 이 파일을 복사해 고친 뒤 넘긴다. 엄격 프로필은
 패키지에 들어 있어 이름(`strict`)으로 넘긴다.
 
+### 다른 모델 연결
+
+모델을 고르고 학습하는 일은 패키지 밖에서 한다. 결과는 네 자리 중 하나로 붙인다.
+- 로컬 LLM 판정기는 `--l2-endpoint` · `--l2-model` 로 붙인다(Ollama · llama-server).
+- 가림 형식으로 학습한 L1 은 ONNX 폴더째 `--l1-model-dir` 로 붙인다.
+- 그 밖의 모델 · 사전은 파이썬 백엔드로 감싸 `--l1-backend` · `--l2-backend` 로 붙인다(`모듈:함수` 또는 `파일.py:함수`).
+
+```bash
+GARIM_NAME_LIST=names.txt garim --l1-backend examples/backends/l1_name_list.py:build check '홍길동 고객님 건입니다'
+# → mask: <PERSON_1> 고객님 건입니다
+```
+
+예시 파일은 소스 저장소의 `examples/backends/` 에 있다. 계약 · 같은 셋으로 재는 방법은 [INTEGRATION.md](https://github.com/seok-hee97/garim-guard/blob/main/docs/INTEGRATION.md) 에 있다.
+`--l1-backend` · `--l2-backend` 는 0.1.2 다음 릴리스부터 들어간다. 0.1.2 에서는 라이브러리(`Inspector(l1_backend=...)`)로 붙인다.
+
 ## 모델 · 데이터
 
 | 저장소 | 내용 |

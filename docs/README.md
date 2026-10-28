@@ -9,6 +9,7 @@
 |---|---|
 | [SUMMARY.md](SUMMARY.md) | 외부 검토용 요약 — 무엇을 왜 만들었고 지금 어디까지 왔는가 |
 | [../README.md](../README.md) | 설치 · 사용법 · 성능 요약 |
+| [INTEGRATION.md](INTEGRATION.md) | 외부 모델 연결 — 로컬 LLM · ONNX 폴더 · 파이썬 백엔드 계약과 예시, 같은 셋으로 재는 법 |
 | [MODEL_CARD_L1.md](MODEL_CARD_L1.md) | 배포 L1 모델 카드 — 데이터 · 교사 · 결과 · 한계 |
 
 ## 설계

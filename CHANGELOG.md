@@ -3,6 +3,18 @@
 PyPI [`garim-guard`](https://pypi.org/project/garim-guard/) 릴리스마다 바뀐 것을 적는다. 각 항목의
 이유와 재현 입력은 커밋 메시지와 `tests/` 의 ★ 주석에 있다.
 
+## 다음 릴리스 (미출시)
+
+### 추가 — 외부 모델 연결
+
+- `--l1-backend` · `--l2-backend`: 패키지 밖 모델 · 사전을 `모듈:함수` 또는 `파일.py:함수` 로 L1 · L2 자리에
+  붙인다. 프록시에도 그대로 붙는다. 시작할 때 실패하면(파일 없음 · import 오류 · 계약 위반) 검사하지 않고
+  종료 코드 `4` 로 끝난다. 라이브러리에서는 `garim.backends.load_backend`.
+- 소스 저장소의 `bench.l1_product_path` · `bench.run_axis_b --judge garim-l1` 이 `--l1-backend` 를 받는다.
+  붙인 모델을 배포 모델과 같은 셋 · 같은 판정 경로로 잰다.
+- [docs/INTEGRATION.md](docs/INTEGRATION.md) — 네 연결 자리의 계약(ONNX 입출력 · 라벨 · 점수 · 스레드 ·
+  시간 예산)과 예시 셋 `examples/backends/`(이름 목록 · Hugging Face NER · 공격 분류기).
+
 ## 0.1.2 — 2026-10-28
 
 ### 고침

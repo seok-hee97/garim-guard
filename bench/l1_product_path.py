@@ -44,22 +44,32 @@ def _micro(gold: set[tuple[str, int, str]], predicted: set[tuple[str, int, str]]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--l1-model-dir", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--l1-model-dir")
+    source.add_argument("--l1-backend", help="패키지 밖 백엔드(`모듈:함수` · `파일.py:함수`)")
     parser.add_argument("--policy", default="config/policy.yaml")
     parser.add_argument("--input", action="append", required=True)
     parser.add_argument("--output")
     args = parser.parse_args()
 
     from garim import Inspector
+    from garim.backends import load_backend
     from garim.detect.l1 import OnnxL1Backend
     from garim.normalize.chain import normalize
     from garim.normalize.offsets import to_source_span
     from garim.segment.chunk import chunk_text
     from garim.training.data import load_jsonl
 
-    backend = OnnxL1Backend(args.l1_model_dir)
+    backend = (
+        load_backend(args.l1_backend, layer="L1")
+        if args.l1_backend
+        else OnnxL1Backend(args.l1_model_dir)
+    )
     inspector = Inspector(args.policy, l1_backend=backend)
     threshold = inspector.policy.config.thresholds.l1_pii
+    # 토크나이저가 없는 백엔드는 런타임과 같이 보수적 문자 기준으로 자른다.
+    chunk_size = getattr(backend, "max_length", inspector.policy.config.limits.chunk_size)
+    tokenizer = getattr(backend, "tokenizer", None)
 
     gold: dict[str, set] = defaultdict(set)
     raw: dict[str, set] = defaultdict(set)
@@ -75,9 +85,9 @@ def main() -> int:
             bundle = normalize(record.text)
             for chunk in chunk_text(
                 bundle.norm.text,
-                chunk_size=backend.max_length,
+                chunk_size=chunk_size,
                 chunk_overlap=64,
-                tokenizer=backend.tokenizer,
+                tokenizer=tokenizer,
             ):
                 output = backend.infer(
                     chunk.text,

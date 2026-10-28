@@ -42,6 +42,9 @@ def main() -> int:
     parser.add_argument("--kanana-dir")
     parser.add_argument("--polyguard-dir")
     parser.add_argument("--l1-model-dir", help="학습된 L1 ONNX 디렉터리(garim-l1)")
+    parser.add_argument(
+        "--l1-backend", help="garim-l1 자리에 붙일 패키지 밖 백엔드(`모듈:함수` · `파일.py:함수`)"
+    )
     parser.add_argument("--l2-endpoint", help="Gemma 4 llama-server /v1 (루프백)")
     parser.add_argument("--l2-model", default="gemma-4-e2b-it")
     parser.add_argument("--gemini-model", default="gemini-3.8-flash")
@@ -62,9 +65,11 @@ def main() -> int:
         if name == "garim-l0":
             judge = judge_module.garim_l0(args.policy)
         elif name == "garim-l1":
-            if not args.l1_model_dir:
-                raise SystemExit("--l1-model-dir is required for the garim-l1 judge")
-            judge = judge_module.garim_l1(args.l1_model_dir, args.policy)
+            if not args.l1_model_dir and not args.l1_backend:
+                raise SystemExit("--l1-model-dir or --l1-backend is required for garim-l1")
+            judge = judge_module.garim_l1(
+                args.l1_model_dir, args.policy, l1_backend=args.l1_backend
+            )
         elif name == "rules-no-normalization":
             judge = judge_module.rules_without_normalization()
         elif name.startswith("kanana"):

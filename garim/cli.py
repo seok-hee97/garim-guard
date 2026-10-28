@@ -82,19 +82,32 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"garim-guard {__version__}")
     parser.add_argument("--policy", help="정책 YAML 경로")
     parser.add_argument("--mode", choices=("interactive", "thorough"), default="interactive")
-    parser.add_argument(
+    l1_source = parser.add_mutually_exclusive_group()
+    l1_source.add_argument(
         "--l1-model-dir",
         help="학습된 L1 ONNX 디렉터리(garim_l1.*.onnx·labels.json·토크나이저). 생략하면 L0 만 돈다",
+    )
+    l1_source.add_argument(
+        "--l1-backend",
+        metavar="MODULE:NAME",
+        help="패키지 밖 L1 모델 — L1Backend 를 돌려주는 `모듈:함수` 또는 `파일.py:함수`"
+        "(docs/INTEGRATION.md)",
     )
     parser.add_argument(
         "--l1-model-file",
         default="garim_l1.int8.onnx",
         help="--l1-model-dir 안의 ONNX 파일 이름",
     )
-    parser.add_argument(
+    l2_source = parser.add_mutually_exclusive_group()
+    l2_source.add_argument(
         "--l2-endpoint",
         help="thorough 모드 L2 판정기의 루프백 OpenAI 호환 /v1 주소 "
         "(llama-server·Ollama). 루프백이 아니면 거부한다",
+    )
+    l2_source.add_argument(
+        "--l2-backend",
+        metavar="MODULE:NAME",
+        help="패키지 밖 L2 판정기 — L2Backend 를 돌려주는 `모듈:함수` 또는 `파일.py:함수`",
     )
     parser.add_argument(
         "--l2-model",
@@ -247,6 +260,10 @@ def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
 
 
 def _l1_backend(args: argparse.Namespace) -> L1Backend | None:
+    if args.l1_backend is not None:
+        from garim.backends import load_backend
+
+        return load_backend(args.l1_backend, layer="L1")
     if args.l1_model_dir is None:
         return None
     # `[l1]` 설치는 torch 없이 토크나이저만 쓴다. transformers 가 임포트마다 "PyTorch was not
@@ -258,6 +275,10 @@ def _l1_backend(args: argparse.Namespace) -> L1Backend | None:
 
 
 def _l2_backend(args: argparse.Namespace) -> L2Backend | None:
+    if args.l2_backend is not None:
+        from garim.backends import load_backend
+
+        return load_backend(args.l2_backend, layer="L2")
     if args.l2_endpoint is None:
         return None
     from garim.detect.l2 import LocalChatL2Backend

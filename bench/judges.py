@@ -35,12 +35,27 @@ def garim_l0(policy_path: str = "config/policy.yaml") -> Judge:
     return judge
 
 
-def garim_l1(l1_model_dir: str, policy_path: str = "config/policy.yaml") -> Judge:
-    """가림 본체 + 학습된 L1(ONNX QInt8) — interactive 모드 그대로, L0 와 같은 판정 기준."""
-    from garim import Inspector
-    from garim.detect.l1 import OnnxL1Backend
+def garim_l1(
+    l1_model_dir: str | None,
+    policy_path: str = "config/policy.yaml",
+    *,
+    l1_backend: str | None = None,
+) -> Judge:
+    """가림 본체 + 학습된 L1(ONNX QInt8) — interactive 모드 그대로, L0 와 같은 판정 기준.
 
-    inspector = Inspector(policy_path, l1_backend=OnnxL1Backend(l1_model_dir))
+    `l1_backend`(`모듈:함수` · `파일.py:함수`)를 주면 패키지 밖 백엔드를 같은 자리에서 잰다.
+    """
+    from garim import Inspector
+
+    if l1_backend is not None:
+        from garim.backends import load_backend
+
+        backend = load_backend(l1_backend, layer="L1")
+    else:
+        from garim.detect.l1 import OnnxL1Backend
+
+        backend = OnnxL1Backend(l1_model_dir)
+    inspector = Inspector(policy_path, l1_backend=backend)
 
     def judge(text: str) -> bool:
         return bool(inspector.check(text).attacks)
