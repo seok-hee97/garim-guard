@@ -20,6 +20,16 @@ _RRN = re.compile(r"(?<!\d)\d{6}[- ]?[1-8]\d{6}(?!\d)")
 _PASSPORT = re.compile(r"(?<![A-Za-z0-9])[MSROmsro]\d{8}(?![A-Za-z0-9])")
 _PASSPORT_NEW = re.compile(r"(?<![A-Za-z0-9])[MSRODG]\d{3}[A-Z]\d{4}(?![A-Za-z0-9])")
 _PASSPORT_ANCHORS = ("여권", "passport", "Passport", "PASSPORT")
+# 앵커 없는 구형 여권번호는 대문자이고, 날짜 모양이 아니고, 다른 번호 이름이 가깝지 않을 때만
+# 받는다.
+# ★ 재측정 — 앵커를 늘 요구했더니 대화 속 `M06430019이긴 한데` 를 놓쳐 KDPII 여권 재현율이
+#   171 → 54 자로 떨어졌다. 앞선 오탐(`회원번호 M00012345`, `모델명 S12345678`, `티켓 R20241028`)은
+#   이 조건으로 막는다.
+_PASSPORT_OTHER_LABELS = (
+    "회원", "모델", "제품", "티켓", "주문", "시리얼", "코드", "쿠폰", "예약", "송장",
+    "사번", "학번", "품번", "부품", "계정", "샘플", "ID", "SKU",
+)
+_DATE_DIGITS = re.compile(r"(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")
 _DRIVER = re.compile(r"(?<!\d)(?:1[1-9]|2[0-8])[- ]\d{2}[- ]\d{6}[- ]\d{2}(?!\d)")
 _BUSINESS = re.compile(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{5}(?!\d)")
 _CORPORATION = re.compile(r"(?<!\d)\d{6}[- ]?\d{7}(?!\d)")
@@ -42,6 +52,13 @@ _ACCOUNT_ANCHORS = (
 # 흔한 낱말과 같은 은행 이름(`국민 여러분`, `우리 회사`)은 번호 바로 앞에 있을 때만 앵커다.
 _BANK_RIGHT_BEFORE = re.compile(r"(?:국민|우리|하나|기업|산업|부산|대구|경남|광주|전북|제주)[ :]?$")
 _PHONE_SHAPED = re.compile(r"01[016789]-?\d{3,4}-?\d{4}")
+# 카드 · 운전면허 모양은 계좌가 아니다 — 은행 이름이 카드사 이름이기도 해서
+# `신한 2050-3830-4443-3739`(카드)가 계좌로 잡혔다(재측정: KDPII 계좌 오탐 332자가 전부 카드).
+_NOT_ACCOUNT_SHAPES = re.compile(
+    r"\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{4}|\d{4}[ -]\d{6}[ -]\d{4,5}"
+    r"|(?:1[1-9]|2[0-8])-\d{2}-\d{6}-\d{2}"
+)
+_ACCOUNT_ANTI = ("카드", "card", "Card")
 
 _RRN_ANCHORS = ("주민등록번호", "주민 번호", "주민번호", "내국인등록번호", "등록번호")
 _FRN_ANCHORS = ("외국인등록번호", "외국인 등록번호", "외국인번호", "등록번호")
@@ -137,7 +154,14 @@ def detect_kr_pii(text: str, *, rrn_anchor: bool = True) -> list[Finding]:
         ):
             findings.append(_finding("L-KR-06", match, 1.0, "corporation_checksum"))
     for match in _PASSPORT.finditer(text):
-        if _near_anchor(text, match.span(), _PASSPORT_ANCHORS):
+        value = match.group(0)
+        anchored = _near_anchor(text, match.span(), _PASSPORT_ANCHORS)
+        bare_ok = (
+            value[0].isupper()
+            and not _DATE_DIGITS.match(value[1:])
+            and _nearest(text, match.span(), _PASSPORT_OTHER_LABELS) is None
+        )
+        if anchored or bare_ok:
             findings.append(_finding("L-KR-03", match, 0.8, "passport_format"))
     for match in _PASSPORT_NEW.finditer(text):
         if _near_anchor(text, match.span(), _PASSPORT_ANCHORS):
@@ -160,7 +184,11 @@ def detect_kr_pii(text: str, *, rrn_anchor: bool = True) -> list[Finding]:
             number = re.sub(r"\D", "", value)
             if not 10 <= len(number) <= 16 or _PHONE_SHAPED.fullmatch(value):
                 continue
-            if _DATE_RUN.match(number):
+            if _DATE_RUN.match(number) or _NOT_ACCOUNT_SHAPES.fullmatch(value):
+                continue
+            card = _nearest(text, (start, end), _ACCOUNT_ANTI)
+            account = _nearest(text, (start, end), _ACCOUNT_ANCHORS)
+            if card is not None and (account is None or card < account):
                 continue
             bank_right_before = pattern is not _ACCOUNT_BARE and bool(
                 _BANK_RIGHT_BEFORE.search(text[max(0, start - 6) : start])
