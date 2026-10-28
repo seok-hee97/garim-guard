@@ -376,12 +376,12 @@ def test_tool_call_arguments_are_inspected_after_unescaping_hangul() -> None:
     """기본 `json.dumps` 는 한글을 `\\uXXXX` 로 낸다 — 이스케이프된 채로는 규칙이 못 읽는다."""
     import json
 
-    from garim.proxy import _argument_slots
+    from garim.proxy import _field_leaves, _working_copy
 
     arguments = json.dumps({"memo": "[대외비] 구조조정 계획"})
     assert "대외비" not in arguments
-    slots = _argument_slots(_tool_history(arguments)["messages"])
-    assert "대외비" in slots[0].scanned
+    leaves = _field_leaves(_working_copy(_tool_history(arguments)))
+    assert any("대외비" in leaf.text for leaf in leaves)
 
 
 def test_blocked_tool_call_arguments_are_never_forwarded() -> None:
@@ -462,3 +462,293 @@ def test_e2e_echo_judge_tells_a_leak_from_a_pass_and_refuses_to_guess() -> None:
     leaked = judge_echo(f"연락처 {PHONE}, 메일 {EMAIL}\n연락처 {PHONE}, 메일 {EMAIL}")
     assert leaked["verdict"] == "leak"
     assert judge_echo("죄송하지만 도와드릴 수 없습니다.")["verdict"] == "inconclusive"
+
+
+def test_lone_surrogate_does_not_open_a_path_upstream() -> None:
+    """★ JSON 의 `\\ud800` 한 글자로 세그먼트 검사를 건너뛰게 할 수 있었다.
+
+    초판은 인코딩 오류 세그먼트를 검사하지 않고 warn 으로만 올렸고, warn 은 전달된다 —
+    엄격 프로필에서도 API 키와 이메일이 원문으로 나갔다.
+    """
+    import json
+
+    recorder = _Recorder()
+    key = "sk-proj-" + "A" * 40
+    body = json.loads(
+        '{"model": "x", "messages": [{"role": "user", "content": "key ' + key
+        + ' mail kim@example.test \\ud800"}]}'
+    )
+    status, _, headers = _service(recorder).handle_chat_completions(body, {})
+    assert status == 400
+    assert recorder.calls == []
+    assert "input_encoding_error" in headers["X-Garim-Degraded-Reasons"]
+
+    masked_only = json.loads(
+        '{"model": "x", "messages": [{"role": "user", "content": "메일 kim@example.test \\ud800"}]}'
+    )
+    status, _, headers = _service(recorder).handle_chat_completions(masked_only, {})
+    assert status == 200
+    sent = json.dumps(recorder.calls[-1]["payload"], ensure_ascii=False)
+    assert "kim@example.test" not in sent
+    assert headers["X-Garim-Verdict"] == "warn"
+
+
+def test_fields_outside_message_content_are_inspected() -> None:
+    """★ `content` · 도구 인자 밖의 필드가 `dict(payload)` 로 그대로 나갔다."""
+    import json
+
+    recorder = _Recorder()
+    payload = {
+        "model": "x",
+        "temperature": 0.2,
+        "messages": [
+            {"role": "user", "content": "안녕하세요", "name": "lee@example.test"},
+            {"role": "tool", "tool_call_id": "call_8fA9b2Kx0Qz7LmN3", "content": "ok"},
+        ],
+        "prediction": {"type": "content", "content": "연락처 010-2222-3333"},
+        "tools": [
+            {"type": "function", "function": {"name": "f", "description": "메일 kim@example.test"}}
+        ],
+        "user": "park@example.test",
+    }
+    status, _, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 200
+    sent = recorder.calls[0]["payload"]
+    text = json.dumps(sent, ensure_ascii=False)
+    for value in ("lee@example.test", "010-2222-3333", "kim@example.test", "park@example.test"):
+        assert value not in text
+    # 검사 대상이 아닌 값과 ID 는 그대로다.
+    assert sent["model"] == "x" and sent["temperature"] == 0.2
+    assert sent["messages"][1]["tool_call_id"] == "call_8fA9b2Kx0Qz7LmN3"
+    assert sent["tools"][0]["function"]["name"] == "f"
+
+
+def test_block_in_a_request_field_is_never_forwarded() -> None:
+    recorder = _Recorder()
+    payload = {
+        **_request(("user", "안녕하세요")),
+        "prediction": {"type": "content", "content": "주민등록번호 900101-1234561"},
+    }
+    status, body, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 400
+    assert recorder.calls == []
+    assert body["error"]["findings"][0]["message"] is None  # 메시지가 아니라 요청 필드다
+
+
+def test_image_only_message_keeps_its_parts_when_another_message_is_masked() -> None:
+    """★ 텍스트 파트가 없는 배열을 "" 로 바꿔 이미지가 지워졌다."""
+    recorder = _Recorder()
+    image = [{"type": "image_url", "image_url": {"url": "https://example.test/a.png"}}]
+    payload = {
+        "model": "x",
+        "messages": [
+            {"role": "user", "content": image},
+            {"role": "user", "content": "메일 kim@example.test"},
+        ],
+    }
+    _service(recorder).handle_chat_completions(payload, {})
+    assert recorder.calls[0]["payload"]["messages"][0]["content"] == image
+
+
+def test_text_parts_are_inspected_whatever_their_type_name() -> None:
+    recorder = _Recorder()
+    payload = {
+        "model": "x",
+        "messages": [
+            {"role": "user", "content": [{"type": "input_text", "text": "메일 kim@example.test"}]}
+        ],
+    }
+    _service(recorder).handle_chat_completions(payload, {})
+    sent = recorder.calls[0]["payload"]["messages"][0]["content"]
+    assert sent == [{"type": "input_text", "text": "메일 <EMAIL_1>"}]
+
+
+def test_unread_body_is_not_parsed_as_the_next_request() -> None:
+    """★ 본문을 읽지 않은 404 뒤에 keep-alive 로 남아, 본문 바이트가 다음 요청이 됐다."""
+    import socket
+
+    server = _serve(_Recorder())
+    try:
+        smuggled = b"POST /v1/chat/completions HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"
+        raw = (
+            b"POST /v1/unknown HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n" % len(smuggled)
+            + smuggled
+        )
+        with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=5) as sock:
+            sock.sendall(raw)
+            data = b""
+            while chunk := sock.recv(65536):
+                data += chunk
+        assert data.count(b"HTTP/1.1 ") == 1
+        assert data.startswith(b"HTTP/1.1 404")
+    finally:
+        server.shutdown()
+
+
+def test_non_object_body_is_a_client_error_not_a_crash() -> None:
+    server = _serve(_Recorder())
+    try:
+        status, _, text = _post(server, [1, 2])  # type: ignore[arg-type]
+        assert status == 400
+        assert "JSON object" in text
+    finally:
+        server.shutdown()
+
+
+def test_strings_inside_parts_and_custom_tool_calls_are_inspected() -> None:
+    """★ 2차 검토 — 텍스트 파트 · 함수 인자 밖의 문자열이 그대로 나갔다."""
+    import json
+
+    recorder = _Recorder()
+    payload = {
+        "model": "x",
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "file", "file": {"filename": "계약서_hong@example.test.pdf",
+                                          "file_data": "data:application/pdf;base64,QUJD"}},
+                {"type": "image_url", "image_url": {"url": "https://x.test/a.png?o=kim@example.test"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "refusal", "refusal": "lee@example.test 에게는 보낼 수 없습니다"}
+            ], "tool_calls": [
+                {"id": "call_8fA9b2Kx0Qz7LmN3", "type": "custom",
+                 "custom": {"name": "mail", "input": "to: park@example.test"}}
+            ]},
+            {"role": "user", "content": "다음"},
+        ],
+    }
+    status, _, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 200
+    sent = recorder.calls[0]["payload"]
+    text = json.dumps(sent, ensure_ascii=False)
+    for value in ("hong@example.test", "kim@example.test", "lee@example.test", "park@example.test"):
+        assert value not in text
+    # 이진 페이로드와 대화 ID 는 손대지 않는다.
+    parts = sent["messages"][0]["content"]
+    assert parts[0]["file"]["file_data"] == "data:application/pdf;base64,QUJD"
+    assert parts[2]["image_url"]["url"] == "data:image/png;base64,iVBORw0KGgo="
+    assert sent["messages"][1]["tool_calls"][0]["id"] == "call_8fA9b2Kx0Qz7LmN3"
+
+
+def test_newline_before_an_email_in_a_field_is_masked_not_refused() -> None:
+    """★ 2차 검토 — JSON 텍스트째 검사해 `\\n` 의 `n` 이 이메일에 붙고 400 이 났다."""
+    recorder = _Recorder()
+    arguments = '{"note": "첫 줄\\nkim@example.test"}'
+    payload = {
+        **_tool_history(arguments),
+        "prediction": {"type": "content", "content": "# CODEOWNERS\nhong@example.test\n"},
+    }
+    status, _, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 200
+    sent = recorder.calls[0]["payload"]
+    assert sent["prediction"]["content"].startswith("# CODEOWNERS\n<EMAIL_")
+    assert "hong@example.test" not in sent["prediction"]["content"]
+    import json
+
+    forwarded = sent["messages"][1]["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(forwarded)["note"].startswith("첫 줄\n<EMAIL_")
+
+
+def test_large_tool_definitions_get_their_own_input_budget() -> None:
+    """★ 2차 검토 — 큰 `tools` 정의와 긴 대화가 한도를 나눠 써서 PII 없는 요청이 차단됐다."""
+    recorder = _Recorder()
+    tools = [
+        {"type": "function", "function": {"name": f"tool_{index}",
+                                          "description": "주문 상태를 조회한다. " * 20}}
+        for index in range(120)
+    ]
+    payload = {**_request(("user", "배송 문의드립니다. " * 6000)), "tools": tools}
+    status, _, headers = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 200, headers
+    assert "input_truncated" not in headers.get("X-Garim-Degraded-Reasons", "")
+
+
+def test_base64_skip_applies_only_to_content_part_payloads() -> None:
+    """★ 3차 검토 — 어느 깊이의 `data:` 문자열 · `file_data` 키든 건너뛰어 주민번호가 나갔다."""
+    import json
+
+    recorder = _Recorder()
+    for arguments in (
+        json.dumps({"note": f"data:;base64, 주민번호 {_rrn()}"}),
+        json.dumps({"file": {"file_data": f"주민번호 {_rrn()}"}}),
+    ):
+        status, _, _ = _service(recorder).handle_chat_completions(_tool_history(arguments), {})
+        assert status == 400, arguments
+    assert recorder.calls == []
+
+
+def test_scalar_json_tool_arguments_are_inspected_unescaped() -> None:
+    """★ 3차 검토 — JSON 문자열 하나인 인자는 이스케이프째 검사돼 깨지거나 비껴갔다."""
+    import json
+
+    recorder = _Recorder()
+    for arguments in ('"note\\nkim@example.test"', '"kim\\u0040example.test"'):
+        status, _, _ = _service(recorder).handle_chat_completions(_tool_history(arguments), {})
+        assert status == 200
+        forwarded = recorder.calls[-1]["payload"]["messages"][1]["tool_calls"][0]["function"]
+        value = json.loads(forwarded["arguments"])
+        assert "kim@example.test" not in value and "<EMAIL_" in value
+
+
+def test_repeated_keys_in_tool_arguments_are_refused() -> None:
+    """★ 3차 검토 — `json.loads` 가 앞 값을 버려 검사하지 않은 원래 바이트가 나갔다."""
+    recorder = _Recorder()
+    arguments = '{"to": "kim@example.test", "to": "x"}'
+    with pytest.raises(ProxyError, match="repeat a key"):
+        _service(recorder).handle_chat_completions(_tool_history(arguments), {})
+    assert recorder.calls == []
+
+
+def test_deeply_nested_request_is_a_client_error() -> None:
+    recorder = _Recorder()
+    nested: Any = "kim@example.test"
+    for _ in range(2000):
+        nested = {"a": nested}
+    with pytest.raises(ProxyError, match="nested too deeply"):
+        _service(recorder).handle_chat_completions(
+            {**_request(("user", "안녕")), "metadata": nested}, {}
+        )
+    assert recorder.calls == []
+
+
+def test_blocked_field_finding_does_not_claim_a_message_segment() -> None:
+    recorder = _Recorder()
+    payload = {
+        **_request(("user", "안녕하세요"), ("user", "다음")),
+        "tools": [{"type": "function", "function": {"name": "f",
+                                                    "description": f"주민등록번호 {_rrn()}"}}],
+    }
+    status, body, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 400
+    finding = next(item for item in body["error"]["findings"] if item["code"] == "L-KR-01")
+    assert finding["segment"] is None and finding["message"] is None
+
+
+def test_pii_used_as_a_json_key_is_masked_in_request_fields() -> None:
+    """★ 3차 검토 — 필드 검사가 dict 키를 읽지 않아 키 자리의 번호 · 주소가 그대로 나갔다."""
+    import json
+
+    recorder = _Recorder()
+    arguments = json.dumps({"contacts": {"010-1234-5678": "x"}}, ensure_ascii=False)
+    payload = {**_tool_history(arguments), "metadata": {"kim@example.test": "vip"}}
+    status, _, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 200
+    sent = recorder.calls[0]["payload"]
+    text = json.dumps(sent, ensure_ascii=False)
+    assert "010-1234-5678" not in text and "kim@example.test" not in text
+    forwarded = json.loads(sent["messages"][1]["tool_calls"][0]["function"]["arguments"])
+    assert list(forwarded["contacts"]) == ["<PHONE_1>"]
+    assert list(sent["metadata"])[0].startswith("<EMAIL_")
+
+
+def test_unknown_top_level_and_message_key_names_are_inspected() -> None:
+    import json
+
+    recorder = _Recorder()
+    payload = {**_request(("user", "안녕")), "kim@example.test": 1}
+    payload["messages"][0]["lee@example.test"] = True
+    status, _, _ = _service(recorder).handle_chat_completions(payload, {})
+    assert status == 200
+    text = json.dumps(recorder.calls[0]["payload"], ensure_ascii=False)
+    assert "kim@example.test" not in text and "lee@example.test" not in text

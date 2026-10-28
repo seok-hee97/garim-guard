@@ -20,6 +20,7 @@ _TEXT_SUFFIXES = {
     ".conf",
     ".cpp",
     ".css",
+    ".csv",
     ".env",
     ".go",
     ".h",
@@ -28,10 +29,13 @@ _TEXT_SUFFIXES = {
     ".java",
     ".js",
     ".json",
+    ".jsonl",
     ".jsx",
+    ".key",
     ".kt",
     ".log",
     ".md",
+    ".pem",
     ".php",
     ".properties",
     ".py",
@@ -41,12 +45,14 @@ _TEXT_SUFFIXES = {
     ".sql",
     ".toml",
     ".ts",
+    ".tsv",
     ".tsx",
     ".txt",
     ".xml",
     ".yaml",
     ".yml",
 }
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -139,6 +145,16 @@ def _print_result(result: CheckResult, *, as_json: bool, prefix: str | None = No
         print(result.masked_text)
 
 
+def _is_scan_target(relative: Path) -> bool:
+    *directories, name = relative.parts
+    if any(part.startswith(".") for part in directories):
+        return False  # .git · .venv 같은 숨은 디렉터리
+    if name == ".env" or name.startswith(".env."):
+        # ★ 숨은 파일 필터가 `.env` 를 늘 건너뛰었다 — 시크릿이 가장 많은 파일이다.
+        return True
+    return not name.startswith(".") and Path(name).suffix.lower() in _TEXT_SUFFIXES
+
+
 def _iter_files(path: Path) -> list[Path]:
     if path.is_file():
         return [path]
@@ -147,9 +163,7 @@ def _iter_files(path: Path) -> list[Path]:
     return sorted(
         candidate
         for candidate in path.rglob("*")
-        if candidate.is_file()
-        and not any(part.startswith(".") for part in candidate.relative_to(path).parts)
-        and candidate.suffix.lower() in _TEXT_SUFFIXES
+        if candidate.is_file() and _is_scan_target(candidate.relative_to(path))
     )
 
 
@@ -220,6 +234,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"(mode={args.mode}, layers={layers})",
                 file=sys.stderr,
             )
+            if args.host not in _LOOPBACK_HOSTS:
+                # 프록시는 인증 없이 받은 요청을 사용자의 Authorization 헤더째 상류로 보낸다.
+                print(
+                    f"garim proxy: warning — {args.host} is not loopback; anyone who can reach "
+                    "this port can send requests through it",
+                    file=sys.stderr,
+                )
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
@@ -254,6 +275,12 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 4
+        if skipped:
+            # ★ 일부만 읽은 경우는 0 이 나왔다. CP949 한글 파일 하나가 검사되지 않아도
+            #   나머지가 깨끗하면 CI 게이트가 통과했다 — 검사가 불완전하면 degraded(3)다.
+            return max(highest, 3)
+        if not seen:
+            print(f"garim: no files to inspect under {args.path}", file=sys.stderr)
         return highest
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         # RuntimeError: L1 extra(onnxruntime·transformers) 미설치. 모델을 달라고 했는데

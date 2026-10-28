@@ -11,6 +11,8 @@ from garim.models import Finding
 ModeResolver = Callable[[str], str]
 
 _STREAM_ORDER = {"raw": 0, "norm": 1, "nospace": 2, "base64": 3, "hex": 3, "l1": 4}
+# 글자를 지워 원문과 경계가 어긋나는 스트림 — 공백 제거 · 된소리 되돌림.
+_LOSSY_STREAMS = frozenset({"nospace", "detensified"})
 
 
 def overlaps(left: tuple[int, int], right: tuple[int, int]) -> bool:
@@ -61,8 +63,50 @@ def _preferred(left: Finding, right: Finding, mode_for: ModeResolver) -> Finding
     return left if left.span[0] <= right.span[0] else right
 
 
-def deduplicate_streams(findings: list[Finding], mode_for: ModeResolver) -> list[Finding]:
-    """Merge equal-code overlaps, preferring raw while retaining the maximum confidence."""
+def _broken_address(text: str, lossy: Finding, exact: Finding) -> bool:
+    """공백 제거본이 줄 · 공백으로 끊긴 **한 주소**를 이은 것인가 — 그러면 남긴다.
+
+    끊긴 주소로 보는 것은 셋뿐이다: 줄 끝 하이픈 · 밑줄(`hong-\ngildong@…`), 점으로 시작하는
+    나머지(`kim.minsu\n.lee@…` — 원문 매치가 `.` 로 시작한다), 끊긴 도메인(`kim@x.co\n.kr`).
+    나머지는 옆 단어를 삼킨 것이다 — `please mail lee@…`, `Thanks. kim@… is mine`.
+    """
+    left = text[lossy.span[0] : exact.span[0]]
+    right = text[exact.span[1] : lossy.span[1]]
+    inner = text[exact.span[0] : exact.span[1]]
+    if left and left[-1].isspace():
+        word = left.rstrip()
+        if inner[:1] in {".", "-", "_"}:
+            return True
+        if word[-1:] in {"-", "_"} and word[-2:-1].isalnum():
+            return True
+    if right and right[0].isspace():
+        word = right.lstrip()
+        if word[:1] in {".", "-"} and word[1:2].isalnum():
+            return True
+    return False
+
+
+def _spurious_email(text: str, lossy: Finding, exact: Finding) -> bool:
+    """공백 제거 스트림의 이메일 `lossy` 를 정확한 스트림의 `exact` 때문에 버릴 것인가."""
+    if not overlaps(lossy.span, exact.span):
+        return False
+    contains = lossy.span[0] <= exact.span[0] and exact.span[1] <= lossy.span[1]
+    inside = exact.span[0] <= lossy.span[0] and lossy.span[1] <= exact.span[1]
+    if not (contains or inside):
+        # ★ 4차 검토 — 공백을 지우면 다음 줄 주소가 앞 주소의 도메인부터 다시 매치된다
+        #   (`- kim@a.com\n- lee@b.com` → `a.com-lee@b.com`). 이 반쪽 겹침이 이기면 `kim@` 이
+        #   원문으로 남았다. 정확한 매치와 반만 겹치는 공백 제거본은 주소가 아니다.
+        return True
+    return contains and not _broken_address(text, lossy, exact)
+
+
+def deduplicate_streams(
+    findings: list[Finding], mode_for: ModeResolver, text: str | None = None
+) -> list[Finding]:
+    """Merge equal-code overlaps, preferring raw while retaining the maximum confidence.
+
+    `text` 는 스팬이 가리키는 원문이다 — 공백 제거 스트림의 이메일을 버릴지 볼 때만 쓴다.
+    """
     raw = [finding for finding in findings if finding.stream == "raw"]
     prepared: list[Finding] = []
     for finding in findings:
@@ -70,6 +114,26 @@ def deduplicate_streams(findings: list[Finding], mode_for: ModeResolver) -> list
             other.code == finding.code and overlaps(other.span, finding.span) for other in raw
         )
         prepared.append(replace(finding, normalized_only=normalized_only))
+
+    # ★ 공백을 지운 스트림의 이메일이 옆 단어까지 먹었을 뿐이면 버린다. 공백이 사라지면
+    #   이메일 패턴이 이웃 영어 단어를 삼켜서 `please mail lee@example.test now` 가 통째로
+    #   `<EMAIL_1>` 하나가 됐다. 이메일만이다 — 줄바꿈으로 쪼개진 키처럼 공백 제거 스트림만
+    #   전체를 보는 경우는 긴 쪽이 이겨야 꼬리가 원문으로 남지 않는다. 줄바꿈으로 끊긴 주소도
+    #   같은 이유로 남긴다(`_broken_address`). 제로폭으로 쪼갠 이메일은 norm 이 전체를 잡는다.
+    if text is not None:
+        exact = [finding for finding in prepared if finding.stream not in _LOSSY_STREAMS]
+        prepared = [
+            finding
+            for finding in prepared
+            if not (
+                finding.code == "L-CM-03"
+                and finding.stream in _LOSSY_STREAMS
+                and any(
+                    other.code == finding.code and _spurious_email(text, finding, other)
+                    for other in exact
+                )
+            )
+        ]
 
     merged: list[Finding] = []
     for finding in sorted(prepared, key=lambda item: (item.span[0], -item.span[1], item.code)):
@@ -88,6 +152,8 @@ def deduplicate_streams(findings: list[Finding], mode_for: ModeResolver) -> list
         selected = _preferred(current, finding, mode_for)
         merged[duplicate_index] = replace(
             selected,
+            # 같은 코드도 합집합이다 — 반만 겹친 두 매치 중 긴 쪽만 남기면 짧은 쪽 꼬리가 나간다.
+            span=(min(current.span[0], finding.span[0]), max(current.span[1], finding.span[1])),
             confidence=max(current.confidence, finding.confidence),
             evasion=sorted(set(current.evasion + finding.evasion)),
             normalized_only=current.normalized_only and finding.normalized_only,
@@ -121,8 +187,15 @@ def merge_overlaps(findings: list[Finding], mode_for: ModeResolver) -> list[Find
             if current.code == finding.code
             else selected.confidence
         )
+        # ★ 스팬은 합집합으로 넓힌다. 초판은 채택된 쪽 스팬만 남겨서, L1 PERSON (0, 14) 와
+        #   전화번호 (4, 17) 이 겹치면 `<PERSON_1>678 끝` — 폐기된 쪽의 꼬리 숫자가 원문으로
+        #   나갔다. 마스킹 경계는 탐지된 글자를 하나도 남기지 않아야 한다.
         output[index] = replace(
             selected,
+            span=(
+                min(current.span[0], finding.span[0]),
+                max(current.span[1], finding.span[1]),
+            ),
             confidence=confidence,
             evasion=sorted(set(current.evasion + finding.evasion)),
         )

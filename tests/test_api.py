@@ -217,8 +217,10 @@ def test_frn_anchor_path_never_claims_checksum_validation() -> None:
 
 
 def test_structured_keys_are_excluded_but_values_are_scanned() -> None:
+    # ★ 키 제외는 키 **이름**을 개체로 읽지 않는다는 뜻이다(L1). 키 자리에 실제 주소가 있으면
+    #   그건 값이다 — 초판은 이것까지 통과시켰다(2026-10-28 수정, DESIGN §2.6.4).
     key_only = Inspector().check('{"user@example.test": "not sensitive"}')
-    assert key_only.verdict == "allow"
+    assert key_only.masked_text == '{"<EMAIL_1>": "not sensitive"}'
     value = Inspector().check('{"email": "user@example.test"}')
     assert value.verdict == "mask"
     assert value.masked_text == '{"email": "<EMAIL_1>"}'
@@ -310,3 +312,108 @@ def test_confidence_does_not_transfer_across_codes() -> None:
     assert len(merged) == 1
     assert merged[0].code == "L-KR-01"
     assert merged[0].confidence == 1.0
+
+
+def test_lone_surrogate_segment_is_still_inspected() -> None:
+    """★ 인코딩 오류 세그먼트를 건너뛰고 warn 만 냈다 — 그 세그먼트는 검사 없이 나갔다."""
+    result = Inspector().check([Segment("메일 kim@example.test \ud800", origin="user")])
+    assert result.verdict == "warn"
+    assert "input_encoding_error" in result.degraded_reasons
+    assert result.masked_segments == ["메일 <EMAIL_1> \ufffd"]
+
+    keyed = Inspector().check([Segment("key sk-proj-" + "A" * 40 + " \ud800", origin="user")])
+    assert keyed.verdict == "block"
+
+
+def test_anchored_frn_in_a_code_block_still_blocks() -> None:
+    """★ 코드 PII 완화(+0.15)가 L0 에도 걸려 앵커 경로(0.6)가 ``` 안에서 사라졌다."""
+    for text in ("```\n외국인등록번호: 900101-5123456\n```", "    외국인등록번호: 900101-5123456"):
+        result = Inspector().check(text)
+        assert result.verdict == "block", text
+        assert any(finding.code == "L-KR-02" for finding in result.leaks)
+
+
+def test_overlapping_findings_mask_their_union() -> None:
+    """★ 채택된 쪽 스팬만 가려 폐기된 쪽의 꼬리 숫자가 원문으로 나갔다."""
+    from garim.detect.merge import merge_overlaps
+    from garim.mask.vault import Vault, mask_text
+    from garim.models import Finding
+    from garim.policy.engine import MASK_LABELS, PolicyEngine
+    from garim.policy.schema import PolicyConfig
+
+    engine = PolicyEngine(PolicyConfig())
+    text = "연락처 010-1234-5678 끝"
+    start = text.index("010")
+    phone = Finding("L-CM-02", (start, start + 13), 0.8, "L0", "phone_format")
+    person = Finding("L-CT-01", (0, start + 10), 0.9, "L1", "ner", stream="l1")
+    merged = merge_overlaps([phone, person], engine.mode_for)
+    assert merged[0].span == (0, start + 13)
+    assert mask_text(text, merged, vault=Vault(), labels=MASK_LABELS) == "<PERSON_1> 끝"
+
+
+def test_raw_span_wins_over_a_nospace_extension() -> None:
+    """★ 공백을 지운 스트림의 긴 매치가 이겨 영어 문장 전체가 `<EMAIL_1>` 하나가 됐다."""
+    inspector = Inspector()
+    assert inspector.check("please mail lee@example.test now").masked_text == (
+        "please mail <EMAIL_1> now"
+    )
+    # 공백으로 쪼갠 우회는 원문 매치가 없으므로 여전히 공백 제거 스트림이 잡는다.
+    assert Inspector().check("kim @ example.test 로 보내").masked_text == "<EMAIL_1> 로 보내"
+
+
+def test_zero_width_split_email_is_masked_whole() -> None:
+    """★ 2차 검토 — 원문 스트림 우선 규칙이 제로폭으로 쪼갠 이메일의 앞부분을 남겼다."""
+    masked = Inspector().check("mail gildong.\u200bhong@example.test now").masked_text
+    assert masked is not None
+    assert "gildong" not in masked and "hong@" not in masked
+
+
+def test_newline_split_secret_is_masked_whole() -> None:
+    """★ 2차 검토 — 줄바꿈으로 쪼갠 키는 공백 제거 스트림만 전체를 본다. 꼬리가 남으면 안 된다."""
+    from garim.policy.schema import PolicyConfig
+
+    head, tail = "sk-proj-" + "A1b2C3d4E5f6G7h8I9j0K1l2", "M3n4O5p6Q7r8S9t0U1v2W3x4Y5z"
+    inspector = Inspector(PolicyConfig(codes={"L-SEC-01": "mask"}))
+    masked = inspector.check(f"키는 {head}\n{tail} 입니다").masked_text
+    assert masked is not None
+    assert tail not in masked and head not in masked
+
+
+def test_line_broken_email_is_masked_whole() -> None:
+    """★ 3차 검토 — 공백 제거본을 버리는 규칙이 줄바꿈으로 끊긴 주소의 이름 부분을 남겼다."""
+    for text in ("kim.minsu\n.lee@company.com", "hong-\ngildong@naver.com"):
+        assert Inspector().check(text).masked_text == "<EMAIL_1>", text
+
+
+def test_checksum_valid_rrn_in_a_structured_key_still_blocks() -> None:
+    """★ 3차 검토 — 키 제외가 L0 형식 탐지까지 지워 키 자리의 주민번호가 통과했다."""
+    digits = "900101123456"
+    weights = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5]
+    check = (11 - sum(int(d) * w for d, w in zip(digits, weights, strict=True)) % 11) % 10
+    rrn = f"{digits[:6]}-{digits[6:]}{check}"
+    result = Inspector().check('{"ids": {"' + rrn + '": "x"}}')
+    assert result.verdict == "block"
+    # 키 이름 자체(`phone`)는 여전히 개체가 아니다 — 값만 가린다.
+    assert Inspector().check('{"phone": "010-1234-5678"}').masked_text == '{"phone": "<PHONE_1>"}'
+
+
+def test_email_lists_and_sentence_punctuation_mask_each_address_exactly() -> None:
+    """★ 4차 검토 — 이메일 목록에서 앞 주소 조각이 새고, 문장 끝 마침표 뒤 주소는 못 잡았다.
+
+    공백을 지운 스트림이 앞 주소의 도메인부터 다음 줄 주소를 다시 매치해서 반만 겹쳤고
+    (`kim@example.com\\nlee@example.com` → `<EMAIL_1>@example.com`), 끝 경계가 마침표를 거부해
+    `kim@example.com.` 은 아무것도 탐지되지 않았다.
+    """
+    cases = {
+        "kim@example.com\nlee@example.com": "<EMAIL_2>\n<EMAIL_1>",
+        "- kim@example.com\n- lee@example.com": "- <EMAIL_2>\n- <EMAIL_1>",
+        "kim@example.com - lee@example.com": "<EMAIL_2> - <EMAIL_1>",
+        "My email is kim@example.com.": "My email is <EMAIL_1>.",
+        "메일 lee@example.com. 확인 부탁": "메일 <EMAIL_1>. 확인 부탁",
+        "Thanks. kim@example.com is mine": "Thanks. <EMAIL_1> is mine",
+        "kim@example.co\n.kr 로": "<EMAIL_1> 로",
+    }
+    for text, expected in cases.items():
+        assert Inspector().check(text).masked_text == expected, text
+    # 식별자처럼 이어지는 것은 여전히 주소가 아니다.
+    assert Inspector().check("user@host.name_x").masked_text is None

@@ -22,7 +22,7 @@
  Gemini · OpenAI API ──▶ 응답의 토큰을 원문으로 복원(조사 교정 포함) ──▶ [내 앱]
 ```
 
-- **찾는 것** — 주민 · 외국인등록번호(체크섬 + 생년월일 · 성별 정합), 여권 · 운전면허 · 사업자 · 계좌 등
+- **찾는 것** — 주민등록번호(체크섬 + 생년월일 · 성별 정합) · 외국인등록번호(정합 + `외국인등록번호` 같은 근접 앵커), 여권 · 운전면허 · 사업자 · 계좌 등
   한국 식별번호, 카드 · 전화 · 이메일, 성명 · 주소(L1), 클라우드 · 결제 · 국내 플랫폼 키, 문서 머리의 기밀
   표식(`대외비` · `「대외비」` 단독 줄, `보안등급: 기밀`), 인젝션 · 간접 인젝션 · 탈옥 · 시스템 프롬프트 유출.
 - **한국어 우회를 정규화로 되돌린다** — 자모 분해(`ㅇㅣㅈㅓㄴ`), 된소리(`이쩐 찌시`), 제로폭 · 전각 · 동형
@@ -69,7 +69,9 @@ printf '검사할 프롬프트' | garim check --json
 garim scan ./prompts
 ```
 
-종료 코드는 `0` allow · mask, `1` warn, `2` block, `3` degraded 다 — `garim scan` 을 CI 게이트로 쓸 수 있다.
+종료 코드는 `0` allow · mask, `1` warn, `2` block, `3` degraded(일부 파일을 읽지 못한 scan 포함), `4` 실행 오류
+(정책 · 모델 로드 실패, 한 파일도 검사하지 못함)다 — `garim scan` 을 CI 게이트로 쓸 수 있다. 디렉터리 scan 은 숨은
+디렉터리를 건너뛰되 `.env` 파일은 검사한다.
 
 ### L1 모델 붙이기
 
@@ -111,10 +113,18 @@ garim proxy --upstream https://generativelanguage.googleapis.com/v1beta/openai  
 # 앱은 base_url=http://127.0.0.1:8080/v1 만 바꾼다. Authorization 헤더는 그대로 상류로 간다.
 ```
 
-- 본문과 `tool_calls` · `function_call` 인자까지 검사 · 마스킹하고, 응답에서 토큰을 원문으로 복원한다.
+macOS 의 python.org 빌드에서 L0 만 설치(`-e .`)했다면 상류 HTTPS 가 `CERTIFICATE_VERIFY_FAILED` 로 실패할 수
+있다 — `pip install certifi` 로 해결한다(`[l1]` 설치에는 이미 들어 있다). 루프백이 아닌 `--host` 로 띄우면
+경고를 낸다 — 그 포트에 닿는 누구나 사용자의 키로 요청을 보낼 수 있다.
+
+- 본문뿐 아니라 요청에 실린 문자열 값을 전부 검사 · 마스킹한다 — 도구 인자, `tools` 설명, `prediction`, `user`,
+  메시지 `name`, 파일 이름, URL, 값 안의 JSON 키 등. 빼는 것은 모델 설정 값, 대화를 잇는 ID(`tool_call_id` 등),
+  이미지 · 오디오 · 파일의 이진 본문(base64 · `data:` URL)이다. 응답에서는 토큰을 원문으로 복원한다. 받는 경로는
+  `POST /v1/chat/completions` 하나다.
 - 스트리밍(`stream: true`)은 상류에 스트리밍 없이 요청해 전문을 복원한 뒤 SSE 로 돌려준다 — 조각째
   복원하면 `<PHONE_1>` 이 청크 경계에서 깨진다. 거부가 필요하면 `--refuse-streaming`.
-- 공격은 기본 정책에서 `warn`(전달하고 `X-Garim-Verdict` 헤더로 알림)이다. 조직 게이트웨이로 막아야 하면
+- 공격 · 기밀 표식 · 형식을 모르는 고엔트로피 시크릿(`L-SEC-05`)은 기본 정책에서 `warn`(전달하고
+  `X-Garim-Verdict` 헤더로 알림)이다. 조직 게이트웨이로 막아야 하면
   엄격 프로필 — `garim --policy config/policy.strict.yaml proxy ...`(인젝션 · 유출 · 기밀 표식이 `block`).
 
 ### 라이브러리
@@ -132,6 +142,10 @@ print(result.verdict, result.degraded)
 outbound = result.masked_segments        # 외부 API 로 보낼 것
 # 응답은 같은 result.vault 의 restore() 로 앱에 돌아오는 경로에서만 복원한다.
 ```
+
+`Inspector` 하나는 볼트 하나를 계속 쓴다 — 대화(세션)마다 `Inspector` 를 따로 만들고 L1 백엔드만 공유한다.
+한 `Inspector` 를 여러 스레드가 동시에 부르면 늦은 쪽은 L1 없이 돌고 `degraded`(`l1_busy`)가 된다. 프록시는
+요청마다 새 `Inspector` 를 만든다.
 
 `CheckResult.public_dict()` 는 볼트 원문을 직렬화하지 않는다.
 

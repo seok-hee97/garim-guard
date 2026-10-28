@@ -8,8 +8,10 @@ import re
 from garim.detect.rules.checksum import luhn_valid
 from garim.models import Finding
 
+# ★ 끝 경계 — 초판 `(?![A-Z0-9_.-])` 는 문장 끝 마침표까지 거부해서 `kim@example.com.` 이
+#   통째로 탐지되지 않았다(4차 검토). `.` · `_` 는 뒤에 영숫자가 이어질 때만(`x.y_z` 식별자) 막는다.
 _EMAIL = re.compile(
-    r"(?<![A-Z0-9_.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}(?![A-Z0-9_.-])",
+    r"(?<![A-Z0-9_.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}(?![A-Z0-9-])(?![._][A-Z0-9])",
     re.IGNORECASE,
 )
 _PHONE = re.compile(r"(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -28,6 +29,8 @@ from garim.segment.split import split_text
 # L2 는 토크나이저가 없다. `chunk_text` 의 문자 모드(토큰당 0.5자)로 약 2,000자 / 겹침 200자.
 _L2_CHUNK_TOKENS = 4000
 _L2_OVERLAP_TOKENS = 400
+# JSON 의 `\ud800` 처럼 짝이 없는 surrogate — UTF-8 로 인코딩할 수 없는 유일한 str 코드 포인트다.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,10 +149,16 @@ class Inspector:
             try:
                 segment.text.encode("utf-8", errors="strict")
             except UnicodeEncodeError:
+                # ★ 초판은 이 세그먼트를 **검사하지 않고** warn 으로만 올렸다. 프록시는
+                #   warn 을 전달하므로, JSON 에 `\ud800` 한 글자를 끼우면 같은 세그먼트의
+                #   API 키 · 이메일이 엄격 프로필에서도 원문 그대로 상류로 나갔다.
+                #   짝 없는 surrogate 를 U+FFFD 로 바꾸면 코드 포인트 수가 같아 오프셋이
+                #   그대로이고, 검사 · 마스킹은 바꾼 텍스트 위에서 한다.
+                segment = replace(segment, text=_LONE_SURROGATE.sub("\ufffd", segment.text))
+                inputs[segment_idx] = segment
                 degraded = True
                 forced_warn = True
                 degraded_reasons.append("input_encoding_error")
-                continue
             slices = split_text(segment.text)
             internal_segments += len(slices)
             slice_types: list[str] = []
@@ -249,7 +258,7 @@ class Inspector:
                     piece.start,
                     group=segment_idx,
                 )
-                # 인코딩 오류·L0 실패 세그먼트는 `segment_types` 에 없다 — 이미 warn/block 이다.
+                # L0 실패 세그먼트는 `segment_types` 에 없다 — 이미 block 이다.
                 for segment_idx, content_type in segment_types.items()
                 for piece in chunk_text(
                     inputs[segment_idx].text,

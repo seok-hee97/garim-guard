@@ -86,7 +86,10 @@ class PolicyEngine:
                 base += policy.attack_threshold_delta
             elif finding.code.startswith("L-SEC-"):
                 base += policy.secret_threshold_delta
-            else:
+            elif finding.layer == "L1":
+                # ★ PII 완화는 **L1** 임계에만 건다(DESIGN §3.7 `pii_threshold_delta` 주석).
+                #   초판은 L0 에도 더해서 코드 블록의 임계가 0.65 가 됐고, 앵커 경로(0.6)뿐인
+                #   외국인등록번호가 ``` 안에서 통째로 사라졌다 — 같은 줄이 산문이면 block 이다.
                 base += policy.pii_threshold_delta
         origin_policy = self.config.origin_policy
         if (

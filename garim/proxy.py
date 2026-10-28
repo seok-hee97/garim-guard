@@ -27,7 +27,9 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -37,7 +39,8 @@ from typing import Any
 from garim.api import Inspector
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
-from garim.models import Origin, Segment
+from garim.models import CheckResult, Origin, Segment
+from garim.policy.engine import SEVERITY
 from garim.policy.schema import load_policy
 from garim.tls import https_context
 
@@ -84,16 +87,20 @@ class ProxyConfig:
             raise ValueError("mode must be 'interactive' or 'thorough'")
 
 
+def _is_text_part(item: Any) -> bool:
+    """`text` 문자열을 가진 파트는 타입 이름과 상관없이 텍스트로 본다.
+
+    `type == "text"` 만 보면 `input_text` 처럼 이름만 다른 파트가 검사 없이 나간다.
+    """
+    return isinstance(item, dict) and isinstance(item.get("text"), str)
+
+
 def _text_of(content: Any) -> str:
     """OpenAI 는 문자열과 파트 배열 둘 다 허용한다. 텍스트 파트만 검사 대상이다."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        parts = [
-            item.get("text", "")
-            for item in content
-            if isinstance(item, dict) and item.get("type") == "text"
-        ]
+        parts = [item["text"] for item in content if _is_text_part(item)]
         return "\n".join(part for part in parts if part)
     return ""
 
@@ -120,20 +127,20 @@ def _with_text(content: Any, replacement: str) -> Any:
     안 맞고 그때 조용히 어긋난다. **첫 텍스트 파트에 전문을 넣고 나머지 텍스트 파트는
     지운다** — 뜻은 그대로이고 원문이 남을 자리가 없다.
 
-    텍스트가 아닌 파트(이미지 등)는 순서대로 보존한다. 검사 대상이 아니었으므로 손댈
-    이유가 없다.
+    텍스트가 아닌 파트(이미지 등)는 순서대로 보존한다. 그 안의 문자열(파일 이름 · URL)은
+    필드 검사(`_field_leaves`)가 이미 가렸다.
     """
-    if content is None and replacement == "":
-        # `tool_calls` 만 있는 assistant 메시지는 content 가 null 이다. 다른 메시지가
-        # 마스킹됐다는 이유로 그 모양을 "" 로 바꿀 이유가 없다.
-        return None
-    if isinstance(content, str) or not isinstance(content, list):
+    if isinstance(content, str):
         return replacement
+    if not isinstance(content, list):
+        # `tool_calls` 만 있는 assistant 메시지의 null, 또는 객체 — 본문 검사 대상이 아니었다.
+        # 다른 메시지가 마스킹됐다는 이유로 모양을 "" 로 바꿀 이유가 없다. 객체 안의 문자열은
+        # 필드 검사(`_field_leaves`)가 이미 가렸다.
+        return content
     updated: list[Any] = []
     injected = False
     for item in content:
-        is_text = isinstance(item, dict) and item.get("type") == "text"
-        if is_text:
+        if _is_text_part(item):
             if injected:
                 # 이미 전문을 넣었다. 남겨 두면 그것이 곧 원문 유출이다.
                 continue
@@ -141,7 +148,9 @@ def _with_text(content: Any, replacement: str) -> Any:
             injected = True
         else:
             updated.append(item)
-    return updated if injected else replacement
+    # 텍스트 파트가 없던 배열(이미지만 있는 메시지)은 검사한 글자도 없다 — 그대로 둔다.
+    # ★ 초판은 `replacement`("")를 돌려줘서, 다른 메시지가 마스킹되면 이미지가 지워졌다.
+    return updated if injected else content
 
 
 def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
@@ -161,107 +170,267 @@ def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
     return segments
 
 
-@dataclass(frozen=True, slots=True)
-class _ArgumentSlot:
-    """`tool_calls[].function.arguments` 하나 — `content` 밖에 있는 검사 단위.
+# 검사하지 않는 요청 최상위 키 — 값이 숫자 · 불리언 · 열거값 · 모델 이름뿐인 것만 둔다. 모르는
+# 키는 검사한다(fail-closed): 새 필드가 생겨도 검사 없이 나가는 자리가 생기지 않는다.
+_UNSCANNED_REQUEST_KEYS = frozenset({
+    "messages",  # 아래에서 메시지 단위로 따로 다룬다
+    "model", "stream", "stream_options", "n", "temperature", "top_p", "max_tokens",
+    "max_completion_tokens", "presence_penalty", "frequency_penalty", "logit_bias",
+    "logprobs", "top_logprobs", "seed", "tool_choice", "parallel_tool_calls",
+    "reasoning_effort", "service_tier", "store", "modalities",
+})
+# 내용 파트의 이진 본문 — 이미지 · 오디오 · 문서 파싱은 범위 밖이다(§1.3). **이 자리에서만**,
+# 그리고 값 전체가 base64 일 때만 건너뛴다. ★ 3차 검토: 어느 깊이에서든 `data:` 로 시작하는
+# 문자열과 `file_data` 키를 건너뛰었더니 도구 인자 `{"note": "data:;base64, 주민번호 …"}` 가
+# 그대로 나갔다.
+_BINARY_PARTS = (("image_url", "url"), ("input_audio", "data"), ("file", "file_data"))
+_DATA_URL = re.compile(r"data:[^,;]*;base64,[A-Za-z0-9+/=\s]*")
+_BASE64 = re.compile(r"(?:data:[^,;]*;base64,)?[A-Za-z0-9+/=\s]*")
+# 메시지의 프로토콜 키 — 이 키 이름은 검사하지 않는다.
+_HANDLED_MESSAGE_KEYS = frozenset(
+    {"role", "content", "tool_calls", "function_call", "tool_call_id"}
+)
+# 필드 값을 한 세그먼트로 이을 때의 경계. 규칙이 잡는 문자 집합 밖이라 스팬이 넘지 않는다.
+_FIELD_SEPARATOR = "\n\ue000\n"
 
-    ★ **원문 유출이 있었다.** `segments_from_messages` 는 `content` 만 읽는다. 함수
-      호출을 쓰는 대화는 매 요청에 이전 턴의 assistant `tool_calls` 를 함께 보내는데,
-      그 인자가 검사 없이 상류로 나갔다. 같은 요청 안에서 `tool` 메시지의
-      `kim@example.test` 는 `<EMAIL_1>` 로 가려지고, 바로 앞 assistant 메시지의
-      `{"email": "kim@example.test"}` 는 원문 그대로 나갔다.
 
-    §1.3 은 도구 호출을 범위 밖으로 둔다. 그래도 프록시가 `tool` 역할을 받아들이는
-    이상, 그 대화에 실려 가는 바이트를 검사하지 않을 근거는 없다.
-    """
+@dataclass(slots=True)
+class _Arguments:
+    """JSON 으로 읽힌 도구 인자 — 검사하는 동안 문자열 자리를 대신한다."""
 
-    message: int
-    call: int | None  # None 이면 구식 `function_call`
     original: str
-    scanned: str
-    is_json: bool
+    value: Any
+    changed: bool = False
 
 
-def _argument_slots(messages: list[dict[str, Any]]) -> list[_ArgumentSlot]:
-    slots: list[_ArgumentSlot] = []
-    for index, message in enumerate(messages):
-        calls = message.get("tool_calls")
-        if calls is not None and not isinstance(calls, list):
-            raise ProxyError(400, f"messages[{index}].tool_calls must be an array")
-        for call_index, call in enumerate(calls or []):
-            function = call.get("function") if isinstance(call, dict) else None
-            if isinstance(function, dict) and "arguments" in function:
-                slots.append(_slot(index, call_index, function["arguments"]))
-        legacy = message.get("function_call")
-        if isinstance(legacy, dict) and "arguments" in legacy:
-            slots.append(_slot(index, None, legacy["arguments"]))
-    return slots
+class _RepeatedKeyError(ValueError):
+    pass
 
 
-def _slot(message: int, call: int | None, arguments: Any) -> _ArgumentSlot:
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """★ 3차 검토: `{"to": 원문, "to": "x"}` 는 `json.loads` 가 뒤 값만 남겨 앞 값을 검사하지
+    않았고, 바뀐 것이 없으니 원래 바이트가 그대로 나갔다. 검사한 것과 보내는 것이 갈린다."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise _RepeatedKeyError
+    return dict(pairs)
+
+
+@dataclass(frozen=True, slots=True)
+class _KeyName:
+    """경로의 마지막 칸 — 값이 아니라 그 dict 의 키 이름을 가리킨다."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Leaf:
+    """본문 밖에서 상류로 가는 문자열 하나와 그 위치."""
+
+    path: tuple[Any, ...]
+    text: str
+    origin: Origin
+
+
+def _parse_arguments(index: int, arguments: Any) -> Any:
     if not isinstance(arguments, str):
         # OpenAI 계약은 JSON 문자열이다. 다른 모양을 추측해 직렬화하면 상류가 받는
         # 바이트와 우리가 검사한 바이트가 갈린다.
-        raise ProxyError(400, f"messages[{message}] tool call arguments must be a JSON string")
+        raise ProxyError(400, f"messages[{index}] tool call arguments must be a JSON string")
     try:
-        parsed = json.loads(arguments)
+        parsed = json.loads(arguments, object_pairs_hook=_unique_object)
+    except _RepeatedKeyError as exc:
+        raise ProxyError(
+            400, f"messages[{index}] tool call arguments repeat a key; request was not forwarded"
+        ) from exc
     except json.JSONDecodeError:
-        return _ArgumentSlot(message, call, arguments, arguments, is_json=False)
-    # `\uXXXX` 이스케이프를 풀어 검사한다 — 기본 `json.dumps` 는 한글을 전부 이스케이프하고
-    # 규칙은 이스케이프된 바이트를 읽지 못한다.
-    scanned = json.dumps(parsed, ensure_ascii=False)
-    return _ArgumentSlot(message, call, arguments, scanned, is_json=True)
+        return arguments  # JSON 이 아니면 문자열 하나로 검사한다
+    # `\uXXXX` 이스케이프를 푼 값을 검사한다 — 기본 `json.dumps` 는 한글을 전부 이스케이프하고
+    # 규칙은 이스케이프된 바이트를 읽지 못한다. JSON 문자열 하나(`"…\nkim@…"`)도 푼 값으로
+    # 검사해야 마스킹이 이스케이프를 먹지 않는다(3차 검토).
+    return _Arguments(arguments, parsed)
 
 
-def _masked_arguments(slot: _ArgumentSlot, masked: str) -> str:
-    if masked == slot.scanned:
-        return slot.original
-    if slot.is_json:
-        try:
-            json.loads(masked)
-        except json.JSONDecodeError as exc:
-            # 스팬이 JSON 이스케이프에 걸쳤다. 깨진 인자를 보내느니 보내지 않는다.
-            raise ProxyError(
-                400, "masking would corrupt tool call arguments; request was not forwarded"
-            ) from exc
-    return masked
+def _working_copy(payload: dict[str, Any]) -> dict[str, Any]:
+    """상류로 보낼 사본. 도구 인자는 검사하는 동안 파싱된 값으로 둔다."""
+    working = copy.deepcopy(payload)
+    for index, message in enumerate(working["messages"]):
+        calls = message.get("tool_calls")
+        if calls is not None and not isinstance(calls, list):
+            raise ProxyError(400, f"messages[{index}].tool_calls must be an array")
+        functions = [call.get("function") for call in calls or [] if isinstance(call, dict)]
+        functions.append(message.get("function_call"))  # 구식 `function_call`
+        for function in functions:
+            if isinstance(function, dict) and "arguments" in function:
+                function["arguments"] = _parse_arguments(index, function["arguments"])
+    return working
 
 
-def _with_arguments(
-    messages: list[dict[str, Any]], slots: list[_ArgumentSlot], masked: list[str]
-) -> list[dict[str, Any]]:
-    updated = [dict(message) for message in messages]
-    for slot, text in zip(slots, masked, strict=True):
-        arguments = _masked_arguments(slot, text)
-        if arguments is slot.original:
-            continue
-        message = updated[slot.message]
-        if slot.call is None:
-            message["function_call"] = {**message["function_call"], "arguments": arguments}
-            continue
-        calls = list(message["tool_calls"])
-        call = calls[slot.call]
-        calls[slot.call] = {**call, "function": {**call["function"], "arguments": arguments}}
-        message["tool_calls"] = calls
-    return updated
+def _without_binary(part: Any) -> Any:
+    """검사용 보기 — 내용 파트의 base64 본문만 뺀다. 경로는 원래 파트와 같다."""
+    if not isinstance(part, dict):
+        return part
+    view = dict(part)
+    for outer, inner in _BINARY_PARTS:
+        holder = view.get(outer)
+        value = holder.get(inner) if isinstance(holder, dict) else None
+        if isinstance(value, str):
+            binary = _DATA_URL.fullmatch(value) if inner == "url" else _BASE64.fullmatch(value)
+            if binary:
+                view[outer] = {k: v for k, v in holder.items() if k != inner}
+    return view
 
 
-def _blocked_body(result: Any, segment_messages: list[int]) -> dict[str, Any]:
+def _collect(node: Any, path: tuple[Any, ...], origin: Origin, out: list[_Leaf]) -> None:
+    if isinstance(node, _Arguments):
+        _collect(node.value, path, origin, out)
+    elif isinstance(node, str):
+        if node:
+            out.append(_Leaf(path, node, origin))
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            # 키도 상류로 가는 문자열이다 — `{"contacts": {"010-…": "김철수"}}` 의 번호는
+            # 키 자리에 있다.
+            if isinstance(key, str) and key:
+                out.append(_Leaf((*path, _KeyName(key)), key, origin))
+            _collect(value, (*path, key), origin, out)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            _collect(value, (*path, index), origin, out)
+
+
+def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
+    """본문(`content` 의 텍스트) 밖에서 상류로 가는 문자열을 전부 모은다.
+
+    ★ **원문 유출이 있었다.** 초판은 `content` 만 읽었고, 다음에 도구 인자를 더했지만
+      나머지는 그대로 보냈다 — `prediction.content` · `tools[].function.description` ·
+      메시지 `name` · `refusal` 파트 · custom 도구 입력 · 파일 이름 · URL 쿼리의 이메일이
+      원문으로 나갔다. 그래서 목록을 늘리는 대신 **빼는 것만** 적는다: 모델 설정 키,
+      대화를 잇는 무작위 ID(`tool_call_id` · `tool_calls[].id`), 내용 파트의 base64 본문.
+
+    값은 JSON 텍스트가 아니라 **문자열 그대로** 검사한다. 직렬화한 채 검사하면 `\\n` 의
+    `n` 이 이메일 앞에 붙어 마스킹이 이스케이프를 반쯤 먹었다. 값 안의 dict 키도 검사한다
+    (요청 최상위 · 메시지의 프로토콜 키는 빼고).
+    """
+    leaves: list[_Leaf] = []
+    for key, value in working.items():
+        if key not in _UNSCANNED_REQUEST_KEYS:
+            # 요청 최상위 필드는 개발자가 채우는 설정이다. 모르는 키는 이름도 검사한다.
+            leaves.append(_Leaf((_KeyName(key),), key, "system"))
+            _collect(value, (key,), "system", leaves)
+    for index, message in enumerate(working["messages"]):
+        origin = ROLE_TO_ORIGIN[str(message.get("role", ""))]
+        for key, value in message.items():
+            path: tuple[Any, ...] = ("messages", index, key)
+            if key not in _HANDLED_MESSAGE_KEYS:
+                leaves.append(_Leaf(("messages", index, _KeyName(key)), key, origin))
+            if key in {"role", "tool_call_id"} or (key == "content" and isinstance(value, str)):
+                continue  # 본문 문자열은 메시지 세그먼트가 검사한다
+            if key == "content" and isinstance(value, list):
+                for part_index, part in enumerate(value):
+                    if _is_text_part(part):
+                        part = {k: v for k, v in part.items() if k != "text"}
+                    _collect(_without_binary(part), (*path, part_index), origin, leaves)
+            elif key == "tool_calls" and isinstance(value, list):
+                for call_index, call in enumerate(value):
+                    if isinstance(call, dict):
+                        call = {k: v for k, v in call.items() if k != "id"}
+                    _collect(call, (*path, call_index), origin, leaves)
+            else:
+                _collect(value, path, origin, leaves)
+    return leaves
+
+
+def _assign(root: Any, path: tuple[Any, ...], value: str) -> None:
+    """가린 값을 제자리에 쓴다. 키 이름이 가려졌으면 순서를 지킨 채 키를 바꾼다.
+
+    키를 바꾸면 그 아래 경로가 옛 이름을 가리키므로, 호출부는 모은 순서의 **역순**으로 쓴다.
+    """
+    node, owner = root, None
+    for key in path[:-1]:
+        node = node[key]
+        if isinstance(node, _Arguments):
+            owner, node = node, node.value
+    if isinstance(path[-1], _KeyName):
+        old = path[-1].name
+        if value in node:
+            raise ProxyError(400, "masking would merge two request keys; request was not forwarded")
+        items = list(node.items())
+        node.clear()
+        node.update((value if key == old else key, item) for key, item in items)
+        if owner is not None:
+            owner.changed = True
+        return
+    target = node[path[-1]]
+    if isinstance(target, _Arguments):  # 인자 전체가 JSON 문자열 하나였다
+        target.value, target.changed = value, True
+        return
+    node[path[-1]] = value
+    if owner is not None:
+        owner.changed = True
+
+
+def _restore_argument_strings(working: dict[str, Any]) -> None:
+    """파싱해 둔 인자를 문자열로 되돌린다. 가린 것이 없으면 원래 바이트 그대로다."""
+    for message in working["messages"]:
+        calls = message.get("tool_calls") or []
+        functions = [call.get("function") for call in calls if isinstance(call, dict)]
+        functions.append(message.get("function_call"))
+        for function in functions:
+            arguments = function.get("arguments") if isinstance(function, dict) else None
+            if isinstance(arguments, _Arguments):
+                function["arguments"] = (
+                    json.dumps(arguments.value, ensure_ascii=False)
+                    if arguments.changed
+                    else arguments.original
+                )
+
+
+def _field_groups(leaves: list[_Leaf]) -> list[tuple[Origin, list[_Leaf]]]:
+    """origin 별로 묶어 세그먼트 몇 개로 만든다 — 값마다 세그먼트를 만들면 상한을 넘는다."""
+    groups: dict[Origin, list[_Leaf]] = {}
+    for leaf in leaves:
+        if "\ue000" in leaf.text:
+            raise ProxyError(400, "request contains U+E000, which the proxy reserves")
+        groups.setdefault(leaf.origin, []).append(leaf)
+    return list(groups.items())
+
+
+def _leaf_message(group: list[_Leaf], offset: int) -> int | None:
+    """필드 세그먼트 안의 오프셋 → 그 값이 속한 메시지 번호(최상위 필드면 None)."""
+    start = 0
+    for leaf in group:
+        end = start + len(leaf.text)
+        if offset < end + len(_FIELD_SEPARATOR):
+            return leaf.path[1] if leaf.path[0] == "messages" else None  # type: ignore[return-value]
+        start = end + len(_FIELD_SEPARATOR)
+    return None
+
+
+def _blocked_body(results: list[tuple[CheckResult, Any]], verdict: str) -> dict[str, Any]:
+    """`results` 는 (검사 결과, 세그먼트 · 오프셋 → (메시지 세그먼트 번호, 메시지 번호)) 쌍이다.
+
+    필드 묶음의 세그먼트 번호는 메시지 번호와 겹치므로 내보내지 않는다(null).
+    """
     return {
         "error": {
             "type": "garim_blocked",
             "message": "가림이 이 요청을 차단했습니다. 상류로 전달하지 않았습니다.",
-            "verdict": result.verdict,
-            "degraded": result.degraded,
-            "degraded_reasons": result.degraded_reasons,
+            "verdict": verdict,
+            "degraded": any(result.degraded for result, _ in results),
+            "degraded_reasons": sorted(
+                {reason for result, _ in results for reason in result.degraded_reasons}
+            ),
             "findings": [
                 {
                     "code": finding.code,
-                    "segment": finding.segment_idx,
-                    "message": segment_messages[finding.segment_idx],
+                    "segment": segment,
+                    "message": message,
                     "rule": finding.rule,
                 }
+                for result, locate in results
                 for finding in (*result.leaks, *result.attacks)
+                for segment, message in [locate(finding.segment_idx, finding.span[0])]
             ],
         }
     }
@@ -339,43 +508,74 @@ class ProxyService:
 
         messages = payload.get("messages")
         segments = segments_from_messages(messages)
-        slots = _argument_slots(messages)
-        segments.extend(
-            Segment(slot.scanned, origin=segments[slot.message].origin, content_type="structured")
-            for slot in slots
-        )
-        segment_messages = [*range(len(messages)), *(slot.message for slot in slots)]
+        try:
+            working = _working_copy(payload)
+            groups = _field_groups(_field_leaves(working))
+        except RecursionError as exc:
+            raise ProxyError(400, "request is nested too deeply") from exc
         inspector = self._inspector_factory()
         result = inspector.check(segments, mode=self.config.mode)
-        response_headers = {
-            "X-Garim-Verdict": result.verdict,
-            "X-Garim-Degraded": "true" if result.degraded else "false",
-        }
-        if result.degraded_reasons:
-            response_headers["X-Garim-Degraded-Reasons"] = ",".join(result.degraded_reasons)
-
-        if result.verdict == "block":
-            return 400, _blocked_body(result, segment_messages), response_headers
-
-        outbound = dict(payload)
-        masked = result.masked_segments
-        if masked is not None:
-            outbound["messages"] = _with_arguments(
+        # 본문 밖 필드는 따로 검사한다 — 큰 `tools` 정의가 본문과 `max_input_chars` 를 나눠
+        # 쓰면 PII 하나 없는 에이전트 요청이 `input_truncated` 로 차단됐다. 같은 Inspector 라
+        # 볼트를 공유하고 토큰 번호가 겹치지 않는다.
+        fields = (
+            inspector.check(
                 [
-                    {**message, "content": _with_text(message.get("content"), text)}
-                    for message, text in zip(messages, masked[: len(messages)], strict=True)
+                    Segment(_FIELD_SEPARATOR.join(leaf.text for leaf in group), origin=origin)
+                    for origin, group in groups
                 ],
-                slots,
-                masked[len(messages) :],
+                mode=self.config.mode,
             )
+            if groups
+            else None
+        )
+        checked = [(result, lambda segment, offset: (segment, segment))]
+        if fields is not None:
+            checked.append(
+                (fields, lambda segment, offset: (None, _leaf_message(groups[segment][1], offset)))
+            )
+        verdict = max((item.verdict for item, _ in checked), key=SEVERITY.__getitem__)
+        degraded = any(item.degraded for item, _ in checked)
+        reasons = sorted({reason for item, _ in checked for reason in item.degraded_reasons})
+        response_headers = {
+            "X-Garim-Verdict": verdict,
+            "X-Garim-Degraded": "true" if degraded else "false",
+        }
+        if reasons:
+            response_headers["X-Garim-Degraded-Reasons"] = ",".join(reasons)
+
+        if verdict == "block":
+            return 400, _blocked_body(checked, verdict), response_headers
+
+        outbound = working
+        if fields is not None and fields.masked_segments is not None:
+            for (_, group), text in zip(groups, fields.masked_segments, strict=True):
+                pieces = text.split(_FIELD_SEPARATOR)
+                if len(pieces) != len(group):
+                    raise ProxyError(
+                        400, "masking crossed a field boundary; request was not forwarded"
+                    )
+                # 역순 — 키 이름을 바꾸기 전에 그 아래 값부터 쓴다(`_assign`).
+                for leaf, piece in reversed(list(zip(group, pieces, strict=True))):
+                    if piece != leaf.text:
+                        _assign(outbound, leaf.path, piece)
+        _restore_argument_strings(outbound)
+        if result.masked_segments is not None:
+            outbound["messages"] = [
+                {**message, "content": _with_text(message.get("content"), text)}
+                for message, text in zip(outbound["messages"], result.masked_segments, strict=True)
+            ]
+        masked = result.masked_segments is not None or (
+            fields is not None and fields.masked_segments is not None
+        )
 
         if stream:
             # 상류에는 스트리밍 없이 묻는다 — 전문을 복원한 뒤 SSE 로 다시 쪼갠다(`to_sse`).
             outbound["stream"] = False
             outbound.pop("stream_options", None)
         upstream = self._sender("/chat/completions", outbound, headers)
-        if result.vault is not None:
-            upstream, restore_missing = _restore_choices(upstream, result.vault)
+        if masked:
+            upstream, restore_missing = _restore_choices(upstream, inspector.vault)
             if restore_missing:
                 response_headers["X-Garim-Verdict"] = "warn"
                 response_headers["X-Garim-Degraded"] = "true"
@@ -509,6 +709,9 @@ def _restore_arguments(arguments: str, vault: Any) -> tuple[str, bool]:
 class _Handler(BaseHTTPRequestHandler):
     service: ProxyService
     protocol_version = "HTTP/1.1"
+    # 본문을 보내지 않고 붙잡고 있는 연결이 스레드를 계속 묶어 두지 못하게 한다. 상류를
+    # 기다리는 동안에는 이 소켓을 읽지 않으므로 `--upstream-timeout` 과는 무관하다.
+    timeout = 60
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """★ 프롬프트 원문이 접근 로그로 새지 않게 기본 로깅을 끈다(§3.2)."""
@@ -534,22 +737,36 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _refuse_unread(self, status: int, message: str) -> None:
+        """본문을 읽지 않고 거절한다 — 연결을 닫는다.
+
+        ★ keep-alive 로 두면 읽지 않은 본문 바이트가 같은 연결의 다음 요청으로 해석됐다.
+        """
+        self.close_connection = True
+        self._reply(status, {"error": {"message": message}}, {})
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
+        self._refuse_unread(404, "garim proxy serves POST /v1/chat/completions only")
+
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
         if self.path.rstrip("/") not in {"/v1/chat/completions", "/chat/completions"}:
-            self._reply(404, {"error": {"message": "unknown path"}}, {})
+            self._refuse_unread(404, "garim proxy serves POST /v1/chat/completions only")
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
-            self._reply(400, {"error": {"message": "invalid Content-Length"}}, {})
+            self._refuse_unread(400, "invalid Content-Length")
             return
         if length <= 0 or length > MAX_BODY_BYTES:
-            self._reply(413, {"error": {"message": "request body is missing or too large"}}, {})
+            self._refuse_unread(413, "request body is missing or too large")
             return
         try:
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._reply(400, {"error": {"message": "body is not valid JSON"}}, {})
+            return
+        if not isinstance(payload, dict):
+            self._reply(400, {"error": {"message": "body must be a JSON object"}}, {})
             return
 
         forwarded: dict[str, str] = {}
@@ -582,7 +799,7 @@ def build_server(
     l1_backend: L1Backend | None = None,
     l2_backend: L2Backend | None = None,
 ) -> Any:
-    """`127.0.0.1` 에만 바인드한다 — 기본값으로 외부에 노출되지 않는다."""
+    """기본값은 `127.0.0.1` 이다 — 다른 `host` 를 넘기면 그 주소에 그대로 바인드한다."""
     service = ProxyService(config, l1_backend=l1_backend, l2_backend=l2_backend)
     handler = type("GarimProxyHandler", (_Handler,), {"service": service})
     return ThreadingHTTPServer((host, port), handler)

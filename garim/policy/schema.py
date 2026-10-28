@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -117,6 +118,17 @@ class CustomPattern(BaseModel):
     name: str
     regex: str
     mode: Mode = "mask"
+
+    @field_validator("regex")
+    @classmethod
+    def compile_regex(cls, value: str) -> str:
+        # ★ 검증하지 않으면 `re.error` 가 정책 로드가 아니라 엔진 생성에서 터졌다 — CLI 는
+        #   트레이스백과 종료 코드 1(= warn)을 냈고, CI 게이트는 그것을 경고로 읽었다.
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"invalid regex: {exc}") from exc
+        return value
 
 
 class OriginPolicy(BaseModel):

@@ -340,7 +340,7 @@ class DetectionPipeline:
                         stream=decoded.name,
                     )
                 )
-        l0_findings = deduplicate_streams(all_l0, self.policy.mode_for)
+        l0_findings = deduplicate_streams(all_l0, self.policy.mode_for, text)
         l0_findings = [
             replace(
                 finding,
@@ -387,12 +387,17 @@ class DetectionPipeline:
         ]
         type_policy = self.policy.config.content_type_policy.get(content_type)
         if type_policy is not None and type_policy.key_exclude:
+            # ★ 키 제외는 **L1** 의 문맥 개체에만 건다. 키 이름(`user_name` · `phone`)을
+            #   개체로 읽는 것은 모델뿐이다. 초판은 L0 형식 탐지까지 지워서
+            #   `{"ids": {"900101-…": "x"}}` 처럼 체크섬이 맞는 주민번호가 키 자리에 있으면
+            #   그대로 통과했다 — 그건 이름이 아니라 값이다.
             key_spans = _structured_key_spans(text)
             accepted = [
                 finding
                 for finding in accepted
                 if not (
-                    _is_pii_finding(finding)
+                    finding.layer == "L1"
+                    and _is_pii_finding(finding)
                     and any(
                         finding.span[0] < key_end and key_start < finding.span[1]
                         for key_start, key_end in key_spans

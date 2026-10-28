@@ -25,7 +25,7 @@
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
 | §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 유료 tier 키 필요(§7.4) |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
-| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, **스트리밍은 모아서 복원한 뒤 SSE**(실모델 확인, `--refuse-streaming` 선택), 엄격 프로필(`config/policy.strict.yaml`), **`tool_calls` 인자 검사·복원**, 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
+| 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, **스트리밍은 모아서 복원한 뒤 SSE**(실모델 확인, `--refuse-streaming` 선택), 엄격 프로필(`garim/policy/profiles/strict.yaml`(`--policy strict`)), **`tool_calls` 인자 검사·복원**, **그 밖의 요청 필드 검사**(`tools` 설명 · `prediction` · `user` · 메시지 `name`, 2026-10-28), 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
 
 현재 단계는 **L1 두 차례 학습·판정 완료**다(2026-10-27). 배포 모델은 R1(seed 37) — 봉인 test ·

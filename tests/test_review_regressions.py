@@ -105,3 +105,39 @@ def test_severity_resolver_is_required_not_defaulted(code: str) -> None:
     with pytest.raises(TypeError, match="mode_for"):
         merge_overlaps([])  # type: ignore[call-arg]
     assert code
+
+
+def test_scan_reports_degraded_when_only_some_files_were_inspected(tmp_path: Path) -> None:
+    """★ 일부만 읽으면 0 이 나왔다 — CP949 파일 하나가 검사되지 않아도 CI 가 통과했다."""
+    from garim.cli import main
+
+    (tmp_path / "a.txt").write_bytes("주민등록번호 900101-1234561".encode("cp949"))
+    (tmp_path / "b.txt").write_text("안녕하세요", encoding="utf-8")
+    assert main(["scan", str(tmp_path)]) == 3
+
+
+def test_invalid_custom_regex_fails_at_startup_with_exit_4(tmp_path: Path) -> None:
+    """★ `re.error` 가 트레이스백과 종료 코드 1(= warn)로 나왔다."""
+    from garim.cli import main
+
+    policy = tmp_path / "policy.yaml"
+    policy.write_text(
+        "version: 1\ncustom_patterns:\n  - name: broken\n    regex: '('\n", encoding="utf-8"
+    )
+    assert main(["--policy", str(policy), "check", "안녕하세요"]) == 4
+
+
+def test_directory_scan_includes_dotenv_but_not_hidden_directories(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """★ 숨은 파일 필터가 `.env` 를 늘 건너뛰었다."""
+    from garim.cli import main
+
+    secret = "OPENAI_API_KEY=sk-proj-" + "A" * 40 + "\n"
+    (tmp_path / ".env").write_text(secret, encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config.txt").write_text(secret, encoding="utf-8")
+    assert main(["scan", str(tmp_path)]) == 2
+    output = capsys.readouterr().out
+    assert ".env: block" in output
+    assert ".git" not in output
