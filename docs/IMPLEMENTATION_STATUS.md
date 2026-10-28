@@ -1,6 +1,6 @@
 # 가림 구현 현황
 
-> 기준일: 2026-10-28 — R1 배포 · R2 판정(불채택) · 공개 준비 완료 (이전 판 2026-10-27)
+> 기준일: 2026-10-28 — R1 배포 · R2 판정(불채택) · GitHub · HF 공개 (이전 판 2026-10-27)
 > 범위: 고정 자산 준비와 로컬 교사 추론을 포함한 현재 구현·실행 상태
 
 이 문서는 [DESIGN.md](DESIGN.md)의 기획을 현재 저장소 코드에 대응시킨 실행 현황이다.
@@ -18,10 +18,10 @@
 | 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
 | 번역 | **완료** | deepset 662행 — Gemini 3.8 Flash 50 + Claude 612(한도 초과로 전환, 행별 `method`), `train/translations/`, `deepset-ko-{train,test}` 적용 | — |
 | 교사·수동 라벨링 | **완료(RTX 3090, 2026-10-27)** | 교사 3종 × 19,157행(기권 0) — kanana · Gemma 4 E2B · **Qwen3Guard-Gen-4B**(0.6B 가 한국어 탈옥을 못 봐 교체). 클래스별 2표 합의 14,020 수용 / 5,137 폐기(감사 기록) | R2 실행 완료 — 새 합성 2,466행만 교사 실행(17,734행 R1 재사용), C3 로 생성기 정상 채택률 0.998 |
-| L1 공동 학습 | **완료 — 3 seed × 5 epoch** | bf16, micro-batch 16×2. 검증 hmean 0.896 / **0.922** / 0.918 → seed 37 | R2(3 seed, seed 37) 학습·판정 완료 — **불채택**(O1 · O4 미달, [RESULTS_L1_R2.md](RESULTS_L1_R2.md)). SYSTEM_LEAK 보강은 R3 |
+| L1 공동 학습 | **완료 — 3 seed × 5 epoch** | bf16, micro-batch 16×2. 검증 hmean 0.896 / **0.922** / 0.918 → seed 37 | R2(3 seed, seed 37) 학습·판정 완료 — **불채택**(O1 · O4 미달, [RESULTS_L1_R2.md](RESULTS_L1_R2.md)). SYSTEM_LEAK 보강은 R3 후보(일정 없음) |
 | 내보내기·평가 | **완료** | QInt8 152MB · 양자화 저하 −0.0002 · 봉인 test 17,146행 · 외부 KoreanGuardrail 0.342/0.007 · TAB · 제품 경로 PII(`bench/l1_product_path.py`) — [RESULTS_L1.md](RESULTS_L1.md) | 노트북 지연 재측정(pod CPU 값만 있음). 배포 INT8 은 `reduce_range` 판으로 교체 — VNNI 없는 x86 의 U8S8 포화 수정 |
 | L2 | **구현 · Gemma 4 E2B 판정기 연결** | `garim/detect/l2.py` — 루프백 llama-server, 교사와 같은 정책 프롬프트, 3-스트림 분리, 파싱 실패 warn+degraded. 고정 revision → Q8_0 → Q4_K_M GGUF | interactive 에스컬레이션(§6.4.6 W1 게이트), kanana L2-fast |
-| RunPod 실행 | **완료(2026-10-27)** | R1: RTX 3090 · torch cu126(드라이버 CUDA 12.8), 결함 셋 수정(Gemma 설명 출력 · KDPII 앞 공백 · Qwen 교체). R2: 해시 게이트 · 교사 재사용 · 학습 · 판정, 평가 단계 결함 둘 수정(CPU 할당량 스레드 · INT8 포화) — `docs/RUNPOD.md`. 산출물 회수·sha256 대조, HF 보관(model 공개 · 합성 주민번호 파일은 비공개 dataset) | — |
+| RunPod 실행 | **완료(2026-10-27)** | R1: RTX 3090 · torch cu126(드라이버 CUDA 12.8), 결함 셋 수정(Gemma 설명 출력 · KDPII 앞 공백 · Qwen 교체). R2: 해시 게이트 · 교사 재사용 · 학습 · 판정, 평가 단계 결함 둘 수정(CPU 할당량 스레드 · INT8 포화) — `docs/RUNPOD.md`. 산출물 회수·sha256 대조, HF 보관(model · dataset 공개, 합성 주민번호 파일은 비공개 dataset) | — |
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
 | §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 유료 tier 키 필요(§7.4) |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
@@ -33,8 +33,9 @@
 ([PREREG_L1_R2.md](PREREG_L1_R2.md))대로 학습·판정했고, 오탐은 거의 없앴지만 외부 공격 탐지(O1)와
 KLUE 이름 재현율(O4)이 통과선에 못 미쳐 **채택하지 않았다**([RESULTS_L1_R2.md](RESULTS_L1_R2.md)). 그 측정 중
 INT8 이 VNNI 없는 x86 에서 깨지는 결함을 찾아 배포 INT8 을 `reduce_range` 판으로 바꿨다. 모델 · 데이터는
-HF `cycloevan/garim-guard`(model · dataset — L1 가중치 CC-BY-SA-4.0)에 있다. 남은 것은 노트북 지연 재측정과
-R3(새 사전 등록 — SYSTEM_LEAK 보강 · 검증 셋 교체) 여부 결정이다.
+HF `cycloevan/garim-guard`(model · dataset — L1 가중치 CC-BY-SA-4.0)에 있다. 2026-10-28 이 상태로 공개하고
+마무리했다. 다음 학습(R3)은 일정에 없다 — 한다면 새 사전 등록부터 하고, 후보는
+[RESULTS_L1_R2 §3](RESULTS_L1_R2.md) 에 적어 두었다. 재지 못한 것은 노트북 지연과 Gemini 측정(유료 키)이다.
 
 ## 구현된 구성요소
 
