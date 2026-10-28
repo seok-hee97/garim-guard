@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "garim-guard"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first Korean prompt DLP inspector — masks PII, secrets and confidential markers and flags prompt attacks before text reaches an external LLM API"
 readme = "README.md"
 # 상한은 유니코드 판을 검증한 마이너까지다 — 새 판은 NFKC 를 비교한 뒤 연다(DESIGN §8.6.2).

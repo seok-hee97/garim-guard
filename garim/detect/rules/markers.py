@@ -73,13 +73,17 @@ _MARKER = re.compile(
 
 # 보안업무규정 제4조의 3등급 + 임의 등급 표기. `보안등급: 기밀` 처럼 사전 단어가
 # 값으로 오는 형태와 `보안등급: 2급` 처럼 숫자로 오는 형태를 모두 받는다.
+# 라벨은 표식 바로 앞에 붙는다 — 앞 `_LABEL_WINDOW` 글자만 본다. ★ 줄 전체를 보면
+# `"분류" + " " * 20000 + "x대외비"` 에 12초가 걸렸다(겹친 `\s*` 두 개, 5차 검토).
 _GRADE_LABEL = re.compile(
-    r"(보안\s*등급|비밀\s*등급|분류|CLASSIFICATION)\s*[:：]?\s*$", re.IGNORECASE
+    r"(보안[ \t]{0,3}등급|비밀[ \t]{0,3}등급|분류|CLASSIFICATION)[ \t]*(?:[:：][ \t]*)?$",
+    re.IGNORECASE,
 )
+_LABEL_WINDOW = 40
 _NUMERIC_GRADE = re.compile(r"(?:[1-4]|[ⅠⅡⅢIV]{1,3})\s*급\s*비?밀?")
 _WRAPPED = "「」『』[]（）()【】<>《》"
 # 조사·어미가 붙으면 문장 속 언급이다 — "대외비인데", "기밀이라서".
-_PARTICLE = re.compile(r"^(인데|이라|라서|입니다|이었|였|니까|지만|이고|여서|라고|이며|인)")
+_PARTICLE = re.compile(r"인데|이라|라서|입니다|이었|였|니까|지만|이고|여서|라고|이며|인")
 
 FIRST_LINES = 3
 SCORE_FIRST_LINES = 2
@@ -91,6 +95,10 @@ DEFAULT_SCORE_THRESHOLD = 3
 
 def _standalone(line: str, term: str) -> bool:
     """The marker occupies the whole line, optionally wrapped in brackets."""
+    if len(line) > len(term) + 16:
+        # 긴 줄은 단독 표식일 수 없다 — 표식마다 줄 전체를 다듬으면 공백 제거 스트림(한 줄)에서
+        # 제곱 시간이 됐다(`"비밀\n" * 5000` 에 23초, 5차 검토).
+        return False
     stripped = line.strip().strip(_WRAPPED).strip()
     return stripped.casefold() == term.casefold()
 
@@ -103,9 +111,9 @@ def score_marker(line: str, line_index: int, match: re.Match[str]) -> int:
         score += SCORE_FIRST_LINES
     if _standalone(line, term):
         score += SCORE_STANDALONE
-    if _GRADE_LABEL.search(line[: match.start()]):
+    if _GRADE_LABEL.search(line[max(0, match.start() - _LABEL_WINDOW) : match.start()]):
         score += SCORE_GRADE_LABEL
-    if _PARTICLE.match(line[match.end() :]):
+    if _PARTICLE.match(line, match.end()):
         score += SCORE_PARTICLE
     return score
 

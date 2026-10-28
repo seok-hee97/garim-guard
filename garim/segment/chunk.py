@@ -59,7 +59,9 @@ def chunk_text(
         return _chunk_by_tokens(text, tokenizer, chunk_size, chunk_overlap)
 
     size = _char_budget(chunk_size)
-    stride = size - _char_budget(chunk_overlap)
+    # ★ 문자 예산으로 바꾸면 겹침이 크기와 같아질 수 있다(129/128 토큰 → 둘 다 64자). 보폭 0 은
+    #   끝나지 않는 루프였다(5차 검토).
+    stride = max(1, size - _char_budget(chunk_overlap))
     if len(text) <= size:
         return [Chunk(text, 0)]
     chunks: list[Chunk] = []

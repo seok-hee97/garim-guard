@@ -13,7 +13,10 @@ from garim.detect.rules.checksum import (
 from garim.models import Finding
 
 _RRN = re.compile(r"(?<!\d)\d{6}[- ]?[1-8]\d{6}(?!\d)")
-_PASSPORT = re.compile(r"(?<![A-Z0-9])[MSRO]\d{8}(?![A-Z0-9])", re.IGNORECASE)
+# 구형 `M12345678` 과 2021년 차세대 여권 `M123A4567`(문자 · 숫자 셋 · 문자 · 숫자 넷).
+_PASSPORT = re.compile(
+    r"(?<![A-Z0-9])(?:[MSRO]\d{8}|[MSRODG]\d{3}[A-Z]\d{4})(?![A-Z0-9])", re.IGNORECASE
+)
 _DRIVER = re.compile(r"(?<!\d)(?:1[1-9]|2[0-8])[- ]\d{2}[- ]\d{6}[- ]\d{2}(?!\d)")
 _BUSINESS = re.compile(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{5}(?!\d)")
 _CORPORATION = re.compile(r"(?<!\d)\d{6}[- ]?\d{7}(?!\d)")

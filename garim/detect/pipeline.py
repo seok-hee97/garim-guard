@@ -100,8 +100,10 @@ def _call_with_deadline(
     return box["value"]  # type: ignore[return-value]
 
 
+# ★ 키 뒤 공백은 줄 안에서만, YAML 키는 탐욕 매치 뒤 코드에서 공백을 뗀다. 게으른 키와 `\s*`
+#   가 겹쳐 `'{"a":\n' + ' ' * 1500 + '1}'` 에 8초(세제곱)가 걸렸다(5차 검토).
 _STRUCTURED_KEY = re.compile(
-    r"""(?m)(?:["'](?P<json>[^"'\r\n]+)["']\s*:|^\s*(?P<yaml>[^#\r\n:]+?)\s*:)"""
+    r"""(?m)(?:["'](?P<json>[^"'\r\n]+)["'][ \t]*:|^[ \t]*(?P<yaml>[^\s#:][^#\r\n:]*):)"""
 )
 
 
@@ -109,7 +111,10 @@ def _structured_key_spans(text: str) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     for match in _STRUCTURED_KEY.finditer(text):
         group = "json" if match.group("json") is not None else "yaml"
-        spans.append(match.span(group))
+        start, end = match.span(group)
+        while end > start and text[end - 1] in " \t":
+            end -= 1
+        spans.append((start, end))
     return spans
 
 

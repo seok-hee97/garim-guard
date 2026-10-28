@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import bisect
+from collections.abc import Callable, Iterator
 from dataclasses import replace
+from itertools import accumulate
 
 from garim.models import Finding
 
@@ -17,6 +19,26 @@ _LOSSY_STREAMS = frozenset({"nospace", "detensified"})
 
 def overlaps(left: tuple[int, int], right: tuple[int, int]) -> bool:
     return left[0] < right[1] and right[0] < left[1]
+
+
+class _SpanIndex:
+    """시작 위치로 정렬한 탐지 — 겹칠 수 있는 후보만 훑는다.
+
+    ★ 5차 검토 — 탐지끼리 모든 쌍을 비교해서 연락처 1,200줄(탐지 2,400개)에 12.6초가 걸렸다.
+    """
+
+    def __init__(self, findings: list[Finding]) -> None:
+        self._items = sorted(findings, key=lambda item: item.span[0])
+        self._starts = [item.span[0] for item in self._items]
+        self._max_end = list(accumulate((item.span[1] for item in self._items), max))
+
+    def overlapping(self, span: tuple[int, int]) -> Iterator[Finding]:
+        for index in range(bisect.bisect_left(self._starts, span[1]) - 1, -1, -1):
+            if self._max_end[index] <= span[0]:
+                return  # 이보다 앞의 탐지는 전부 span 시작 전에 끝난다
+            item = self._items[index]
+            if item.span[1] > span[0]:
+                yield item
 
 
 def _severity(finding: Finding, mode_for: ModeResolver) -> int:
@@ -107,11 +129,16 @@ def deduplicate_streams(
 
     `text` 는 스팬이 가리키는 원문이다 — 공백 제거 스트림의 이메일을 버릴지 볼 때만 쓴다.
     """
-    raw = [finding for finding in findings if finding.stream == "raw"]
+    raw_by_code: dict[str, list[Finding]] = {}
+    for finding in findings:
+        if finding.stream == "raw":
+            raw_by_code.setdefault(finding.code, []).append(finding)
+    raw_index = {code: _SpanIndex(items) for code, items in raw_by_code.items()}
     prepared: list[Finding] = []
     for finding in findings:
-        normalized_only = finding.stream != "raw" and not any(
-            other.code == finding.code and overlaps(other.span, finding.span) for other in raw
+        index = raw_index.get(finding.code)
+        normalized_only = finding.stream != "raw" and not (
+            index is not None and any(True for _ in index.overlapping(finding.span))
         )
         prepared.append(replace(finding, normalized_only=normalized_only))
 
@@ -121,7 +148,13 @@ def deduplicate_streams(
     #   전체를 보는 경우는 긴 쪽이 이겨야 꼬리가 원문으로 남지 않는다. 줄바꿈으로 끊긴 주소도
     #   같은 이유로 남긴다(`_broken_address`). 제로폭으로 쪼갠 이메일은 norm 이 전체를 잡는다.
     if text is not None:
-        exact = [finding for finding in prepared if finding.stream not in _LOSSY_STREAMS]
+        exact = _SpanIndex(
+            [
+                finding
+                for finding in prepared
+                if finding.code == "L-CM-03" and finding.stream not in _LOSSY_STREAMS
+            ]
+        )
         prepared = [
             finding
             for finding in prepared
@@ -129,23 +162,20 @@ def deduplicate_streams(
                 finding.code == "L-CM-03"
                 and finding.stream in _LOSSY_STREAMS
                 and any(
-                    other.code == finding.code and _spurious_email(text, finding, other)
-                    for other in exact
+                    _spurious_email(text, finding, other)
+                    for other in exact.overlapping(finding.span)
                 )
             )
         ]
 
+    # 시작 순으로 합치면 같은 코드의 합친 결과는 서로 겹치지 않고 끝도 정렬된다 — 새 탐지는
+    # 그 코드의 마지막 결과와만 겹칠 수 있다.
     merged: list[Finding] = []
+    last_by_code: dict[str, int] = {}
     for finding in sorted(prepared, key=lambda item: (item.span[0], -item.span[1], item.code)):
-        duplicate_index = next(
-            (
-                index
-                for index, current in enumerate(merged)
-                if current.code == finding.code and overlaps(current.span, finding.span)
-            ),
-            None,
-        )
-        if duplicate_index is None:
+        duplicate_index = last_by_code.get(finding.code)
+        if duplicate_index is None or not overlaps(merged[duplicate_index].span, finding.span):
+            last_by_code[finding.code] = len(merged)
             merged.append(finding)
             continue
         current = merged[duplicate_index]
@@ -168,15 +198,13 @@ def merge_overlaps(findings: list[Finding], mode_for: ModeResolver) -> list[Find
     `mode_for` 는 필수다. 기본값을 두면 넘기는 것을 잊은 호출부가 조용히 하드코딩
     기본값으로 돌아가고, 그게 정확히 이 함수가 냈던 fail-open 이다.
     """
+    # 시작 순으로 합집합을 쌓으면 결과는 서로 겹치지 않는다 — 마지막 결과와만 비교한다.
     output: list[Finding] = []
     for finding in sorted(findings, key=lambda item: (item.span[0], -item.span[1], item.code)):
-        index = next(
-            (idx for idx, current in enumerate(output) if overlaps(current.span, finding.span)),
-            None,
-        )
-        if index is None:
+        if not output or not overlaps(output[-1].span, finding.span):
             output.append(finding)
             continue
+        index = len(output) - 1
         current = output[index]
         selected = _preferred(current, finding, mode_for)
         # ★ 코드가 다르면 confidence 를 옮기지 않는다.

@@ -316,6 +316,8 @@ class Inspector:
         result_vault: Vault | None = None
         maskable = [finding for finding in leaks if self.policy.mode_for(finding.code) == "mask"]
         if verdict != "block" and maskable:
+            for segment in inputs:
+                self.vault.reserve_literals(segment.text)
             by_segment: dict[int, list[Finding]] = defaultdict(list)
             for finding in maskable:
                 by_segment[finding.segment_idx].append(finding)

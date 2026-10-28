@@ -12,7 +12,11 @@ _PREFIX_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}"), "openai_key"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "anthropic_key"),
     (re.compile(r"(?:AKIA|ASIA)[A-Z0-9]{16}"), "aws_access_key"),
-    (re.compile(r"(?:ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})"), "github_token"),
+    # ghp_ · gho_ · ghu_ · ghs_ · ghr_ — 개인 · OAuth · 앱 토큰이 같은 모양이다.
+    (re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})"), "github_token"),
+    (re.compile(r"(?:sk|rk)_live_[A-Za-z0-9]{20,}"), "stripe_live_key"),
+    # 구형 OpenAI 키(`sk-` + 48자). 다른 `sk-` 접두는 위 줄들이 먼저 받는다.
+    (re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9]{40,}(?![A-Za-z0-9_-])"), "openai_legacy_key"),
     (re.compile(r"(?:xox[baprs]-[A-Za-z0-9-]{20,}|xapp-[A-Za-z0-9-]{20,})"), "slack_token"),
     (re.compile(r"AIza[A-Za-z0-9_-]{30,}"), "google_api_key"),
     (re.compile(r"(?:glpat-|hf_)[A-Za-z0-9_-]{20,}"), "developer_token"),
@@ -35,15 +39,21 @@ _KOREAN_HEADER = re.compile(
 _PUBLIC_DATA_KEY = re.compile(r"(?i)serviceKey\s*=\s*['\"]?([A-Za-z0-9%_+/=-]{20,})")
 # 공동인증서(NPKI) — 파일명·경로 자체가 자격증명 유출 신호다(§2.4).
 _NPKI = re.compile(r"(?i)(?:signCert\.der|signPri\.key|NPKI[\\/][^\s'\"]+)")
-_PEM = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")
+# RSA · EC · DSA · OPENSSH · ENCRYPTED · PGP(`… PRIVATE KEY BLOCK`) 모두 같은 머리다.
+_PEM = re.compile(r"-----BEGIN (?:[A-Z0-9]+ ){0,3}PRIVATE KEY(?: BLOCK)?-----")
 _JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
+# ★ 길이에 상한을 둔다 — `"mysql://a:" * 5000` 처럼 `@` 가 없으면 시작점마다 끝까지 되짚어
+#   제곱 시간이 들었다(5차 검토). 실제 자격증명은 이 길이 안에 든다.
 _DB_URL = re.compile(
-    r"(?i)(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^\s:/]+:[^\s@]+@[^\s]+"
+    r"(?i)(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://"
+    r"[^\s:/]{1,256}:[^\s@]{1,512}@[^\s]{1,1024}"
 )
+# ★ 이름 안의 키워드는 코드에서 본다. `[A-Z0-9_]*(?:SECRET|…)[A-Z0-9_]*` 는 겹친 반복이라
+#   `"A" + "SECRET" * 8000` 에 22초, 여러 줄 모드 `^\s*` 는 빈 줄을 건너 제곱이었다(5차 검토).
 _ENV = re.compile(
-    r"(?im)^\s*(?:export\s+)?([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*)"
-    r"\s*=\s*([^\s#]{8,})"
+    r"(?im)^[ \t]*(?:export[ \t]+)?([A-Z][A-Z0-9_]{0,127})[ \t]*=[ \t]*([^\s#]{8,})"
 )
+_ENV_NAME = re.compile(r"(?i)SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY")
 _GENERIC_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_+/=-]{20,}(?![A-Za-z0-9_-])")
 _SECRET_ANCHOR = re.compile(
     r"(?i)(?:api[_ -]?key|secret|token|password|비밀번호|인증키|접근키|시크릿)"
@@ -90,7 +100,8 @@ def detect_secrets(text: str) -> list[Finding]:
     for match in _DB_URL.finditer(text):
         findings.append(Finding("L-SEC-04", match.span(), 0.95, "L0", "database_url"))
     for match in _ENV.finditer(text):
-        findings.append(Finding("L-SEC-04", match.span(2), 0.9, "L0", "secret_assignment"))
+        if _ENV_NAME.search(match.group(1)):
+            findings.append(Finding("L-SEC-04", match.span(2), 0.9, "L0", "secret_assignment"))
 
     for match in _GENERIC_TOKEN.finditer(text):
         value = match.group(0)

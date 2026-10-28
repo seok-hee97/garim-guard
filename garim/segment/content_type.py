@@ -11,17 +11,23 @@ _LOG_LINE = re.compile(
     r"(?m)^(?:\[?(?:19|20)\d{2}[-/.]\d{2}[-/.]\d{2}|"
     r"(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\b|Traceback \(most recent call last\))"
 )
+# ★ 줄 안의 공백만 본다(`[ \t]`). 여러 줄 모드의 `^\s*` · `\s*$` 는 빈 줄을 건너 다음 줄까지
+#   먹어서, 빈 줄 1만 개(`"x" + "\n" * 10000 + "x"`)에 15초가 걸렸다(5차 검토).
 _CODE_SIGNAL = re.compile(
-    r"(?m)(?:^\s*(?:def|class|func|function|import|from|const|let|var|SELECT|INSERT)\b|"
-    r"[{};]\s*$|=>|</?[A-Za-z][^>]*>)"
+    r"(?m)(?:^[ \t]*(?:def|class|func|function|import|from|const|let|var|SELECT|INSERT)\b|"
+    r"[{};][ \t]*$|=>|</?[A-Za-z][^>\n]*>)"
 )
-_STRUCTURED_LINE = re.compile(r"(?m)^\s*(?:[-\w가-힣]+\s*:\s*\S|[\[{]\s*$)")
+_STRUCTURED_LINE = re.compile(
+    r"(?m)^[ \t]*(?:[-\w가-힣]+[ \t]*:(?:[ \t]*\S|[ \t]*$)|[\[{][ \t]*$)"
+)
 
 
 def _is_json(text: str) -> bool:
     try:
         parsed = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
+    except (ValueError, TypeError, RecursionError):
+        # ★ 4,300자리를 넘는 정수는 `json.loads` 가 `ValueError` 를 낸다(JSONDecodeError 아님).
+        #   잡지 않으면 긴 숫자 하나가 검사 전체를 멈췄다(5차 검토).
         return False
     return isinstance(parsed, dict | list)
 

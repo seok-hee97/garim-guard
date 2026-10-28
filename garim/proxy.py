@@ -514,6 +514,10 @@ class ProxyService:
         except RecursionError as exc:
             raise ProxyError(400, "request is nested too deeply") from exc
         inspector = self._inspector_factory()
+        # 두 검사가 볼트를 나눠 쓴다 — 필드에 있는 `<PHONE_1>` 같은 글자도 본문 마스킹 전에 피한다.
+        for _, group in groups:
+            for leaf in group:
+                inspector.vault.reserve_literals(leaf.text)
         result = inspector.check(segments, mode=self.config.mode)
         # 본문 밖 필드는 따로 검사한다 — 큰 `tools` 정의가 본문과 `max_input_chars` 를 나눠
         # 쓰면 PII 하나 없는 에이전트 요청이 `input_truncated` 로 차단됐다. 같은 Inspector 라

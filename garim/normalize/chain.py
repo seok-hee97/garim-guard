@@ -89,6 +89,20 @@ _HANJA = {
 }
 _HORIZONTAL_SPACE = re.compile(r"[ \t\u3000]+")
 
+# ★ 5차 검토 — 아래 `_drop_controls` 의 범위 밖에 있는 보이지 않는 문자 하나(U+00AD 소프트
+#   하이픈, U+034F, U+180E, 변이 선택자, 한글 채움 문자 …)가 주민번호 · 키 사이에 끼면 L0 가
+#   통째로 비껴갔다.
+#   지우되 `zero_width` 델타에는 **세지 않는다**: 델타는 L1 입력 feature 다(§3.2.5). 학습 때 없던
+#   카운트를 늘리면 이모지의 변이 선택자(U+FE0F)만으로 공격 점수가 움직인다.
+_INVISIBLE_EXTRA = frozenset(
+    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0}
+)
+# 대시류 → `-`. 전화 · 계좌 · 주민번호의 구분자로 쓰이면 규칙이 못 읽었다. 동형 문자 델타에도
+# 세지 않는다 — 문장 부호 `—` 는 평범한 한국어에 흔하고, 세면 위와 같은 이유로 L1 이 흔들린다.
+_DASHES = {
+    chr(code): "-" for code in (0x2010, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0x2E3A, 0x2E3B)
+}
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedView:
@@ -145,6 +159,13 @@ def _drop_controls(text: str, source_map: IntervalMap) -> tuple[str, IntervalMap
         ):
             zero_width += 1
             continue
+        if (
+            code in _INVISIBLE_EXTRA
+            or 0xFE00 <= code <= 0xFE0F
+            or 0xE0100 <= code <= 0xE01EF
+            or unicodedata.category(character) == "Cf"
+        ):
+            continue  # 지우되 세지 않는다(위 `_INVISIBLE_EXTRA` 주석)
         output.append(character)
         mapped.append(interval)
     return "".join(output), mapped, zero_width, tag_chars
@@ -194,6 +215,7 @@ def normalize(text: str) -> NormalizedBundle:
         current, current_map
     )
     current, current_map, delta["homoglyph"] = _translate(current, current_map, _CONFUSABLE)
+    current, current_map, _ = _translate(current, current_map, _DASHES)
     current, current_map, delta["jamo_composed"] = compose_jamo(current, current_map)
     current, current_map, delta["hanja"] = _translate(current, current_map, _HANJA)
     current, current_map = _conservative_spaces(current, current_map)

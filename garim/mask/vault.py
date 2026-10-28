@@ -15,6 +15,10 @@ _TOKEN = re.compile(
 )
 
 
+# 조사 바로 뒤에 붙어 조사로 읽히게 하는 음절 — `과의` · `과도` · `로만` · `로는` · `로서` · `은요`.
+_PARTICLE_CONTINUATIONS = frozenset("의도만요는서써")
+
+
 def _coreference_key(value: str) -> str:
     return "".join(unicodedata.normalize("NFKC", value).split())
 
@@ -25,6 +29,8 @@ class Vault:
     entries: dict[str, str] = field(default_factory=dict, repr=False)
     counters: dict[str, int] = field(default_factory=dict, repr=False)
     _reverse: dict[tuple[str, str], str] = field(default_factory=dict, repr=False)
+    # 입력에 원래 있던 토큰 모양 글자 — 복원하지 않고, "없는 토큰" 으로 세지도 않는다.
+    _literals: set[str] = field(default_factory=set, repr=False)
 
     def __post_init__(self) -> None:
         if self.scope not in {"task", "session"}:
@@ -32,6 +38,19 @@ class Vault:
 
     def __repr__(self) -> str:
         return f"Vault(scope={self.scope!r}, entries=<redacted:{len(self.entries)}>)"
+
+    def reserve_literals(self, text: str) -> None:
+        """입력에 이미 있는 `<PHONE_1>` 같은 글자보다 큰 번호부터 쓴다.
+
+        ★ 5차 검토 — `예시 <PHONE_1> … 010-1234-5678` 에서 실제 번호도 `<PHONE_1>` 이 되어
+        상류가 같은 토큰 둘을 받았고, 응답을 복원하면 예시 자리까지 실제 번호로 바뀌었다.
+        """
+        for match in _TOKEN.finditer(text):
+            label, number = match.group(1).upper(), int(match.group(2))
+            canonical = f"<{label}_{number}>"
+            if canonical not in self.entries:
+                self._literals.add(canonical)
+                self.counters[label] = max(self.counters.get(label, 0), number)
 
     def token_for(self, value: str, label: str) -> str:
         key = (label, _coreference_key(value))
@@ -59,18 +78,19 @@ class Vault:
             canonical = f"<{match.group(1).upper()}_{int(match.group(2))}>"
             value = self.entries.get(canonical)
             if value is None:
-                missing = True
+                missing = missing or canonical not in self._literals
                 return match.group(0)
             particle = match.group(3)
             following = text[match.end() : match.end() + 1]
+            syllable_follows = bool(following) and 0xAC00 <= ord(following) <= 0xD7A3
             # `<X_1>이에요`·`<X_1>이고` 의 `이` 는 주격 조사가 아니라 서술격이다.
             # 주격으로 보고 바꾸면 `김철수가에요` 가 된다 — 뒤에 음절이 이어지면 두지 않는다.
-            copula = (
-                particle in {"이", "가"}
-                and bool(following)
-                and 0xAC00 <= ord(following) <= 0xD7A3
-            )
-            if particle and not copula:
+            copula = particle in {"이", "가"} and syllable_follows
+            # ★ 다른 조사도 뒤에 음절이 이어지면 대개 낱말의 첫 글자다 — `<PERSON_1>과장님` 이
+            #   `김철수와장님` 이, `은행원` 이 `는행원` 이 됐다(5차 검토). 조사 뒤에 붙는 음절
+            #   (`과의` · `로는` · `은요` …)일 때만 교정한다.
+            word = syllable_follows and following not in _PARTICLE_CONTINUATIONS
+            if particle and not copula and not word:
                 particle = correct_particle(value, particle)
             return value + (particle or "")
 
@@ -84,12 +104,26 @@ def mask_text(
     vault: Vault,
     labels: dict[str, str],
 ) -> str:
-    masked = text
-    for finding in sorted(findings, key=lambda item: item.span[0], reverse=True):
+    """스팬을 토큰으로 바꾼다. 겹치는 스팬은 합집합 하나로 가린다(앞 탐지의 라벨).
+
+    ★ 초판은 뒤에서부터 문자열을 잘라 붙여 탐지 수 × 길이만큼 복사했고(제곱), 겹치는 스팬이
+    오면 원문 글자가 남거나 토큰이 깨졌으며, 번호가 뒤에서부터 매겨졌다(`<EMAIL_2>` 가 앞).
+    """
+    regions: list[tuple[int, int, str]] = []
+    for finding in sorted(findings, key=lambda item: (item.span[0], -item.span[1])):
         start, end = finding.span
         if not 0 <= start < end <= len(text):
             raise ValueError(f"mask span outside source: {finding.span}")
-        value = text[start:end]
-        token = vault.token_for(value, labels.get(finding.code, "SENSITIVE"))
-        masked = masked[:start] + token + masked[end:]
-    return masked
+        if regions and start < regions[-1][1]:
+            first, last, label = regions[-1]
+            regions[-1] = (first, max(end, last), label)
+            continue
+        regions.append((start, end, labels.get(finding.code, "SENSITIVE")))
+    pieces: list[str] = []
+    cursor = 0
+    for start, end, label in regions:
+        pieces.append(text[cursor:start])
+        pieces.append(vault.token_for(text[start:end], label))
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces)

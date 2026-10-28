@@ -405,9 +405,9 @@ def test_email_lists_and_sentence_punctuation_mask_each_address_exactly() -> Non
     `kim@example.com.` 은 아무것도 탐지되지 않았다.
     """
     cases = {
-        "kim@example.com\nlee@example.com": "<EMAIL_2>\n<EMAIL_1>",
-        "- kim@example.com\n- lee@example.com": "- <EMAIL_2>\n- <EMAIL_1>",
-        "kim@example.com - lee@example.com": "<EMAIL_2> - <EMAIL_1>",
+        "kim@example.com\nlee@example.com": "<EMAIL_1>\n<EMAIL_2>",
+        "- kim@example.com\n- lee@example.com": "- <EMAIL_1>\n- <EMAIL_2>",
+        "kim@example.com - lee@example.com": "<EMAIL_1> - <EMAIL_2>",
         "My email is kim@example.com.": "My email is <EMAIL_1>.",
         "메일 lee@example.com. 확인 부탁": "메일 <EMAIL_1>. 확인 부탁",
         "Thanks. kim@example.com is mine": "Thanks. <EMAIL_1> is mine",

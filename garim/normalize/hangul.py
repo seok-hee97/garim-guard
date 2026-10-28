@@ -80,6 +80,18 @@ def compose_jamo(text: str, interval_map: IntervalMap) -> tuple[str, IntervalMap
                 composed += 1
                 index += consumed
                 continue
+        trail = ord(text[index + 1]) - T_START if index + 1 < len(text) else 0
+        code = ord(text[index])
+        if S_START <= code <= 0xD7A3 and (code - S_START) % T_COUNT == 0 and 0 < trail < T_COUNT:
+            # ★ 받침 없는 음절 + 조합형 받침(U+11A8~U+11C2). 화면에는 `이전` 으로 붙어 보이는
+            #   `이저\u11ab` 가 규칙에 걸리지 않았다(5차 검토). 호환 자모(ㄴ)는 붙이지 않는다 —
+            #   채팅의 `ㄴ`(아니) 같은 낱자를 음절로 만들면 뜻이 바뀐다.
+            source = interval_map[index : index + 2]
+            output.append(chr(code + trail))
+            mapped.append((min(item[0] for item in source), max(item[1] for item in source)))
+            composed += 1
+            index += 2
+            continue
         output.append(text[index])
         mapped.append(interval_map[index])
         index += 1

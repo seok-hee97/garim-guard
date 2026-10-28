@@ -6,12 +6,14 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from garim.api import Inspector
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
 from garim.models import CheckResult
+from garim.policy.engine import SEVERITY
 
 _TEXT_SUFFIXES = {
     ".c",
@@ -53,6 +55,10 @@ _TEXT_SUFFIXES = {
     ".yml",
 }
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# 이보다 큰 파일은 읽지 않고 "검사 안 됨" 으로 알린다 — 통째로 메모리에 올리지 않는다.
+_MAX_SCAN_BYTES = 64 * 1024 * 1024
+# 큰 파일을 나눌 때 창끼리 겹치는 글자 수 — 경계에 걸친 식별자 · 키가 한 창에는 온전히 든다.
+_WINDOW_OVERLAP = 2_000
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -167,6 +173,57 @@ def _iter_files(path: Path) -> list[Path]:
     )
 
 
+def _windows(text: str, limit: int) -> list[tuple[int, str]]:
+    """`limit` 글자 이하의 겹치는 창으로 나눈다. 가능하면 줄 경계에서 자른다."""
+    windows: list[tuple[int, str]] = []
+    start = 0
+    while True:
+        end = min(len(text), start + limit)
+        if end < len(text):
+            cut = text.rfind("\n", start + limit // 2, end)
+            if cut > start:
+                end = cut + 1
+        windows.append((start, text[start:end]))
+        if end >= len(text):
+            return windows
+        start = max(start + 1, end - _WINDOW_OVERLAP)
+
+
+def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
+    """파일 하나를 검사한다. 입력 상한보다 길면 창으로 나눠 **끝까지** 본다.
+
+    ★ 5차 검토 — 상한(기본 10만 자)을 넘는 파일은 잘린 입력이라 block · degraded 만 내고
+      탐지 목록은 비어 있었다. 10만 500번째 글자의 AWS 키는 끝내 보고되지 않았다. 스캔은
+      외부로 보내는 경로가 아니라 보고서이므로, 잘라서 막는 대신 나눠서 다 본다.
+    """
+    limit = inspector.policy.config.limits.max_input_chars
+    if len(source) <= limit:
+        return inspector.check(source, mode=mode)
+    results = []
+    seen: set[tuple[str, tuple[int, int]]] = set()
+    leaks, attacks = [], []
+    for offset, window in _windows(source, limit - _WINDOW_OVERLAP):
+        result = inspector.check(window, mode=mode)
+        results.append(result)
+        for bucket, findings in ((leaks, result.leaks), (attacks, result.attacks)):
+            for finding in findings:
+                span = (finding.span[0] + offset, finding.span[1] + offset)
+                if (finding.code, span) not in seen:
+                    seen.add((finding.code, span))
+                    bucket.append(replace(finding, span=span))
+    first = results[0]
+    return replace(
+        first,
+        verdict=max((result.verdict for result in results), key=SEVERITY.__getitem__),
+        leaks=leaks,
+        attacks=attacks,
+        masked_text=None,  # 겹치는 창의 마스킹본은 이어 붙일 수 없다 — 탐지 위치만 보고한다
+        masked_segments=None,
+        degraded=any(result.degraded for result in results),
+        degraded_reasons=sorted({r for result in results for r in result.degraded_reasons}),
+    )
+
+
 def _l1_backend(args: argparse.Namespace) -> L1Backend | None:
     if args.l1_model_dir is None:
         return None
@@ -252,9 +309,18 @@ def main(argv: list[str] | None = None) -> int:
         highest = 0
         seen = 0
         skipped: list[str] = []
+        root = Path(args.path).resolve()
         for path in _iter_files(Path(args.path)):
             seen += 1
+            if root.is_dir() and not path.resolve().is_relative_to(root):
+                # ★ 파일 심볼릭 링크를 따라 스캔 루트 밖(`../outside/private.conf`)을 읽고
+                #   마스킹본을 출력했다(5차 검토). 루트 밖은 검사 대상이 아니다.
+                skipped.append(f"{path}: symlink outside scan root")
+                continue
             try:
+                if path.stat().st_size > _MAX_SCAN_BYTES:
+                    skipped.append(f"{path}: larger than {_MAX_SCAN_BYTES // (1024 * 1024)}MB")
+                    continue
                 source = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 # ★ 조용히 넘기면 안 된다. 읽지 못한 파일은 **검사되지 않은 파일**이고,
@@ -263,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
                 #   출력하지 않고 0 을 냈다.
                 skipped.append(f"{path}: {type(exc).__name__}")
                 continue
-            result = inspector.check(source, mode=args.mode)
+            result = _check_file(inspector, source, args.mode)
             _print_result(result, as_json=args.as_json, prefix=str(path))
             highest = max(highest, _exit_code(result))
         for entry in skipped:
