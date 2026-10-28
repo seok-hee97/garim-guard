@@ -132,13 +132,23 @@ def test_l2_asks_the_next_stream_after_a_weak_answer() -> None:
 
 
 def test_abandoned_l1_inferences_are_bounded_across_inspectors() -> None:
-    """★ 프록시처럼 요청마다 Inspector 를 만들면 버려진 추론이 요청 수만큼 쌓였다."""
+    """★ 프록시처럼 요청마다 Inspector 를 만들면 버려진 추론이 요청 수만큼 쌓였다.
+
+    프로세스의 `garim-l1` 스레드 수를 세면 앞선 테스트가 남긴 스레드까지 세어진다(CI 에서 3) —
+    이 백엔드가 실제로 불린 횟수를 센다.
+    """
 
     class Slow:
         name = "slow"
 
+        def __init__(self) -> None:
+            self.calls = 0
+            self.lock = threading.Lock()
+
         def infer(self, text: str, **_: object) -> None:
-            time.sleep(1.5)
+            with self.lock:
+                self.calls += 1
+            time.sleep(3)  # 다섯 번의 검사가 끝날 때까지 버려진 채 살아 있게
             raise RuntimeError("late")
 
     backend = Slow()
@@ -146,9 +156,9 @@ def test_abandoned_l1_inferences_are_bounded_across_inspectors() -> None:
     reasons = [
         Inspector(config, l1_backend=backend).check("안녕").degraded_reasons for _ in range(5)
     ]
-    assert reasons[-1] == ["l1_busy"]
-    alive = sum(thread.name == "garim-l1" for thread in threading.enumerate())
-    assert alive <= 2
+    assert reasons[:2] == [["l1_timeout"], ["l1_timeout"]]
+    assert reasons[2:] == [["l1_busy"]] * 3
+    assert backend.calls == 2
 
 
 # ── 탐지 규칙: 오탐 ───────────────────────────────────────────────────────────
