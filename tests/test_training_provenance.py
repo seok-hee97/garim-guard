@@ -67,9 +67,7 @@ def in_directory() -> Iterator[None]:
         os.chdir(original)
 
 
-def test_seal_verifies_after_the_tree_is_relocated(
-    tmp_path: Path, in_directory: None
-) -> None:
+def test_seal_verifies_after_the_tree_is_relocated(tmp_path: Path, in_directory: None) -> None:
     """Schema 1 stored absolute paths, so preparing here and training on the GPU box
     (or a third party reproducing the run) failed the seal on location alone."""
     source_root = tmp_path / "here"
@@ -84,9 +82,7 @@ def test_seal_verifies_after_the_tree_is_relocated(
     moved_root = tmp_path / "elsewhere"
     shutil.copytree(source_root, moved_root)
     os.chdir(moved_root)
-    contract = verify_training_input_manifest(
-        Path("seal.json"), paths, provenance_files=provenance
-    )
+    contract = verify_training_input_manifest(Path("seal.json"), paths, provenance_files=provenance)
     assert contract["files"]["pii_train"] == 1
 
 
@@ -98,9 +94,7 @@ def test_seal_still_detects_content_drift(tmp_path: Path, in_directory: None) ->
     )
     write_jsonl(Path("pii-train.jsonl"), [_pii("p1", "train"), _pii("p3", "train")])
     with pytest.raises(ValueError, match="content drift"):
-        verify_training_input_manifest(
-            Path("seal.json"), paths, provenance_files=provenance
-        )
+        verify_training_input_manifest(Path("seal.json"), paths, provenance_files=provenance)
 
 
 def test_stale_schema_is_rejected_with_a_reseal_instruction(
@@ -112,14 +106,10 @@ def test_stale_schema_is_rejected_with_a_reseal_instruction(
     payload["schema_version"] = 1
     write_training_input_manifest(Path("seal.json"), payload)
     with pytest.raises(ValueError, match="reseal"):
-        verify_training_input_manifest(
-            Path("seal.json"), paths, provenance_files=provenance
-        )
+        verify_training_input_manifest(Path("seal.json"), paths, provenance_files=provenance)
 
 
-def test_path_key_is_relative_to_the_working_directory(
-    tmp_path: Path, in_directory: None
-) -> None:
+def test_path_key_is_relative_to_the_working_directory(tmp_path: Path, in_directory: None) -> None:
     os.chdir(tmp_path)
     target = tmp_path / "data" / "corpus.jsonl"
     target.parent.mkdir()

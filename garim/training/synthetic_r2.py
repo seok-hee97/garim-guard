@@ -83,6 +83,8 @@ _TRAIN_LATIN_MARKERS = ("XLSX", "HTML", "XML", "CSS")
 
 def _latin_prefix(text: str, index: int) -> str:
     return f"{_TRAIN_LATIN_MARKERS[index % len(_TRAIN_LATIN_MARKERS)]} 자료: {text}"
+
+
 _BENIGN_SCHEDULE_R2 = _schedule(BENIGN_WEIGHTS_R2)
 # 검증에 고정하는 공격 템플릿 — 클래스마다 하나.
 VALIDATION_ATTACK_SLOT = 2
@@ -130,8 +132,9 @@ def generate_attack_corpus_r2(*, seed: int = 20260807) -> list[CorpusRecord]:
     ) -> None:
         nonlocal index, hiding_cursor, benign_cursor
         base_labels[base].add(label)
-        text = _with_reference(_surface(base, local_index, romanized=romanized,
-                                        honorific=honorific), references[index])
+        text = _with_reference(
+            _surface(base, local_index, romanized=romanized, honorific=honorific), references[index]
+        )
         if romanized:
             # 로마자 행은 라틴 글자를 가지므로 공격 · 정상 모두 homoglyph 를 직접 건다. 절반에는
             # 정상 한국어 동형 문자 행과 같은 접두를 붙여 접두가 라벨을 따라가지 않게 한다.

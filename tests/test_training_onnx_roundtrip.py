@@ -52,9 +52,7 @@ def _write_fast_tokenizer(directory: Path) -> None:
     vocab = {word: index for index, word in enumerate(words)}
     backend = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
     backend.pre_tokenizer = pre_tokenizers.Whitespace()
-    fast = PreTrainedTokenizerFast(
-        tokenizer_object=backend, unk_token="[UNK]", pad_token="[PAD]"
-    )
+    fast = PreTrainedTokenizerFast(tokenizer_object=backend, unk_token="[UNK]", pad_token="[PAD]")
     fast.save_pretrained(directory)
 
 
@@ -70,9 +68,7 @@ def l1_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         attention_mask=torch.ones((1, 8), dtype=torch.long),
         normalization_delta=torch.zeros((1, len(NORMALIZATION_DELTA_ORDER))),
     )
-    quantize_joint_onnx(
-        directory / "garim_l1.fp32.onnx", directory / "garim_l1.int8.onnx"
-    )
+    quantize_joint_onnx(directory / "garim_l1.fp32.onnx", directory / "garim_l1.int8.onnx")
     write_l1_metadata(directory)
     _write_fast_tokenizer(directory)
     return directory

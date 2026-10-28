@@ -62,9 +62,7 @@ _SYSTEM_LEAK = re.compile(
 #   → 대상어(AI·모델·정책·필터…)를 앞뒤 좁은 창 안에서 함께 요구한다.
 #   ★ 전수 검토 — 뒤쪽 `정책` · `규칙` 은 `제한이 없는 요금제 정책` 에 걸렸다. 앞쪽(`정책 제한
 #   없는 모드`)에서만 받는다.
-_UNRESTRICTED_TARGET = (
-    r"(?:AI|인공지능|모델|어시스턴트|assistant|챗봇|필터|가이드라인|검열|제약)"
-)
+_UNRESTRICTED_TARGET = r"(?:AI|인공지능|모델|어시스턴트|assistant|챗봇|필터|가이드라인|검열|제약)"
 _UNRESTRICTED_TARGET_BEFORE = (
     r"(?:AI|인공지능|모델|어시스턴트|assistant|챗봇|정책|규칙|필터|가이드라인|검열|제약)"
 )
@@ -121,11 +119,21 @@ _CHOSEONG_SIGNATURES: tuple[tuple[re.Pattern[str], str, str], ...] = (
         "choseong_ignore",
     ),
     # 시스템/개발자 ... 프롬프트/지시 ... 보여/출력/공개
-    (re.compile(r"(?:ㅅㅅㄷ|ㄱㅂㅈ).{0,4}?(?:ㅂㄹㅂㄷ|ㅈㅅ|ㅁㅅㅈ).{0,6}?(?:ㅂㅇ|ㅈㄹ|ㄱㄱ|ㄱㄷㄹ)"),
-     "LEAK", "choseong_system_leak"),
+    (
+        re.compile(
+            r"(?:ㅅㅅㄷ|ㄱㅂㅈ).{0,4}?(?:ㅂㄹㅂㄷ|ㅈㅅ|ㅁㅅㅈ).{0,6}?(?:ㅂㅇ|ㅈㄹ|ㄱㄱ|ㄱㄷㄹ)"
+        ),
+        "LEAK",
+        "choseong_system_leak",
+    ),
     # 제한 없는 / 안전·보안 규칙 우회·해제
-    (re.compile(r"ㅈㅎ.{0,2}?ㅇㄴ|(?:ㅇㅈ|ㅂㅇ|ㅇㄹ).{0,2}?(?:ㄱㅈ|ㅈㅊ|ㅂㄷ).{0,3}?(?:ㅇㅎ|ㅎㅈ)"),
-     "JB", "choseong_jailbreak"),
+    (
+        re.compile(
+            r"ㅈㅎ.{0,2}?ㅇㄴ|(?:ㅇㅈ|ㅂㅇ|ㅇㄹ).{0,2}?(?:ㄱㅈ|ㅈㅊ|ㅂㄷ).{0,3}?(?:ㅇㅎ|ㅎㅈ)"
+        ),
+        "JB",
+        "choseong_jailbreak",
+    ),
 )
 
 
@@ -203,7 +211,5 @@ def _detect_choseong(text: str, *, origin: Origin) -> list[Finding]:
                     offset + min(item[0] for item in covered),
                     offset + max(item[1] for item in covered),
                 )
-                findings.append(
-                    Finding(codes[kind], span, 0.65, "L0", rule, evasion=["A-KO-02"])
-                )
+                findings.append(Finding(codes[kind], span, 0.65, "L0", rule, evasion=["A-KO-02"]))
     return findings

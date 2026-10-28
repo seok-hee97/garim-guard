@@ -30,9 +30,7 @@ def main() -> int:
 
     models = load_model_registry(args.models_manifest)
     sources = load_source_registry(args.sources_manifest)
-    asset_status = verify_asset_manifest(
-        args.asset_manifest, build_asset_plan(models, sources)
-    )
+    asset_status = verify_asset_manifest(args.asset_manifest, build_asset_plan(models, sources))
     failed = [item for item in asset_status if not item["ok"]]
     if failed:
         raise ValueError(f"cannot seal inputs while pinned assets have drift: {failed}")

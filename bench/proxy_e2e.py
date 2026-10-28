@@ -69,7 +69,7 @@ def _content_from_sse(text: str) -> str:
     for block in text.split("\n\n"):
         if not block.startswith("data: ") or block == "data: [DONE]":
             continue
-        chunk = json.loads(block[len("data: "):])
+        chunk = json.loads(block[len("data: ") :])
         for choice in chunk.get("choices", []):
             parts.append(choice.get("delta", {}).get("content") or "")
     return "".join(parts)
@@ -80,9 +80,7 @@ def run(
 ) -> dict[str, Any]:
     from garim.proxy import ProxyConfig, build_server
 
-    server = build_server(
-        ProxyConfig(upstream_base_url=upstream, timeout_seconds=timeout), port=0
-    )
+    server = build_server(ProxyConfig(upstream_base_url=upstream, timeout_seconds=timeout), port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -112,16 +110,25 @@ def run(
                 raw = response.read().decode("utf-8")
                 content_type = response.headers.get("Content-Type", "")
         except urllib.error.HTTPError as exc:
-            return {"verdict": "error", "status": exc.code,
-                    "body": exc.read(2000).decode("utf-8", errors="replace")}
+            return {
+                "verdict": "error",
+                "status": exc.code,
+                "body": exc.read(2000).decode("utf-8", errors="replace"),
+            }
         if stream:
             if not content_type.startswith("text/event-stream"):
                 return {"verdict": "error", "reason": f"expected SSE, got {content_type}"}
             content = _content_from_sse(raw)
         else:
             content = json.loads(raw)["choices"][0]["message"]["content"] or ""
-        return {"upstream": upstream, "model": model, "stream": stream, "garim_headers": garim,
-                "content": content, **judge_echo(content)}
+        return {
+            "upstream": upstream,
+            "model": model,
+            "stream": stream,
+            "garim_headers": garim,
+            "content": content,
+            **judge_echo(content),
+        }
     finally:
         server.shutdown()
         server.server_close()

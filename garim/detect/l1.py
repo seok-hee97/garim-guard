@@ -220,9 +220,7 @@ class OnnxL1Backend:
         if len(self.pii_labels) != 29 or self.pii_labels[0] != "O":
             raise ValueError("pii_labels must contain O plus 14 BIO entity pairs")
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            directory, local_files_only=True, use_fast=True
-        )
+        tokenizer = AutoTokenizer.from_pretrained(directory, local_files_only=True, use_fast=True)
         if not tokenizer.is_fast:
             raise ValueError("L1 requires a fast tokenizer for source offset mapping")
         self.tokenizer = _SerializedTokenizer(tokenizer)
@@ -249,8 +247,7 @@ class OnnxL1Backend:
         }
         if set(self.output_names) != required_outputs:
             raise ValueError(
-                "ONNX outputs must be pii_logits, attack_logits, romanized_logits, "
-                "honorific_logits"
+                "ONNX outputs must be pii_logits, attack_logits, romanized_logits, honorific_logits"
             )
         self.max_length = max_length
 

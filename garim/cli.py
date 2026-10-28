@@ -325,9 +325,7 @@ def _l2_backend(args: argparse.Namespace) -> L2Backend | None:
         return None
     from garim.detect.l2 import LocalChatL2Backend
 
-    return LocalChatL2Backend(
-        args.l2_endpoint, args.l2_model, timeout_seconds=args.l2_timeout
-    )
+    return LocalChatL2Backend(args.l2_endpoint, args.l2_model, timeout_seconds=args.l2_timeout)
 
 
 def main(argv: list[str] | None = None) -> int:

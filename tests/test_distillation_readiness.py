@@ -37,9 +37,7 @@ def test_configured_distillation_without_teacher_labels_is_refused() -> None:
 def test_the_message_names_both_missing_targets() -> None:
     """어느 교사가 빠졌는지 알아야 무엇을 돌릴지 안다."""
     with pytest.raises(ValueError) as caught:
-        assert_distillation_inputs_exist(
-            [_attack("a")], hard_label_alpha=0.5, qwen_weight=0.25
-        )
+        assert_distillation_inputs_exist([_attack("a")], hard_label_alpha=0.5, qwen_weight=0.25)
     assert "hard_label_alpha" in str(caught.value)
     assert "qwen_weight" in str(caught.value)
 
@@ -55,9 +53,7 @@ def test_partial_coverage_is_accepted() -> None:
 
 def test_disabling_the_weights_is_the_way_to_train_without_teachers() -> None:
     """증류 없이 돌리려면 계수를 그렇게 **적어야** 한다 — 설정과 실행을 어긋나게 두지 않는다."""
-    assert_distillation_inputs_exist(
-        [_attack("a")], hard_label_alpha=1.0, qwen_weight=0.0
-    )
+    assert_distillation_inputs_exist([_attack("a")], hard_label_alpha=1.0, qwen_weight=0.0)
 
 
 def test_coverage_is_reported_as_a_fraction() -> None:

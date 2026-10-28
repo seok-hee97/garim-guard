@@ -91,9 +91,7 @@ def test_rubber_stamp_is_flagged() -> None:
     always = {key: _artifact(key, "JAILBREAK") for key in primary}
     assert jailbreak_independence(primary, always)["is_rubber_stamp"]
 
-    mixed = {
-        key: _artifact(key, "JAILBREAK" if int(key) % 2 else "NONE") for key in primary
-    }
+    mixed = {key: _artifact(key, "JAILBREAK" if int(key) % 2 else "NONE") for key in primary}
     report = jailbreak_independence(primary, mixed)
     assert not report["is_rubber_stamp"]
     assert report["agreement_on_jailbreak"] == 0.5
@@ -176,11 +174,16 @@ def test_cli_accepts_a_pool_larger_than_the_generator_sidecar(tmp_path) -> None:
     pool = {"syn-1": "JAILBREAK", "syn-2": "NONE", "polyguard-9": "NONE"}
     status = main(
         [
-            "--gold", str(gold_train),
-            "--gold", str(gold_validation),
-            "--teacher", f"gemma4={_write_teacher(tmp_path, 'gemma4', pool)}",
-            "--teacher", f"qwen3guard_gen={_write_teacher(tmp_path, 'qwen3guard_gen', pool)}",
-            "--output", str(tmp_path / "report.json"),
+            "--gold",
+            str(gold_train),
+            "--gold",
+            str(gold_validation),
+            "--teacher",
+            f"gemma4={_write_teacher(tmp_path, 'gemma4', pool)}",
+            "--teacher",
+            f"qwen3guard_gen={_write_teacher(tmp_path, 'qwen3guard_gen', pool)}",
+            "--output",
+            str(tmp_path / "report.json"),
         ]
     )
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
@@ -196,9 +199,12 @@ def test_cli_refuses_teachers_that_skipped_generator_rows(tmp_path) -> None:
     with pytest.raises(SystemExit, match="miss 1 generator-labeled rows"):
         main(
             [
-                "--gold", str(gold),
-                "--teacher", f"gemma4={_write_teacher(tmp_path, 'gemma4', partial)}",
-                "--output", str(tmp_path / "report.json"),
+                "--gold",
+                str(gold),
+                "--teacher",
+                f"gemma4={_write_teacher(tmp_path, 'gemma4', partial)}",
+                "--output",
+                str(tmp_path / "report.json"),
             ]
         )
 
@@ -211,10 +217,14 @@ def test_cli_refuses_teachers_run_on_different_inputs(tmp_path) -> None:
     with pytest.raises(SystemExit, match="different ID sets"):
         main(
             [
-                "--gold", str(gold),
-                "--teacher", f"gemma4={gemma}",
-                "--teacher", f"qwen3guard_gen={qwen}",
-                "--output", str(tmp_path / "report.json"),
+                "--gold",
+                str(gold),
+                "--teacher",
+                f"gemma4={gemma}",
+                "--teacher",
+                f"qwen3guard_gen={qwen}",
+                "--output",
+                str(tmp_path / "report.json"),
             ]
         )
 
@@ -238,9 +248,10 @@ def test_default_gold_matches_the_r1_sidecars_and_r2_passes_its_own() -> None:
     """
     from bench.teacher_agreement import DEFAULT_GOLD
 
-    pipeline = Path("train/runpod_pipeline.py").read_text(encoding="utf-8")
+    # 포맷터가 인자를 줄마다 나눠도 같은 호출이다 — 공백을 하나로 접어 본다.
+    pipeline = " ".join(Path("train/runpod_pipeline.py").read_text(encoding="utf-8").split())
     assert 'f"attack-generator-gold-r2-{split}.json"' in pipeline
-    assert '*teacher_args, *gold_args' in pipeline
+    assert "*teacher_args, *gold_args" in pipeline
     assert '*generator_args, "--output-dir"' in pipeline
     assert DEFAULT_GOLD == tuple(
         f"data/corpus/attack-generator-gold-{split}.json" for split in ("train", "validation")

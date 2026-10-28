@@ -103,9 +103,7 @@ def resolve_teacher_corpus(
     for teacher, predictions in artifacts.items():
         extra = set(predictions) - record_ids
         if extra:
-            raise ValueError(
-                f"{teacher}: {len(extra)} prediction IDs are not in the teacher pool"
-            )
+            raise ValueError(f"{teacher}: {len(extra)} prediction IDs are not in the teacher pool")
 
     generator_labels = generator_labels or {}
     for record in materialized:
@@ -171,9 +169,7 @@ def resolve_teacher_corpus(
         if soft_target_teacher is not None:
             probabilities = row_artifacts[soft_target_teacher].class_probabilities
             if probabilities is not None:
-                soft_probabilities = tuple(
-                    probabilities[label] for label in SOFT_TARGET_CLASSES
-                )
+                soft_probabilities = tuple(probabilities[label] for label in SOFT_TARGET_CLASSES)
         jailbreak_target = None
         if jailbreak_teacher is not None:
             probabilities = row_artifacts[jailbreak_teacher].class_probabilities
@@ -192,7 +188,8 @@ def resolve_teacher_corpus(
                 and decision_label in SOFT_TARGET_CLASSES
                 and SOFT_TARGET_CLASSES[
                     max(range(len(soft_probabilities)), key=soft_probabilities.__getitem__)
-                ] != decision_label
+                ]
+                != decision_label
             ):
                 soft_probabilities = None
                 silenced.append("soft")

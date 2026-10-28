@@ -54,9 +54,7 @@ def test_build_optimizer_excludes_bias_and_layernorm_from_weight_decay() -> None
     assert decay["weight_decay"] == pytest.approx(0.01)
     assert no_decay["weight_decay"] == 0.0
     assert no_decay["params"], "bias parameters must land in the no-decay group"
-    assert len(decay["params"]) + len(no_decay["params"]) == len(
-        list(model.parameters())
-    )
+    assert len(decay["params"]) + len(no_decay["params"]) == len(list(model.parameters()))
 
 
 def test_train_epoch_steps_the_optimizer_on_interleaved_tasks() -> None:

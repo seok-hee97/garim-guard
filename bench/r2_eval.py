@@ -131,7 +131,9 @@ def main() -> int:
         if kind == "account_pair_positive":
             gold = {p for span in record.spans for p in range(span.start, span.end)}
             hit = {
-                p for label, start, end in predicted if label == "KR_ACCOUNT"
+                p
+                for label, start, end in predicted
+                if label == "KR_ACCOUNT"
                 for p in range(start, end)
             }
             account.append((_family(record), float(len(gold & hit)), float(len(gold))))
@@ -147,8 +149,11 @@ def main() -> int:
     report = {
         "model": f"{args.l1_model_dir}/{args.model_file}",
         "policy": args.policy,
-        "machine": {"platform": platform.platform(), "machine": platform.machine(),
-                    "onnxruntime": onnxruntime.__version__},
+        "machine": {
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "onnxruntime": onnxruntime.__version__,
+        },
         "O2_t4_r2_benign_fpr": {
             **summarize(false_positive),
             "by_cell": {cell: round(n / d, 4) for cell, (n, d) in sorted(by_cell.items())},

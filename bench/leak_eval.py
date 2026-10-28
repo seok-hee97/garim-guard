@@ -64,9 +64,7 @@ class LeakReport:
     def segment_false_positive_rate(self) -> float:
         """§7.2.1 — 분모는 음성 **세그먼트** 수다."""
         return (
-            self.false_positive_segments / self.negative_segments
-            if self.negative_segments
-            else 0.0
+            self.false_positive_segments / self.negative_segments if self.negative_segments else 0.0
         )
 
     @property
@@ -96,16 +94,10 @@ class LeakReport:
 
 
 def _characters(spans: Sequence[tuple[int, int, str]]) -> set[tuple[int, str]]:
-    return {
-        (position, label)
-        for start, end, label in spans
-        for position in range(start, end)
-    }
+    return {(position, label) for start, end, label in spans for position in range(start, end)}
 
 
-def evaluate(
-    records: Sequence[CorpusRecord], detector: Detector, *, name: str
-) -> LeakReport:
+def evaluate(records: Sequence[CorpusRecord], detector: Detector, *, name: str) -> LeakReport:
     """Character-level per-label scores plus the segment-level false-positive rate."""
     if not records:
         raise ValueError("leak evaluation needs at least one record")

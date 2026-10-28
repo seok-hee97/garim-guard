@@ -97,15 +97,11 @@ def _post(url: str, payload: dict[str, Any], key: str, *, retries: int = 6) -> d
     raise RuntimeError("unreachable")
 
 
-def translate_batch(
-    rows: list[dict[str, str]], *, model: str, key: str
-) -> dict[str, str]:
+def translate_batch(rows: list[dict[str, str]], *, model: str, key: str) -> dict[str, str]:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     items = [{"id": row["id"], "text": row["text"]} for row in rows]
     payload = {
-        "contents": [
-            {"parts": [{"text": INSTRUCTIONS + json.dumps(items, ensure_ascii=False)}]}
-        ],
+        "contents": [{"parts": [{"text": INSTRUCTIONS + json.dumps(items, ensure_ascii=False)}]}],
         "generationConfig": {
             "temperature": 0,
             "maxOutputTokens": 16384,

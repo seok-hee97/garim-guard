@@ -40,9 +40,7 @@ def _record(identifier: str) -> CorpusRecord:
     )
 
 
-def test_run_teacher_resumes_and_batches_pending_rows(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_teacher_resumes_and_batches_pending_rows(tmp_path: Path, monkeypatch) -> None:
     input_path = tmp_path / "input.jsonl"
     output_path = tmp_path / "output.jsonl"
     records = [_record(f"row-{index}") for index in range(5)]
@@ -87,9 +85,7 @@ def test_run_teacher_resumes_and_batches_pending_rows(
     assert set(load_teacher_artifacts(output_path)) == {record.id for record in records}
 
 
-def test_run_teacher_rejects_stale_resumable_output(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_teacher_rejects_stale_resumable_output(tmp_path: Path, monkeypatch) -> None:
     input_path = tmp_path / "input.jsonl"
     output_path = tmp_path / "output.jsonl"
     write_jsonl(input_path, [_record("row-0")])

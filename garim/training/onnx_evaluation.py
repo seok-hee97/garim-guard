@@ -67,11 +67,7 @@ def evaluate_onnx_records(
                 gold_chars.add((record.id, position, span.label))
         if record.attack_label is not None:
             non_none = [item for item in attack_candidates if item[0] != "NONE"]
-            prediction = (
-                max(non_none, key=lambda item: item[1])[0]
-                if non_none
-                else "NONE"
-            )
+            prediction = max(non_none, key=lambda item: item[1])[0] if non_none else "NONE"
             attack_confusion[record.attack_label][prediction] += 1
 
     labels = sorted({item[2] for item in gold_chars | predicted_chars})
@@ -116,9 +112,7 @@ def evaluate_onnx_records(
     }
 
 
-def evaluate_onnx_by_source(
-    backend: OnnxL1Backend, records: list[CorpusRecord]
-) -> dict[str, Any]:
+def evaluate_onnx_by_source(backend: OnnxL1Backend, records: list[CorpusRecord]) -> dict[str, Any]:
     grouped: dict[str, list[CorpusRecord]] = defaultdict(list)
     for record in records:
         grouped[record.source].append(record)

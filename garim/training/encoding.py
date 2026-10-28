@@ -46,9 +46,7 @@ def normalization_delta_vector(delta: dict[str, int]) -> list[float]:
     return [math.log1p(delta[key]) for key in NORMALIZATION_DELTA_ORDER]
 
 
-def align_bio_labels(
-    offsets: list[tuple[int, int]], entity_spans: list[EntitySpan]
-) -> list[int]:
+def align_bio_labels(offsets: list[tuple[int, int]], entity_spans: list[EntitySpan]) -> list[int]:
     """Map character spans to token BIO ids; special/padding tokens receive -100."""
     entities = sorted(entity_spans, key=lambda entity: (entity.start, entity.end))
     for left, right in zip(entities, entities[1:], strict=False):

@@ -54,9 +54,7 @@ def test_alert_rate_counts_segments_not_hits() -> None:
     """한 세그먼트에 히트가 셋이어도 경보 세그먼트는 하나다(§7.2.1 과 같은 단위)."""
     report = scan(
         [("a", "x"), ("b", "y"), ("c", "z"), ("d", "w")],
-        lambda text: [_hit("L-KR-01"), _hit("L-CM-02"), _hit("L-CM-03")]
-        if text == "x"
-        else [],
+        lambda text: [_hit("L-KR-01"), _hit("L-CM-02"), _hit("L-CM-03")] if text == "x" else [],
         name="noisy",
     )
     assert report.alerting_segments == 1
@@ -72,8 +70,10 @@ def test_empty_corpus_is_refused() -> None:
 def test_corpus_loader_reads_jsonl_and_text(tmp_path: Path) -> None:
     jsonl = tmp_path / "c.jsonl"
     jsonl.write_text(
-        json.dumps({"id": "x1", "text": "첫 문장"}, ensure_ascii=False) + "\n"
-        + json.dumps({"id": "x2", "text": "  "}, ensure_ascii=False) + "\n",
+        json.dumps({"id": "x1", "text": "첫 문장"}, ensure_ascii=False)
+        + "\n"
+        + json.dumps({"id": "x2", "text": "  "}, ensure_ascii=False)
+        + "\n",
         encoding="utf-8",
     )
     assert list(iter_text_corpus(jsonl)) == [("x1", "첫 문장")]

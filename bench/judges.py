@@ -232,9 +232,7 @@ def polyguard(model_dir: str | Path, *, device: str | None = None) -> Judge:
     resolved = device or ("mps" if torch.backends.mps.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(directory, local_files_only=True)
     model = (
-        AutoModelForCausalLM.from_pretrained(
-            directory, local_files_only=True, dtype=torch.float16
-        )
+        AutoModelForCausalLM.from_pretrained(directory, local_files_only=True, dtype=torch.float16)
         .to(resolved)
         .eval()
     )

@@ -49,9 +49,7 @@ def _verify_entry(entry: object, expected_path: str | Path | None = None) -> Pat
         raise ValueError(f"evaluation input path drift: {source}")
     if not source.is_file():
         raise ValueError(f"evaluation input file is missing: {source}")
-    if entry.get("bytes") != source.stat().st_size or entry.get("sha256") != file_sha256(
-        source
-    ):
+    if entry.get("bytes") != source.stat().st_size or entry.get("sha256") != file_sha256(source):
         raise ValueError(f"evaluation input content drift: {source}")
     return source
 
@@ -119,9 +117,7 @@ def create_evaluation_input_manifest(
         "git_commit": git_commit(),
         "inputs": [_entry(path, records=len(load_jsonl(path))) for path in paths],
         "training_manifest": _entry(training_manifest_path),
-        "provenance": {
-            name: _entry(path) for name, path in sorted(provenance_files.items())
-        },
+        "provenance": {name: _entry(path) for name, path in sorted(provenance_files.items())},
         "contract": contract,
     }
 
@@ -130,9 +126,7 @@ def write_evaluation_input_manifest(path: str | Path, payload: dict[str, Any]) -
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(destination)
     return destination
 

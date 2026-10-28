@@ -81,15 +81,11 @@ def _train_seed(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     device = _device(torch, device_name)
-    tokenizer = AutoTokenizer.from_pretrained(
-        encoder_dir, local_files_only=True, use_fast=True
-    )
+    tokenizer = AutoTokenizer.from_pretrained(encoder_dir, local_files_only=True, use_fast=True)
     if not tokenizer.is_fast:
         raise ValueError("L1 training requires a fast tokenizer with offset mappings")
     collator = JointBatchCollator(tokenizer)
-    pii_dataset = EncodedCorpusDataset(
-        tokenizer, pii_train, max_length=max_length, stride=stride
-    )
+    pii_dataset = EncodedCorpusDataset(tokenizer, pii_train, max_length=max_length, stride=stride)
     attack_dataset = EncodedCorpusDataset(
         tokenizer, attack_train, max_length=max_length, stride=stride
     )
@@ -132,9 +128,7 @@ def _train_seed(
         precision=run_config.precision,
     )
     optimizer = build_optimizer(model, config)
-    steps_per_epoch = len(pii_loader) + math.ceil(
-        len(pii_loader) / run_config.pii_per_attack
-    )
+    steps_per_epoch = len(pii_loader) + math.ceil(len(pii_loader) / run_config.pii_per_attack)
     total_steps = max(1, steps_per_epoch * epochs)
     warmup_steps = max(1, round(total_steps * run_config.warmup_ratio))
 
@@ -171,8 +165,11 @@ def _train_seed(
         )
         row = {"epoch": epoch, "loss": asdict(losses), "metrics": metrics.as_dict()}
         history.append(row)
-        score = 2 * metrics.pii_character_recall * metrics.attack_macro_recall / max(
-            1e-12, metrics.pii_character_recall + metrics.attack_macro_recall
+        score = (
+            2
+            * metrics.pii_character_recall
+            * metrics.attack_macro_recall
+            / max(1e-12, metrics.pii_character_recall + metrics.attack_macro_recall)
         )
         improved = score > best_score
         if improved:
@@ -219,12 +216,8 @@ def main() -> int:
     parser.add_argument("--asset-manifest", default="data/asset-manifest.json")
     parser.add_argument("--models-manifest", default="train/models.yaml")
     parser.add_argument("--sources-manifest", default="train/sources.yaml")
-    parser.add_argument(
-        "--input-manifest", default="data/training-input-manifest.json"
-    )
-    parser.add_argument(
-        "--evaluation-manifest", default="data/evaluation-input-manifest.json"
-    )
+    parser.add_argument("--input-manifest", default="data/training-input-manifest.json")
+    parser.add_argument("--evaluation-manifest", default="data/evaluation-input-manifest.json")
     parser.add_argument("--output-dir", default="train/artifacts/l1")
     parser.add_argument("--seeds")
     parser.add_argument("--epochs", type=int)
@@ -291,21 +284,15 @@ def main() -> int:
         from garim.training.dataset import EncodedCorpusDataset, JointBatchCollator
         from garim.training.model import JointL1Model
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            encoder_dir, local_files_only=True, use_fast=True
-        )
+        tokenizer = AutoTokenizer.from_pretrained(encoder_dir, local_files_only=True, use_fast=True)
         collator = JointBatchCollator(tokenizer)
         sample = [
             *pii_train[: args.dry_run_examples],
             *attack_train[: args.dry_run_examples],
         ]
-        encoded = EncodedCorpusDataset(
-            tokenizer, sample, max_length=max_length, stride=stride
-        )
+        encoded = EncodedCorpusDataset(tokenizer, sample, max_length=max_length, stride=stride)
         device = _device(torch, args.device)
-        model = JointL1Model.from_pretrained(
-            str(encoder_dir), local_files_only=True
-        ).to(device)
+        model = JointL1Model.from_pretrained(str(encoder_dir), local_files_only=True).to(device)
         batch = collator(encoded.examples[: min(batch_size, len(encoded.examples))])
         model.eval()
         with torch.inference_mode():

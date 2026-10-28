@@ -26,9 +26,7 @@ def main() -> int:
     args = parser.parse_args()
 
     blocked = {
-        fingerprint_text(record.text)
-        for path in args.blocked_eval
-        for record in load_jsonl(path)
+        fingerprint_text(record.text) for path in args.blocked_eval for record in load_jsonl(path)
     }
     # ★ 회귀 — `네, 맞습니다.` 같은 일반 발화가 KDPII(스팬 없음, train·validation 양쪽)와
     #   PolyGuardMix 에 같이 있었다. PII 행끼리는 `validate_corpus` 가 허용하지만 공격 행은

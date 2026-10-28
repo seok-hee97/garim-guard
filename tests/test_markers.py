@@ -42,8 +42,22 @@ def test_design_measurement_holds_as_a_rate() -> None:
 
 @pytest.mark.parametrize(
     "term",
-    ["기밀", "영업비밀", "극비", "취급주의", "사외비", "부외비", "내부용", "秘", "極秘",
-     "RESTRICTED", "PROPRIETARY", "TLP:RED", "TLP:AMBER", "INTERNAL USE ONLY"],
+    [
+        "기밀",
+        "영업비밀",
+        "극비",
+        "취급주의",
+        "사외비",
+        "부외비",
+        "내부용",
+        "秘",
+        "極秘",
+        "RESTRICTED",
+        "PROPRIETARY",
+        "TLP:RED",
+        "TLP:AMBER",
+        "INTERNAL USE ONLY",
+    ],
 )
 def test_dictionary_terms_from_the_design_are_actually_wired(term: str) -> None:
     """22 of these were absent while the probe still passed."""

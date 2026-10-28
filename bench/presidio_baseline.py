@@ -194,8 +194,7 @@ def main() -> int:
     # 라벨별 대조는 macro 하나로 안 보인다 — 어디서 지고 어디서 이기는지가 §7.3 의 요점이다.
     per_label = {
         report.as_dict()["detector"]: {
-            label: round(score["f1"], 4)
-            for label, score in report.as_dict()["by_label"].items()
+            label: round(score["f1"], 4) for label, score in report.as_dict()["by_label"].items()
         }
         for report in reports
     }

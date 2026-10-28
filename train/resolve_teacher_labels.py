@@ -65,9 +65,7 @@ def main() -> int:
             f"missing={sorted(expected - set(artifact_paths))}, "
             f"extra={sorted(set(artifact_paths) - expected)}"
         )
-    artifacts = {
-        name: load_teacher_artifacts(path) for name, path in artifact_paths.items()
-    }
+    artifacts = {name: load_teacher_artifacts(path) for name, path in artifact_paths.items()}
     accepted, review, audit = resolve_teacher_corpus(
         records,
         artifacts,

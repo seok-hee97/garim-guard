@@ -105,27 +105,20 @@ def _attack_split_for(key: str) -> Split:
 
 def _rrn_check_digit(first_twelve: str) -> str:
     weights = (2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5)
-    weighted = sum(
-        int(digit) * weight
-        for digit, weight in zip(first_twelve, weights, strict=True)
-    )
+    weighted = sum(int(digit) * weight for digit, weight in zip(first_twelve, weights, strict=True))
     return str((11 - weighted % 11) % 10)
 
 
 def _business_check_digit(first_nine: str) -> str:
     weights = (1, 3, 7, 1, 3, 7, 1, 3, 5)
-    total = sum(
-        int(digit) * weight
-        for digit, weight in zip(first_nine, weights, strict=True)
-    )
+    total = sum(int(digit) * weight for digit, weight in zip(first_nine, weights, strict=True))
     total += (int(first_nine[8]) * 5) // 10
     return str((10 - total % 10) % 10)
 
 
 def _corporation_check_digit(first_twelve: str) -> str:
     total = sum(
-        int(digit) * (1 if index % 2 == 0 else 2)
-        for index, digit in enumerate(first_twelve)
+        int(digit) * (1 if index % 2 == 0 else 2) for index, digit in enumerate(first_twelve)
     )
     return str((10 - total % 10) % 10)
 
@@ -216,9 +209,7 @@ def _identifier_value(
     raise ValueError(f"not an identifier label: {label}")
 
 
-def _failed_context_value(
-    label: str, rng: random.Random, split: Split | None = None
-) -> str:
+def _failed_context_value(label: str, rng: random.Random, split: Split | None = None) -> str:
     if split is not None:
         for _ in range(10_000):
             candidate = _failed_context_value(label, rng)
@@ -283,7 +274,7 @@ def _compose(opening: str, fields: list[tuple[str, str]], closing: str) -> _Rend
 _TYPE_NEGATIVES: dict[str, tuple[str, ...]] = {
     "code": (
         'user_ssn_{n} = os.environ.get("USER_SSN_{n}")  # 값은 런타임에 주입한다',
-        'def mask_phone_number_{n}(phone_number: str) -> str:\n'
+        "def mask_phone_number_{n}(phone_number: str) -> str:\n"
         '    return phone_number[:3] + "****"',
         'ORDER_NO_PATTERN_{n} = r"\\d{{6}}-\\d{{7}}"  # 주문번호 형식, 주민번호 아님',
         "class Customer{n}:\n    resident_registration_number: str | None = None",
@@ -423,13 +414,11 @@ def _joint_shape_schedule(
 
     integers = {key: int(value) for key, value in matrix.items()}
     row_remaining = {
-        category: category_counts[category]
-        - sum(integers[category, shape] for shape in shapes)
+        category: category_counts[category] - sum(integers[category, shape] for shape in shapes)
         for category in categories
     }
     column_remaining = {
-        shape: shape_counts[shape]
-        - sum(integers[category, shape] for category in categories)
+        shape: shape_counts[shape] - sum(integers[category, shape] for category in categories)
         for shape in shapes
     }
     while sum(row_remaining.values()):
@@ -448,11 +437,7 @@ def _joint_shape_schedule(
 
     schedules: dict[str, list[str]] = {}
     for category in categories:
-        schedule = [
-            shape
-            for shape in shapes
-            for _ in range(integers[category, shape])
-        ]
+        schedule = [shape for shape in shapes for _ in range(integers[category, shape])]
         rng.shuffle(schedule)
         schedules[category] = schedule
     return schedules
@@ -480,8 +465,7 @@ def generate_pii_corpus(
     else:
         desired_spans = valid_count + round(valid_count * 7 / 12)
         valid_labels = [
-            IDENTIFIER_LABELS[index % len(IDENTIFIER_LABELS)]
-            for index in range(desired_spans)
+            IDENTIFIER_LABELS[index % len(IDENTIFIER_LABELS)] for index in range(desired_spans)
         ]
     rng.shuffle(valid_labels)
 
@@ -598,8 +582,7 @@ def generate_pii_corpus(
                 rendered = _compose(opening, fields, closing)
             else:
                 rendered = _Rendered(
-                    f"{opening} 회의 일정과 공개 자료 {local_index:05d}번만 "
-                    f"검토합니다. {closing}",
+                    f"{opening} 회의 일정과 공개 자료 {local_index:05d}번만 검토합니다. {closing}",
                     [],
                 )
 

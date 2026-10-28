@@ -89,10 +89,7 @@ def detect_secrets_baseline() -> Detector | None:
 
     def detector(text: str) -> bool:
         with default_settings() as settings:
-            loaded = [
-                plugins.initialize.from_plugin_classname(name)
-                for name in settings.plugins
-            ]
+            loaded = [plugins.initialize.from_plugin_classname(name) for name in settings.plugins]
             for line_number, line in enumerate(text.splitlines(), start=1):
                 for plugin in loaded:
                     try:
@@ -147,9 +144,7 @@ def evaluate(
     )
 
 
-def run(
-    positives: Sequence[str], negatives: Sequence[str]
-) -> list[BaselineScore]:
+def run(positives: Sequence[str], negatives: Sequence[str]) -> list[BaselineScore]:
     candidates: list[tuple[str, Detector | None]] = [
         ("garim-l0", garim_secrets()),
         ("garim-raw-rules", garim_raw_rules()),
@@ -160,9 +155,7 @@ def run(
     for name, detector in candidates:
         if detector is None:
             # 설치 안 됐다고 0점을 주지 않는다 — "안 돌았다" 와 "못 잡았다" 는 다르다.
-            scores.append(
-                BaselineScore(name=name, available=False, note="not installed; skipped")
-            )
+            scores.append(BaselineScore(name=name, available=False, note="not installed; skipped"))
             continue
         scores.append(evaluate(positives, negatives, detector, name=name))
     return scores

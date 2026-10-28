@@ -81,9 +81,7 @@ def encode_corpus_record(
                 selected.append(entity)
                 covered_entities.add(entity_index)
         pii_labels = (
-            align_bio_labels(offsets, selected)
-            if record.task == "pii"
-            else [-100] * len(offsets)
+            align_bio_labels(offsets, selected) if record.task == "pii" else [-100] * len(offsets)
         )
         if record.task == "pii":
             # ★ 창 경계에 걸린 개체는 고르지 않았다 — 그 개체의 창 안 토큰이 `O` 로 학습돼, 다음
@@ -109,9 +107,7 @@ def encode_corpus_record(
                 "pii_labels": pii_labels,
                 "pii_eval_labels": pii_eval_labels,
                 "attack_labels": (
-                    _ATTACK_ID[record.attack_label]
-                    if record.attack_label is not None
-                    else -100
+                    _ATTACK_ID[record.attack_label] if record.attack_label is not None else -100
                 ),
                 "normalization_delta": delta,
                 "kanana_probabilities": list(record.kanana_probabilities or (0.0, 0.0, 0.0)),
@@ -192,9 +188,7 @@ class JointBatchCollator:
             "input_ids": torch.tensor(padded("input_ids", self.pad_token_id), dtype=torch.long),
             "attention_mask": torch.tensor(padded("attention_mask", 0), dtype=torch.long),
             "pii_labels": torch.tensor(padded("pii_labels", -100), dtype=torch.long),
-            "pii_eval_labels": torch.tensor(
-                padded("pii_eval_labels", -100), dtype=torch.long
-            ),
+            "pii_eval_labels": torch.tensor(padded("pii_eval_labels", -100), dtype=torch.long),
             "attack_labels": torch.tensor(
                 [example["attack_labels"] for example in examples], dtype=torch.long
             ),
@@ -221,7 +215,5 @@ class JointBatchCollator:
             "offset_mappings": [example["offset_mapping"] for example in examples],
         }
         if all("token_type_ids" in example for example in examples):
-            batch["token_type_ids"] = torch.tensor(
-                padded("token_type_ids", 0), dtype=torch.long
-            )
+            batch["token_type_ids"] = torch.tensor(padded("token_type_ids", 0), dtype=torch.long)
         return batch

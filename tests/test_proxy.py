@@ -174,7 +174,7 @@ def _post(server: Any, body: dict[str, Any]) -> tuple[int, dict[str, str], str]:
 def _sse_chunks(text: str) -> list[Any]:
     import json
 
-    events = [line[len("data: "):] for line in text.split("\n\n") if line.startswith("data: ")]
+    events = [line[len("data: ") :] for line in text.split("\n\n") if line.startswith("data: ")]
     assert events[-1] == "[DONE]"
     return [json.loads(event) for event in events[:-1]]
 
@@ -475,7 +475,8 @@ def test_lone_surrogate_does_not_open_a_path_upstream() -> None:
     recorder = _Recorder()
     key = "sk-proj-" + "A" * 40
     body = json.loads(
-        '{"model": "x", "messages": [{"role": "user", "content": "key ' + key
+        '{"model": "x", "messages": [{"role": "user", "content": "key '
+        + key
         + ' mail kim@example.test \\ud800"}]}'
     )
     status, _, headers = _service(recorder).handle_chat_completions(body, {})
@@ -603,18 +604,39 @@ def test_strings_inside_parts_and_custom_tool_calls_are_inspected() -> None:
     payload = {
         "model": "x",
         "messages": [
-            {"role": "user", "content": [
-                {"type": "file", "file": {"filename": "계약서_hong@example.test.pdf",
-                                          "file_data": "data:application/pdf;base64,QUJD"}},
-                {"type": "image_url", "image_url": {"url": "https://x.test/a.png?o=kim@example.test"}},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
-            ]},
-            {"role": "assistant", "content": [
-                {"type": "refusal", "refusal": "lee@example.test 에게는 보낼 수 없습니다"}
-            ], "tool_calls": [
-                {"id": "call_8fA9b2Kx0Qz7LmN3", "type": "custom",
-                 "custom": {"name": "mail", "input": "to: park@example.test"}}
-            ]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file",
+                        "file": {
+                            "filename": "계약서_hong@example.test.pdf",
+                            "file_data": "data:application/pdf;base64,QUJD",
+                        },
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://x.test/a.png?o=kim@example.test"},
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="},
+                    },
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "refusal", "refusal": "lee@example.test 에게는 보낼 수 없습니다"}
+                ],
+                "tool_calls": [
+                    {
+                        "id": "call_8fA9b2Kx0Qz7LmN3",
+                        "type": "custom",
+                        "custom": {"name": "mail", "input": "to: park@example.test"},
+                    }
+                ],
+            },
             {"role": "user", "content": "다음"},
         ],
     }
@@ -654,8 +676,10 @@ def test_large_tool_definitions_get_their_own_input_budget() -> None:
     """★ 2차 검토 — 큰 `tools` 정의와 긴 대화가 한도를 나눠 써서 PII 없는 요청이 차단됐다."""
     recorder = _Recorder()
     tools = [
-        {"type": "function", "function": {"name": f"tool_{index}",
-                                          "description": "주문 상태를 조회한다. " * 20}}
+        {
+            "type": "function",
+            "function": {"name": f"tool_{index}", "description": "주문 상태를 조회한다. " * 20},
+        }
         for index in range(120)
     ]
     payload = {**_request(("user", "배송 문의드립니다. " * 6000)), "tools": tools}
@@ -716,8 +740,9 @@ def test_blocked_field_finding_does_not_claim_a_message_segment() -> None:
     recorder = _Recorder()
     payload = {
         **_request(("user", "안녕하세요"), ("user", "다음")),
-        "tools": [{"type": "function", "function": {"name": "f",
-                                                    "description": f"주민등록번호 {_rrn()}"}}],
+        "tools": [
+            {"type": "function", "function": {"name": "f", "description": f"주민등록번호 {_rrn()}"}}
+        ],
     }
     status, body, _ = _service(recorder).handle_chat_completions(payload, {})
     assert status == 400

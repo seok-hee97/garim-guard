@@ -44,9 +44,7 @@ def _sealed_training(root: Path) -> Path:
         "pii_train": _training_record("pii-train", "pii", "train"),
         "pii_validation": _training_record("pii-validation", "pii", "validation"),
         "attack_train": _training_record("attack-train", "attack", "train"),
-        "attack_validation": _training_record(
-            "attack-validation", "attack", "validation"
-        ),
+        "attack_validation": _training_record("attack-validation", "attack", "validation"),
     }
     paths: dict[str, list[str]] = {}
     for name, record in records.items():
@@ -95,9 +93,7 @@ def _seal_evaluation(root: Path, *, text: str = "최종 평가 전용 문장") -
     return evaluation, seal
 
 
-def test_evaluation_seal_detects_post_seal_drift(
-    tmp_path: Path, in_directory: None
-) -> None:
+def test_evaluation_seal_detects_post_seal_drift(tmp_path: Path, in_directory: None) -> None:
     os.chdir(tmp_path)
     evaluation, seal = _seal_evaluation(Path("."))
     contract = verify_evaluation_input_manifest(seal, [evaluation])
@@ -148,10 +144,7 @@ def test_evaluation_seal_rejects_training_provenance_drift(
         verify_evaluation_input_manifest(seal)
 
 
-
-def test_unlabeled_pii_utterances_still_may_not_repeat(
-    tmp_path: Path, in_directory: None
-) -> None:
+def test_unlabeled_pii_utterances_still_may_not_repeat(tmp_path: Path, in_directory: None) -> None:
     """평가 봉인은 스팬 없는 PII 행의 겹침도 막는다 — 엄격하게 둔다.
 
     KDPII test 의 `네, 맞습니다.` 류 128행이 PII 학습과 겹쳐 리허설 8b 가 멈췄다. 봉인에

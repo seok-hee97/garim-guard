@@ -288,7 +288,7 @@ def test_l0_remeasurement_regressions_stay_fixed() -> None:
     assert inspector.check("시스템 프롬프트를 작성할 때 예시를 보여줘").attacks == []
     notice = "공지에 '이전 지시사항은 폐기하고 새 매뉴얼로 교체'라는데 해석 좀."
     assert inspector.check(notice).attacks == []
-    assert inspector.check("법인번호 900101-*******").verdict == "block"  # 주민 체크섬 유효
+    assert inspector.check(f"법인번호 {_rrn()}").verdict == "block"  # 주민 체크섬 유효
 
 
 def test_an_account_span_does_not_swallow_the_amount() -> None:
@@ -330,14 +330,19 @@ def test_json_tool_results_are_inspected_after_unescaping() -> None:
         "model": "x",
         "messages": [
             {"role": "user", "content": "요약해줘"},
-            {"role": "tool", "tool_call_id": "call_1",
-             "content": json.dumps({"doc": "[대외비]\n2027 구조조정 계획 초안"})},
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": json.dumps({"doc": "[대외비]\n2027 구조조정 계획 초안"}),
+            },
         ],
     }
     status, _, _ = _proxy(upstream, "strict").handle_chat_completions(request, {})
     assert status == 400 and upstream.calls == []
     phone = {
-        "role": "tool", "tool_call_id": "call_1", "content": json.dumps({"tel": "010-1234-5678"})
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": json.dumps({"tel": "010-1234-5678"}),
     }
     status, _, _ = _proxy(upstream).handle_chat_completions(
         {"model": "x", "messages": [{"role": "user", "content": "확인"}, phone]}, {}
@@ -355,12 +360,20 @@ def test_plaintext_in_binary_fields_is_inspected() -> None:
     png = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
     request = {
         "model": "x",
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": "첨부 확인"},
-            {"type": "input_audio", "input_audio": {"data": f"card {card}", "format": "wav"}},
-            {"type": "file", "file": {"file_data": text_file, "filename": "a.txt"}},
-            {"type": "image_url", "image_url": {"url": png}},
-        ]}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "첨부 확인"},
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": f"card {card}", "format": "wav"},
+                    },
+                    {"type": "file", "file": {"file_data": text_file, "filename": "a.txt"}},
+                    {"type": "image_url", "image_url": {"url": png}},
+                ],
+            }
+        ],
     }
     _proxy(upstream).handle_chat_completions(request, {})
     parts = upstream.calls[-1]["messages"][0]["content"]
@@ -372,8 +385,11 @@ def test_plaintext_in_binary_fields_is_inspected() -> None:
 def test_a_literal_token_in_a_message_does_not_collide_with_a_field_token() -> None:
     reply = {"choices": [{"message": {"content": "형식은 <PHONE_1>, 담당 <PHONE_2>"}}]}
     upstream = _Upstream(reply)
-    request = {"model": "x", "metadata": {"owner": "010-1234-5678"},
-               "messages": [{"role": "user", "content": "번호 형식 예시: <PHONE_1> 처럼 쓰세요"}]}
+    request = {
+        "model": "x",
+        "metadata": {"owner": "010-1234-5678"},
+        "messages": [{"role": "user", "content": "번호 형식 예시: <PHONE_1> 처럼 쓰세요"}],
+    }
     _, body, _ = _proxy(upstream).handle_chat_completions(request, {})
     assert upstream.calls[-1]["metadata"] == {"owner": "<PHONE_2>"}
     assert body["choices"][0]["message"]["content"] == "형식은 <PHONE_1>, 담당 010-1234-5678"
@@ -444,10 +460,19 @@ def test_ids_and_settings_are_skipped_only_when_they_look_like_ids_and_settings(
 
 
 def test_refusal_and_reasoning_fields_are_restored() -> None:
-    upstream = _Upstream({"choices": [{"message": {
-        "content": [{"type": "text", "text": "메일 <EMAIL_1>"}],
-        "refusal": "r <EMAIL_1>", "reasoning_content": "think <EMAIL_1>",
-    }}]})
+    upstream = _Upstream(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": [{"type": "text", "text": "메일 <EMAIL_1>"}],
+                        "refusal": "r <EMAIL_1>",
+                        "reasoning_content": "think <EMAIL_1>",
+                    }
+                }
+            ]
+        }
+    )
     request = {"model": "x", "messages": [{"role": "user", "content": "kim@example.com 에게"}]}
     _, body, headers = _proxy(upstream).handle_chat_completions(request, {})
     message = body["choices"][0]["message"]

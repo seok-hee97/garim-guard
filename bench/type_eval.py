@@ -41,9 +41,7 @@ class TypeCell:
     @property
     def false_positive_rate(self) -> float:
         return (
-            self.false_positive_segments / self.negative_segments
-            if self.negative_segments
-            else 0.0
+            self.false_positive_segments / self.negative_segments if self.negative_segments else 0.0
         )
 
     @property
@@ -107,9 +105,7 @@ def content_type_of(record: CorpusRecord) -> str:
     return str(shape) if isinstance(shape, str) and shape else "unknown"
 
 
-def evaluate(
-    records: Sequence[CorpusRecord], config: PolicyConfig, *, arm: str
-) -> TypeReport:
+def evaluate(records: Sequence[CorpusRecord], config: PolicyConfig, *, arm: str) -> TypeReport:
     """정책 하나로 코퍼스를 돌려 타입별 FPR·재현율을 낸다."""
     if not records:
         raise ValueError("type evaluation needs at least one record")
@@ -151,9 +147,7 @@ def evaluate(
     )
 
 
-def policy_coverage(
-    records: Sequence[CorpusRecord], config: PolicyConfig
-) -> dict[str, int]:
+def policy_coverage(records: Sequence[CorpusRecord], config: PolicyConfig) -> dict[str, int]:
     """정책이 겨냥하는 케이스가 코퍼스에 **몇 건이나 있는가**.
 
     ★ 이것이 없으면 `0.0000` 을 잘못 읽는다. §8.4-5 는 "기여가 측정되지 않으면 자른다"

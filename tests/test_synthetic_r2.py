@@ -97,7 +97,7 @@ def test_account_pairs_share_digits_and_split(pii: list[CorpusRecord]) -> None:
         positive = next(r for r in members if r.meta["type"] == "account_pair_positive")
         negative = next(r for r in members if r.meta["type"] == "numeric_context_negative")
         (span,) = positive.spans
-        digits = positive.text[span.start:span.end]
+        digits = positive.text[span.start : span.end]
         assert span.label == "KR_ACCOUNT" and digits.isdigit() and 10 <= len(digits) <= 14
         assert digits in negative.text and not negative.spans
         assert positive.split == negative.split
@@ -131,8 +131,16 @@ def test_r1_teacher_rows_are_reused_only_when_id_and_text_match(tmp_path: Path) 
     from runpod_pipeline import TEACHERS, reuse_r1_teachers
 
     def row(record_id: str, text: str) -> str:
-        return json.dumps({"id": record_id, "task": "attack", "text": text, "source": "fixture",
-                           "split": "train"}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "id": record_id,
+                "task": "attack",
+                "text": text,
+                "source": "fixture",
+                "split": "train",
+            },
+            ensure_ascii=False,
+        )
 
     source = tmp_path / "r1"
     source.mkdir()
@@ -147,8 +155,14 @@ def test_r1_teacher_rows_are_reused_only_when_id_and_text_match(tmp_path: Path) 
         )
     current = tmp_path / "r2-input.jsonl"
     current.write_text(
-        "\n".join([row("same", "변하지 않은 행"), row("edited", "R2 에서 바뀐 텍스트"),
-                   row("new", "새 행")]) + "\n",
+        "\n".join(
+            [
+                row("same", "변하지 않은 행"),
+                row("edited", "R2 에서 바뀐 텍스트"),
+                row("new", "새 행"),
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     outputs = {name: tmp_path / f"teacher-{name}-r2.jsonl" for name in TEACHERS}
@@ -202,7 +216,8 @@ def test_consensus_audit_stops_when_generator_benign_is_dropped_wholesale() -> N
     kept = [{"id": f"r{i}", "status": "accepted", "label": "NONE"} for i in range(10)]
     assert audit_generator_consensus(kept, gold, families)["benign_acceptance"] == 1.0
     r1_like = [
-        {"id": f"r{i}", "status": "accepted", "label": "NONE"} if i >= 5
+        {"id": f"r{i}", "status": "accepted", "label": "NONE"}
+        if i >= 5
         else {"id": f"r{i}", "status": "review", "label": None, "reason": "no_consensus"}
         for i in range(10)
     ]
@@ -229,8 +244,16 @@ def test_reference_numbers_do_not_reveal_the_label(attack: list[CorpusRecord]) -
 def test_benign_rows_carry_every_t4_benign_hiding_except_b64(attack: list[CorpusRecord]) -> None:
     """정상 학습문에 없는 은닉으로 정상 FPR(O2)을 재면 모델과 무관하게 통과할 수 없다."""
     hidings = Counter(r.meta["hiding"] for r in attack if r.attack_label == "NONE")
-    for technique in ("zwsp", "jamo", "space_break", "tensify", "homoglyph", "hanja",
-                      "chosung", "space_join"):
+    for technique in (
+        "zwsp",
+        "jamo",
+        "space_break",
+        "tensify",
+        "homoglyph",
+        "hanja",
+        "chosung",
+        "space_join",
+    ):
         assert hidings[technique] > 0, technique
     assert hidings["b64"] == 0
 
@@ -242,13 +265,17 @@ def test_homoglyph_marker_does_not_track_the_label(attack: list[CorpusRecord]) -
     marker = re.compile(r"^(xlsx|html|xml|css) 자료:", re.I)
     by_label = Counter(
         (r.attack_label == "NONE", bool(marker.search(normalize(r.text).norm.text)))
-        for r in attack if r.meta["hiding"] == "homoglyph"
+        for r in attack
+        if r.meta["hiding"] == "homoglyph"
     )
     assert by_label[(False, True)] and by_label[(False, False)]  # 공격에도 접두 있음·없음
     assert by_label[(True, False)]  # 정상에도 접두 없는 동형 문자
     # 한글 본문 위의 동형 문자(= `t4-r2-test` 동형 문자 셀의 모양)도 두 라벨에 다 있다.
-    hangul = Counter(r.attack_label == "NONE" for r in attack
-                     if r.meta["hiding"] == "homoglyph" and not r.romanized_target)
+    hangul = Counter(
+        r.attack_label == "NONE"
+        for r in attack
+        if r.meta["hiding"] == "homoglyph" and not r.romanized_target
+    )
     assert hangul[True] and hangul[False]
     # T4 정상 셀의 접두(`CSV 첨부:` 등)는 학습에 나오지 않는다.
     assert not any("첨부:" in normalize(r.text).norm.text for r in attack if r.split != "test")
@@ -257,8 +284,11 @@ def test_homoglyph_marker_does_not_track_the_label(attack: list[CorpusRecord]) -
 def test_one_attack_family_per_class_is_pinned_to_validation(attack: list[CorpusRecord]) -> None:
     from garim.training.split import component_validation_splits
 
-    pinned = {(r.attack_label, r.template_id) for r in attack
-              if r.attack_label != "NONE" and r.split == "validation"}
+    pinned = {
+        (r.attack_label, r.template_id)
+        for r in attack
+        if r.attack_label != "NONE" and r.split == "validation"
+    }
     assert {label for label, _ in pinned} == {"INJECTION", "JAILBREAK", "SYSTEM_LEAK"}
     assert all(family.endswith("-t2") for _, family in pinned)
     pool = [r for r in attack if r.split != "test"]
@@ -271,8 +301,15 @@ def test_shipping_contexts_reach_training_and_some_numbers_lead_with_zero(
 ) -> None:
     shipping = [r for r in pii if r.template_id.startswith("pii-num-ship-")]
     assert shipping and all(r.split == "train" for r in shipping)
-    assert any(re.search(r"(?<!\d)0\d{7,}", r.text) for r in pii
-               if r.meta["type"] == "numeric_context_negative")
-    numbers = [token for r in pii if r.meta["type"] == "numeric_context_negative"
-               for token in re.findall(r"\d[\d-]{6,}\d", r.text)]
+    assert any(
+        re.search(r"(?<!\d)0\d{7,}", r.text)
+        for r in pii
+        if r.meta["type"] == "numeric_context_negative"
+    )
+    numbers = [
+        token
+        for r in pii
+        if r.meta["type"] == "numeric_context_negative"
+        for token in re.findall(r"\d[\d-]{6,}\d", r.text)
+    ]
     assert numbers and not any(token.startswith("010") for token in numbers)

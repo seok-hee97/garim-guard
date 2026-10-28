@@ -111,9 +111,7 @@ def default_grid(inspector: Inspector, *, runs: int = 30) -> list[LatencyPoint]:
     points: list[LatencyPoint] = []
     for characters in (256, 1024, 4096):
         text = (_FILLER * (characters // len(_FILLER) + 1))[:characters]
-        points.append(
-            measure(inspector, [Segment(text)], label=f"1seg/{characters}c", runs=runs)
-        )
+        points.append(measure(inspector, [Segment(text)], label=f"1seg/{characters}c", runs=runs))
     for count in (3, 8, 16):
         chunk = (_FILLER * 4)[:512]
         body = [Segment(chunk, origin="user") for _ in range(count)]

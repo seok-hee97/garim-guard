@@ -74,8 +74,7 @@ def _import(target: str, layer: str) -> ModuleType:
             raise
         except BaseException as exc:
             raise RuntimeError(
-                f"{layer} backend module {target!r} failed to import: "
-                f"{type(exc).__name__}: {exc}"
+                f"{layer} backend module {target!r} failed to import: {type(exc).__name__}: {exc}"
             ) from exc
 
     # 파일 경로는 sys.path 를 건드리지 않고 그 파일만 올린다 — 현재 디렉터리를 경로에 넣으면

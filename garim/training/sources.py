@@ -165,8 +165,7 @@ class SourceRegistry:
         for item in self.manifest.forbidden_paths:
             prefix = item.path.removesuffix("/**").rstrip("/")
             if any(
-                relative == prefix or relative.startswith(prefix + "/")
-                for relative in relatives
+                relative == prefix or relative.startswith(prefix + "/") for relative in relatives
             ):
                 raise ValueError(f"forbidden training path {relatives[0]}: {item.reason}")
 
@@ -180,9 +179,7 @@ class SourceRegistry:
         dataset_loader: Callable[..., object] | None = None,
     ) -> object:
         """Authorize and load exactly the pinned HF revision and split."""
-        source = self.authorize(
-            name, purpose=purpose, license_resolver=license_resolver
-        ).source
+        source = self.authorize(name, purpose=purpose, license_resolver=license_resolver).source
         if source.hf_id is None or source.revision is None:
             raise ValueError(f"{name}: not a HuggingFace source")
         expected_split = source.train_split if purpose == "train" else source.eval_split
@@ -211,9 +208,7 @@ class SourceRegistry:
         if not source.enabled:
             raise ValueError(f"{name}: source is disabled pending verification")
         if source.use != purpose:
-            raise ValueError(
-                f"{name}: registered for {source.use}, cannot authorize as {purpose}"
-            )
+            raise ValueError(f"{name}: registered for {source.use}, cannot authorize as {purpose}")
         if local_file is not None:
             self.assert_path_allowed(local_file)
 

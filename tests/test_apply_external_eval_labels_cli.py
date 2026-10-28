@@ -7,9 +7,7 @@ from garim.training.data import CorpusRecord, load_jsonl, write_jsonl
 from train import apply_external_eval_labels
 
 
-def test_external_eval_label_cli_writes_valid_gold(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_external_eval_label_cli_writes_valid_gold(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "source.jsonl"
     output = tmp_path / "gold.jsonl"
     write_jsonl(

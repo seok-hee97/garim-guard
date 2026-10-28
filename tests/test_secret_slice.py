@@ -18,9 +18,7 @@ def test_slices_satisfy_the_corpus_contract() -> None:
 
 
 def test_slices_are_deterministic() -> None:
-    assert [r.text for r in generate_secret_slice()] == [
-        r.text for r in generate_secret_slice()
-    ]
+    assert [r.text for r in generate_secret_slice()] == [r.text for r in generate_secret_slice()]
 
 
 def test_positive_and_negative_share_the_carrier() -> None:

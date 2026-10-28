@@ -129,9 +129,7 @@ def evaluate(rows: Sequence[CredRow], detector: Detector, *, name: str) -> CredR
         recall=recall,
         f1=(2 * precision * recall / (precision + recall)) if precision + recall else 0.0,
         false_positives=false_positive,
-        by_category={
-            key: sum(values) / len(values) for key, values in by_category.items()
-        },
+        by_category={key: sum(values) / len(values) for key, values in by_category.items()},
     )
 
 

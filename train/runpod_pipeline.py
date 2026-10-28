@@ -139,9 +139,11 @@ def materialize_r2() -> None:
     # T4 는 은닉 · 로마자 · 존댓말이 없는 기본 행에서만 만든다. 이미 은닉된 행에 셀 기법을 한 번 더
     # 걸면 한 행에 은닉이 두 겹이라 셀별 FPR 이 그 셀의 기법만 재지 않는다.
     holdout = [
-        record for record in outputs["attack-synthetic-r2-test.jsonl"]
+        record
+        for record in outputs["attack-synthetic-r2-test.jsonl"]
         if record.meta.get("hiding") == "none"
-        and not record.romanized_target and not record.honorific_target
+        and not record.romanized_target
+        and not record.honorific_target
     ]
     outputs["t4-r2-test.jsonl"] = generate_t4_benign(holdout)
     outputs["t4-prime-r2-test.jsonl"] = generate_t4_prime(
@@ -168,8 +170,10 @@ def audit_data() -> None:
         for record in load_jsonl(ROOT / CORPUS / f"attack-synthetic-r2-{split}.jsonl")
     ]
     pii_families = {
-        split: {record.template_id for record in load_jsonl(
-            ROOT / CORPUS / f"pii-negative-r2-{split}.jsonl")}
+        split: {
+            record.template_id
+            for record in load_jsonl(ROOT / CORPUS / f"pii-negative-r2-{split}.jsonl")
+        }
         for split in ("train", "validation", "test")
     }
     try:
@@ -225,17 +229,22 @@ def apply_deepset() -> None:
             f"2c deepset 번역 적용 ({split})",
             _python(
                 "train/apply_translations.py",
-                "--queue", str(CORPUS / f"{queue}.jsonl"),
-                "--translations", f"train/translations/deepset-{split}-ko.jsonl",
-                "--output", str(CORPUS / f"deepset-ko-{split}.jsonl"),
+                "--queue",
+                str(CORPUS / f"{queue}.jsonl"),
+                "--translations",
+                f"train/translations/deepset-{split}-ko.jsonl",
+                "--output",
+                str(CORPUS / f"deepset-ko-{split}.jsonl"),
             ),
         )
     _require(
         "2c deepset 외부 이진 gold",
         _python(
             "train/apply_external_eval_labels.py",
-            "--input", str(CORPUS / "deepset-ko-test.jsonl"),
-            "--output", str(CORPUS / "attack-external-gold-test.jsonl"),
+            "--input",
+            str(CORPUS / "deepset-ko-test.jsonl"),
+            "--output",
+            str(CORPUS / "attack-external-gold-test.jsonl"),
         ),
     )
 
@@ -250,17 +259,30 @@ def merge_pii() -> None:
     """
     blocked = [arg for path in EVALUATION_INPUTS for arg in ("--blocked-eval", str(path))]
     for split, inputs in (
-        ("train",
-         ("pii-synthetic-train", "pii-negative-r2-train", "kdpii-train", "klue_train-train")),
-        ("validation",
-         ("pii-synthetic-validation", "pii-negative-r2-validation", "kdpii-validation")),
+        (
+            "train",
+            ("pii-synthetic-train", "pii-negative-r2-train", "kdpii-train", "klue_train-train"),
+        ),
+        (
+            "validation",
+            ("pii-synthetic-validation", "pii-negative-r2-validation", "kdpii-validation"),
+        ),
     ):
         output = PII_TRAIN[0] if split == "train" else PII_VALIDATION[0]
         sources = [arg for name in inputs for arg in ("--input", str(CORPUS / f"{name}.jsonl"))]
         _require(
             f"3 PII 병합 ({split})",
-            _python("train/merge_corpora.py", "--task", "pii", "--split", split,
-                    *sources, *blocked, "--output", output),
+            _python(
+                "train/merge_corpora.py",
+                "--task",
+                "pii",
+                "--split",
+                split,
+                *sources,
+                *blocked,
+                "--output",
+                output,
+            ),
         )
         print(f"   sha256 {_digest(output)}  {output}")
 
@@ -299,9 +321,12 @@ def build_pool() -> Path:
             f"5 생성기 라벨 분리 ({split})",
             _python(
                 "train/make_teacher_input.py",
-                "--input", str(CORPUS / f"attack-synthetic-r2-{split}.jsonl"),
-                "--output", str(CORPUS / f"attack-unlabeled-r2-{split}.jsonl"),
-                "--gold", str(CORPUS / f"attack-generator-gold-r2-{split}.json"),
+                "--input",
+                str(CORPUS / f"attack-synthetic-r2-{split}.jsonl"),
+                "--output",
+                str(CORPUS / f"attack-unlabeled-r2-{split}.jsonl"),
+                "--gold",
+                str(CORPUS / f"attack-generator-gold-r2-{split}.json"),
             ),
         )
     evaluation = (*EVALUATION_INPUTS, *EXTRA_BLOCKED)
@@ -319,8 +344,17 @@ def build_pool() -> Path:
         sources = [arg for name in inputs for arg in ("--input", str(CORPUS / f"{name}.jsonl"))]
         _require(
             f"5b 공격 교사 풀 ({split})",
-            _python("train/merge_corpora.py", "--task", "attack", "--split", split, *sources,
-                    *blocked, "--output", str(CORPUS / f"attack-teacher-pool-r2-{split}.jsonl")),
+            _python(
+                "train/merge_corpora.py",
+                "--task",
+                "attack",
+                "--split",
+                split,
+                *sources,
+                *blocked,
+                "--output",
+                str(CORPUS / f"attack-teacher-pool-r2-{split}.jsonl"),
+            ),
         )
     from garim.training.compat import load_local_tokenizer
     from garim.training.data import load_jsonl, write_jsonl
@@ -374,19 +408,33 @@ def write_standin_teachers(teacher_input: Path, out_dir: Path) -> dict[str, Path
             probabilities[kanana] = 0.9
             jailbreak = 0.9 if label == "JAILBREAK" and _bucket(record.id, "qwen") < 0.8 else 0.05
             rows = {
-                "kanana": {"label": kanana, "confidence": 0.9,
-                           "class_probabilities": probabilities},
+                "kanana": {
+                    "label": kanana,
+                    "confidence": 0.9,
+                    "class_probabilities": probabilities,
+                },
                 "gemma4": {"label": label, "confidence": 1.0},
-                "qwen3guard_gen": {"label": "JAILBREAK" if jailbreak > 0.5 else "NONE",
-                                   "confidence": max(jailbreak, 1 - jailbreak),
-                                   "class_probabilities": {"JAILBREAK": jailbreak}},
+                "qwen3guard_gen": {
+                    "label": "JAILBREAK" if jailbreak > 0.5 else "NONE",
+                    "confidence": max(jailbreak, 1 - jailbreak),
+                    "class_probabilities": {"JAILBREAK": jailbreak},
+                },
             }
             for name, row in rows.items():
                 spec = policy.teachers[name]
-                streams[name].write(json.dumps({
-                    "id": record.id, "teacher": name, "model_id": spec.model_id,
-                    "revision": spec.revision, "prompt_version": "rehearsal-standin", **row,
-                }) + "\n")
+                streams[name].write(
+                    json.dumps(
+                        {
+                            "id": record.id,
+                            "teacher": name,
+                            "model_id": spec.model_id,
+                            "revision": spec.revision,
+                            "prompt_version": "rehearsal-standin",
+                            **row,
+                        }
+                    )
+                    + "\n"
+                )
     finally:
         for stream in streams.values():
             stream.close()
@@ -445,10 +493,20 @@ def run_teachers(teacher_input: Path, device: str, batch_size: int) -> dict[str,
         _require(
             f"6 교사 {name}",
             _python(
-                "train/run_teacher.py", "--teacher", name,
-                "--model-dir", f"models/pinned/teacher_{name}",
-                "--input", str(teacher_input), "--output", str(path),
-                "--device", device, "--batch-size", str(batch_size), "--execute",
+                "train/run_teacher.py",
+                "--teacher",
+                name,
+                "--model-dir",
+                f"models/pinned/teacher_{name}",
+                "--input",
+                str(teacher_input),
+                "--output",
+                str(path),
+                "--device",
+                device,
+                "--batch-size",
+                str(batch_size),
+                "--execute",
             ),
         )
     return paths
@@ -504,8 +562,14 @@ def main() -> int:
     gold_args = [arg for path in GENERATOR_GOLD for arg in ("--gold", str(path))]
     gate = _require(
         "6b 교사 일치도 · JAILBREAK 독립성",
-        _python("-m", "bench.teacher_agreement", *teacher_args, *gold_args,
-                "--output", str(work / "teacher_agreement-r2.json")),
+        _python(
+            "-m",
+            "bench.teacher_agreement",
+            *teacher_args,
+            *gold_args,
+            "--output",
+            str(work / "teacher_agreement-r2.json"),
+        ),
         allowed=(0, 2),
     )
     if gate == 2 and not (args.rehearse or args.accept_rubber_stamp):
@@ -516,8 +580,16 @@ def main() -> int:
     generator_args = [arg for path in GENERATOR_GOLD for arg in ("--generator-gold", str(path))]
     _require(
         "7 교사 합의 (사람 검수 없음 — 불일치는 감사 기록과 함께 폐기, 생성기 행은 C3)",
-        _python("train/resolve_teacher_labels.py", "--input", str(teacher_input),
-                *teacher_args, *generator_args, "--output-dir", str(resolved), "--drop-review"),
+        _python(
+            "train/resolve_teacher_labels.py",
+            "--input",
+            str(teacher_input),
+            *teacher_args,
+            *generator_args,
+            "--output-dir",
+            str(resolved),
+            "--drop-review",
+        ),
     )
     audit_consensus(resolved, work / "consensus-audit-r2.json")
     corpora: list[str] = []
@@ -536,12 +608,21 @@ def main() -> int:
     evaluation = [arg for path in EVALUATION_INPUTS for arg in ("--input", str(path))]
     _require(
         "8b 평가 입력 봉인",
-        _python("train/finalize_evaluation_inputs.py", *evaluation,
-                "--training-input-manifest", str(training_manifest),
-                "--output", str(evaluation_manifest)),
+        _python(
+            "train/finalize_evaluation_inputs.py",
+            *evaluation,
+            "--training-input-manifest",
+            str(training_manifest),
+            "--output",
+            str(evaluation_manifest),
+        ),
     )
-    manifests = ["--input-manifest", str(training_manifest),
-                 "--evaluation-manifest", str(evaluation_manifest)]
+    manifests = [
+        "--input-manifest",
+        str(training_manifest),
+        "--evaluation-manifest",
+        str(evaluation_manifest),
+    ]
     encoder = ["--encoder-dir", "models/pinned/l1_ax_encoder"]
     _require(
         "9 preflight --stage training",
@@ -554,11 +635,21 @@ def main() -> int:
     if args.train:
         _require(
             "10 학습 (3 seed)",
-            _python("train/train_l1.py", *encoder, *corpora, *manifests,
-                    "--output-dir", "train/artifacts/l1-r2", "--device", args.device, "--execute"),
+            _python(
+                "train/train_l1.py",
+                *encoder,
+                *corpora,
+                *manifests,
+                "--output-dir",
+                "train/artifacts/l1-r2",
+                "--device",
+                args.device,
+                "--execute",
+            ),
         )
-    print("\n리허설 통과 — 교사 대역으로 3~10 배선을 끝까지 돌렸다." if args.rehearse
-          else "\n완료.")
+    print(
+        "\n리허설 통과 — 교사 대역으로 3~10 배선을 끝까지 돌렸다." if args.rehearse else "\n완료."
+    )
     return 0
 
 

@@ -183,13 +183,31 @@ def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
 
 # 검사하지 않는 요청 최상위 키 — 값이 숫자 · 불리언 · 열거값 · 모델 이름뿐인 것만 둔다. 모르는
 # 키는 검사한다(fail-closed): 새 필드가 생겨도 검사 없이 나가는 자리가 생기지 않는다.
-_UNSCANNED_REQUEST_KEYS = frozenset({
-    "messages",  # 아래에서 메시지 단위로 따로 다룬다
-    "model", "stream", "stream_options", "n", "temperature", "top_p", "max_tokens",
-    "max_completion_tokens", "presence_penalty", "frequency_penalty", "logit_bias",
-    "logprobs", "top_logprobs", "seed", "tool_choice", "parallel_tool_calls",
-    "reasoning_effort", "service_tier", "store", "modalities",
-})
+_UNSCANNED_REQUEST_KEYS = frozenset(
+    {
+        "messages",  # 아래에서 메시지 단위로 따로 다룬다
+        "model",
+        "stream",
+        "stream_options",
+        "n",
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "max_completion_tokens",
+        "presence_penalty",
+        "frequency_penalty",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+        "seed",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "service_tier",
+        "store",
+        "modalities",
+    }
+)
 # 내용 파트의 이진 본문 — 이미지 · 오디오 · 문서 파싱은 범위 밖이다(§1.3). **이 자리에서만**,
 # 그리고 값 전체가 base64 일 때만 건너뛴다. ★ 3차 검토: 어느 깊이에서든 `data:` 로 시작하는
 # 문자열과 `file_data` 키를 건너뛰었더니 도구 인자 `{"note": "data:;base64, 주민번호 …"}` 가
@@ -264,6 +282,8 @@ def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedTe
     if decoded is not None:
         return _EncodedText(value, prefix, decoded[0], decoded[1], urlsafe)
     return "plain" if len(value) <= _SHORT_PAYLOAD else "binary"
+
+
 # 메시지의 프로토콜 키 — 이 키 이름은 검사하지 않는다.
 _HANDLED_MESSAGE_KEYS = frozenset(
     {"role", "content", "tool_calls", "function_call", "tool_call_id"}
@@ -293,14 +313,18 @@ def _expected_setting(key: str, value: Any) -> bool:
     if key == "modalities" and isinstance(value, list):
         return all(isinstance(item, str) and _SETTING_NAME.fullmatch(item) for item in value)
     if key == "tool_choice" and isinstance(value, dict):
+
         def names(node: Any) -> bool:
             if isinstance(node, dict):
                 return all(_SETTING_NAME.fullmatch(str(k)) and names(v) for k, v in node.items())
             if isinstance(node, list):
                 return all(names(item) for item in node)
             return not isinstance(node, str) or bool(_SETTING_NAME.fullmatch(node))
+
         return names(value)
     return False
+
+
 # 필드 값을 한 세그먼트로 이을 때의 경계. 규칙이 잡는 문자 집합 밖이라 스팬이 넘지 않는다.
 _FIELD_SEPARATOR = "\n\ue000\n"
 
@@ -823,8 +847,13 @@ def to_sse(response: dict[str, Any], *, include_usage: bool = False) -> str:
         index = choice.get("index", position) if isinstance(choice, dict) else position
         message = choice.get("message") if isinstance(choice, dict) else None
         message = message if isinstance(message, dict) else {}
-        events.append({"index": index, "delta": {"role": message.get("role", "assistant")},
-                       "finish_reason": None})
+        events.append(
+            {
+                "index": index,
+                "delta": {"role": message.get("role", "assistant")},
+                "finish_reason": None,
+            }
+        )
         delta: dict[str, Any] = {}
         for key in ("content", "refusal", "reasoning_content"):
             if isinstance(message.get(key), str):
@@ -838,8 +867,9 @@ def to_sse(response: dict[str, Any], *, include_usage: bool = False) -> str:
             delta["function_call"] = message["function_call"]
         if delta:
             events.append({"index": index, "delta": delta, "finish_reason": None})
-        events.append({"index": index, "delta": {},
-                       "finish_reason": choice.get("finish_reason", "stop")})
+        events.append(
+            {"index": index, "delta": {}, "finish_reason": choice.get("finish_reason", "stop")}
+        )
     lines = [
         "data: " + json.dumps({**base, "choices": [event]}, ensure_ascii=False) + "\n\n"
         for event in events

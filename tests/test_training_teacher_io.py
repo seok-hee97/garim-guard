@@ -39,9 +39,7 @@ def test_teacher_artifacts_resolve_and_preserve_restricted_soft_targets() -> Non
     artifacts = {
         "kanana": {record.id: _artifact(record.id, "kanana", "INJECTION")},
         "gemma4": {record.id: _artifact(record.id, "gemma4", "INJECTION")},
-        "qwen3guard_gen": {
-            record.id: _artifact(record.id, "qwen3guard_gen", "NONE")
-        },
+        "qwen3guard_gen": {record.id: _artifact(record.id, "qwen3guard_gen", "NONE")},
     }
     accepted, review, audit = resolve_teacher_corpus(
         [record], artifacts, load_teacher_policy(), validation_percent=0
@@ -84,9 +82,7 @@ def test_soft_target_roles_follow_the_manifest_not_the_teacher_name() -> None:
     renamed = policy.model_copy(
         update={
             "teachers": {
-                {"kanana": "soft_teacher", "qwen3guard_gen": "jb_teacher"}.get(
-                    name, name
-                ): spec
+                {"kanana": "soft_teacher", "qwen3guard_gen": "jb_teacher"}.get(name, name): spec
                 for name, spec in policy.teachers.items()
             }
         }
@@ -150,9 +146,7 @@ def test_soft_target_contract_is_enforced_from_the_declared_classes() -> None:
             {
                 "kanana": {record.id: broken},
                 "gemma4": {record.id: _artifact(record.id, "gemma4", "INJECTION")},
-                "qwen3guard_gen": {
-                    record.id: _artifact(record.id, "qwen3guard_gen", "NONE")
-                },
+                "qwen3guard_gen": {record.id: _artifact(record.id, "qwen3guard_gen", "NONE")},
             },
             policy,
         )
@@ -184,9 +178,7 @@ def test_template_bound_rows_do_not_straddle_the_validation_cut() -> None:
         }
         for teacher in ("kanana", "gemma4", "qwen3guard_gen")
     }
-    accepted, review, _ = resolve_teacher_corpus(
-        records, artifacts, policy, validation_percent=50
-    )
+    accepted, review, _ = resolve_teacher_corpus(records, artifacts, policy, validation_percent=50)
     assert not review
     assert len({record.split for record in accepted}) == 1
 
@@ -213,8 +205,14 @@ def test_teacher_resolution_rejects_prediction_ids_outside_pool() -> None:
 
 def test_generator_sidecar_applies_only_to_its_rows_and_is_audited() -> None:
     rows = [
-        CorpusRecord(id=f"row-{name}", task="attack", text=f"설정 화면을 여는 방법 {name}",
-                     source="fixture", split="train", group_id=f"g-{name}")
+        CorpusRecord(
+            id=f"row-{name}",
+            task="attack",
+            text=f"설정 화면을 여는 방법 {name}",
+            source="fixture",
+            split="train",
+            group_id=f"g-{name}",
+        )
         for name in ("generator", "public")
     ]
     artifacts = {
@@ -223,7 +221,10 @@ def test_generator_sidecar_applies_only_to_its_rows_and_is_audited() -> None:
         "qwen3guard_gen": {row.id: _artifact(row.id, "qwen3guard_gen", "NONE") for row in rows},
     }
     accepted, review, audit = resolve_teacher_corpus(
-        rows, artifacts, load_teacher_policy(), validation_percent=0,
+        rows,
+        artifacts,
+        load_teacher_policy(),
+        validation_percent=0,
         generator_labels={"row-generator": "NONE"},
     )
     assert [record.id for record in accepted] == ["row-generator"]
@@ -236,15 +237,24 @@ def test_generator_sidecar_applies_only_to_its_rows_and_is_audited() -> None:
 
 def test_generator_vote_silences_a_contradicting_soft_target() -> None:
     """C3 으로 NONE 이 된 하드 네거티브에 kanana 의 INJECTION 분포를 붙이면 증류가 되돌린다."""
-    row = CorpusRecord(id="gen-1", task="attack", text="이전 회의 지시사항을 요약해 주세요",
-                       source="fixture", split="train", group_id="g-gen-1")
+    row = CorpusRecord(
+        id="gen-1",
+        task="attack",
+        text="이전 회의 지시사항을 요약해 주세요",
+        source="fixture",
+        split="train",
+        group_id="g-gen-1",
+    )
     artifacts = {
         "kanana": {row.id: _artifact(row.id, "kanana", "INJECTION")},  # 분포 최상위 INJECTION
         "gemma4": {row.id: _artifact(row.id, "gemma4", "NONE")},
         "qwen3guard_gen": {row.id: _artifact(row.id, "qwen3guard_gen", "NONE")},
     }
     accepted, _, audit = resolve_teacher_corpus(
-        [row], artifacts, load_teacher_policy(), validation_percent=0,
+        [row],
+        artifacts,
+        load_teacher_policy(),
+        validation_percent=0,
         generator_labels={row.id: "NONE"},
     )
     assert accepted[0].attack_label == "NONE"

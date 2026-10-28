@@ -115,9 +115,7 @@ def _public_corpora(
     corpora["kdpii"] = kdpii_records
 
     klue_train_source = registry.source("KLUE-NER")
-    klue_train_root = _assert_pinned_asset(
-        assets, "KLUE-NER", klue_train_source.revision
-    )
+    klue_train_root = _assert_pinned_asset(assets, "KLUE-NER", klue_train_source.revision)
     converted, report = adapt_klue_ner(
         _parquet_rows(sorted((klue_train_root / "ner").glob("train-*.parquet"))),
         split="train",
@@ -127,9 +125,7 @@ def _public_corpora(
     reports.append(report.as_dict())
 
     klue_eval_source = registry.source("KLUE-NER-validation")
-    klue_eval_root = _assert_pinned_asset(
-        assets, "KLUE-NER-validation", klue_eval_source.revision
-    )
+    klue_eval_root = _assert_pinned_asset(assets, "KLUE-NER-validation", klue_eval_source.revision)
     converted, report = adapt_klue_ner(
         _parquet_rows(sorted((klue_eval_root / "ner").glob("validation-*.parquet"))),
         split="test",
@@ -139,9 +135,7 @@ def _public_corpora(
     reports.append(report.as_dict())
 
     poly_train_source = registry.source("PolyGuardMix")
-    poly_train_root = _assert_pinned_asset(
-        assets, "PolyGuardMix", poly_train_source.revision
-    )
+    poly_train_root = _assert_pinned_asset(assets, "PolyGuardMix", poly_train_source.revision)
     poly_train = list(
         adapt_polyguard_mix(
             _parquet_rows(sorted((poly_train_root / "data").glob("train-*.parquet")))
@@ -149,9 +143,7 @@ def _public_corpora(
     )
 
     poly_eval_source = registry.source("PolyGuardPrompts")
-    poly_eval_root = _assert_pinned_asset(
-        assets, "PolyGuardPrompts", poly_eval_source.revision
-    )
+    poly_eval_root = _assert_pinned_asset(assets, "PolyGuardPrompts", poly_eval_source.revision)
     poly_eval = list(
         adapt_polyguard_prompts(
             _parquet_rows(sorted((poly_eval_root / "data").glob("test-*.parquet")))

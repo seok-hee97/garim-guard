@@ -17,9 +17,7 @@ def main() -> int:
     parser.add_argument("--model-file", default="garim_l1.int8.onnx")
     parser.add_argument("--baseline-model-file")
     parser.add_argument("--input", action="append", required=True)
-    parser.add_argument(
-        "--evaluation-manifest", default="data/evaluation-input-manifest.json"
-    )
+    parser.add_argument("--evaluation-manifest", default="data/evaluation-input-manifest.json")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -27,9 +25,7 @@ def main() -> int:
     from garim.training.onnx_evaluation import evaluate_onnx_by_source
 
     records = [record for path in args.input for record in load_jsonl(path)]
-    sealed_contract = verify_evaluation_input_manifest(
-        args.evaluation_manifest, args.input
-    )
+    sealed_contract = verify_evaluation_input_manifest(args.evaluation_manifest, args.input)
     backend = OnnxL1Backend(args.model_dir, model_filename=args.model_file)
     report = evaluate_onnx_by_source(backend, records)
     report["sealed_input_contract"] = sealed_contract
@@ -42,21 +38,15 @@ def main() -> int:
         baseline_overall = baseline["overall"]
         report["candidate_minus_baseline"] = {
             "attack_macro_recall": (
-                candidate_overall["attack_macro_recall"]
-                - baseline_overall["attack_macro_recall"]
+                candidate_overall["attack_macro_recall"] - baseline_overall["attack_macro_recall"]
             ),
             "attack_macro_f1": (
-                candidate_overall["attack_macro_f1"]
-                - baseline_overall["attack_macro_f1"]
+                candidate_overall["attack_macro_f1"] - baseline_overall["attack_macro_f1"]
             ),
             "pii_recall_by_label": {
                 label: metrics["recall"]
-                - baseline_overall["pii_character_by_label"].get(label, {}).get(
-                    "recall", 0.0
-                )
-                for label, metrics in candidate_overall[
-                    "pii_character_by_label"
-                ].items()
+                - baseline_overall["pii_character_by_label"].get(label, {}).get("recall", 0.0)
+                for label, metrics in candidate_overall["pii_character_by_label"].items()
             },
         }
     destination = Path(args.output)

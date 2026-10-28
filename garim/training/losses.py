@@ -112,9 +112,7 @@ def compute_joint_loss(
             kanana_kl = functional.kl_div(student_log, teacher, reduction="batchmean")
             kanana_kl = kanana_kl * temperature**2
 
-    qwen_jailbreak = _masked_binary_loss(
-        output.attack_logits[:, 2], qwen_jailbreak_targets
-    )
+    qwen_jailbreak = _masked_binary_loss(output.attack_logits[:, 2], qwen_jailbreak_targets)
     romanized = _masked_binary_loss(output.romanized_logits[:, 0], romanized_targets)
     honorific = _masked_binary_loss(output.honorific_logits[:, 0], honorific_targets)
 

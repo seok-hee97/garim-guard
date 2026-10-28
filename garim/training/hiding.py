@@ -224,8 +224,7 @@ def apply_hiding(text: str, technique: str) -> tuple[str, str]:
         # §3.2.4 가 NFKC 확장 1,237자를 "상당수가 한국 업무문서의 상용 표기" 라고 한
         # 그 문자들 — 원문자·괄호문자·단위기호 — 까지 함께 쓴다.
         hidden = "".join(
-            _COMPAT_DIGITS.get(char)
-            or (chr(ord(char) + 0xFEE0) if "!" <= char <= "~" else char)
+            _COMPAT_DIGITS.get(char) or (chr(ord(char) + 0xFEE0) if "!" <= char <= "~" else char)
             for char in text
         )
     elif technique == HANJA:

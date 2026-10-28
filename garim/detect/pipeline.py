@@ -385,9 +385,7 @@ class DetectionPipeline:
                 self._scan_view(bundle.norm, source_text=text, origin=origin, stream="norm")
             )
             all_l0.extend(
-                self._scan_view(
-                    bundle.nospace, source_text=text, origin=origin, stream="nospace"
-                )
+                self._scan_view(bundle.nospace, source_text=text, origin=origin, stream="nospace")
             )
             if bundle.detensified.text != bundle.norm.text:
                 all_l0.extend(
@@ -485,8 +483,7 @@ class DetectionPipeline:
                 if not (
                     _is_pii_finding(finding)
                     and any(
-                        finding.span[0] < identifier_end
-                        and identifier_start < finding.span[1]
+                        finding.span[0] < identifier_end and identifier_start < finding.span[1]
                         for identifier_start, identifier_end in identifier_spans
                     )
                 )

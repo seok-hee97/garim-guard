@@ -95,30 +95,22 @@ def create_training_input_manifest(
     )
     inputs: dict[str, list[dict[str, Any]]] = {}
     for name, group_paths in paths.items():
-        inputs[name] = [
-            _file_entry(path, records=len(load_jsonl(path))) for path in group_paths
-        ]
+        inputs[name] = [_file_entry(path, records=len(load_jsonl(path))) for path in group_paths]
     return {
         "schema_version": SCHEMA_VERSION,
         "created_at": datetime.now(UTC).isoformat(),
         "git_commit": git_commit(),
         "inputs": inputs,
-        "provenance": {
-            name: _file_entry(path) for name, path in sorted(provenance_files.items())
-        },
+        "provenance": {name: _file_entry(path) for name, path in sorted(provenance_files.items())},
         "contract": contract,
     }
 
 
-def write_training_input_manifest(
-    path: str | Path, payload: dict[str, Any]
-) -> Path:
+def write_training_input_manifest(path: str | Path, payload: dict[str, Any]) -> Path:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(destination)
     return destination
 
@@ -130,14 +122,11 @@ def _verify_entry(entry: object, expected_path: str | Path) -> None:
     expected_key = manifest_path_key(source)
     if entry.get("path") != expected_key:
         raise ValueError(
-            f"training input path drift: expected {expected_key}, "
-            f"recorded {entry.get('path')!r}"
+            f"training input path drift: expected {expected_key}, recorded {entry.get('path')!r}"
         )
     if not source.is_file():
         raise ValueError(f"training input file is missing: {source}")
-    if entry.get("bytes") != source.stat().st_size or entry.get("sha256") != file_sha256(
-        source
-    ):
+    if entry.get("bytes") != source.stat().st_size or entry.get("sha256") != file_sha256(source):
         raise ValueError(f"training input content drift: {source}")
 
 

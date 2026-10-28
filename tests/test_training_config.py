@@ -77,12 +77,8 @@ def test_training_input_manifest_detects_post_seal_drift(tmp_path: Path) -> None
         manifest,
         create_training_input_manifest(paths, provenance_files=provenance_files),
     )
-    verify_training_input_manifest(
-        manifest, paths, provenance_files=provenance_files
-    )
+    verify_training_input_manifest(manifest, paths, provenance_files=provenance_files)
 
     Path(paths["attack_train"][0]).write_text("drift\n", encoding="utf-8")
     with pytest.raises(ValueError, match="content drift"):
-        verify_training_input_manifest(
-            manifest, paths, provenance_files=provenance_files
-        )
+        verify_training_input_manifest(manifest, paths, provenance_files=provenance_files)

@@ -62,8 +62,12 @@ def audit_attack_synthetic(
         bases[record.split][str(record.attack_label)].add(base)
         labels[base].add(str(record.attack_label))
 
-    seen = {base for split in ("train", "validation") for group in bases[split].values()
-            for base in group}
+    seen = {
+        base
+        for split in ("train", "validation")
+        for group in bases[split].values()
+        for base in group
+    }
     held_out = {base for group in bases["test"].values() for base in group}
     exact = sorted(held_out & seen)
     seen_shingles = {base: _shingles(base) for base in seen}
@@ -97,8 +101,9 @@ def audit_attack_synthetic(
     if near:
         problems.append(f"test 기본 문장 {len(near)}개가 학습 문장과 근사 일치 — 예: {near[:2]}")
     if conflicts:
-        problems.append(f"기본 문장 {len(conflicts)}개가 라벨 둘 이상 — 예: "
-                        f"{list(conflicts.items())[:2]}")
+        problems.append(
+            f"기본 문장 {len(conflicts)}개가 라벨 둘 이상 — 예: {list(conflicts.items())[:2]}"
+        )
     if short:
         problems.append(f"라벨별 고유 기본 문장 부족(실제, 최소): {short}")
     if problems:
@@ -131,12 +136,14 @@ def audit_generator_consensus(
     benign_kept = outcome[("NONE", "NONE")]
     acceptance = benign_kept / benign_total if benign_total else 0.0
     whole_families = sorted(
-        family for family, dropped in dropped_by_family.items()
+        family
+        for family, dropped in dropped_by_family.items()
         if dropped and dropped == rows_by_family[family]
     )
     report = {
-        "generator_outcomes": {f"{gold}->{result}": count
-                               for (gold, result), count in sorted(outcome.items())},
+        "generator_outcomes": {
+            f"{gold}->{result}": count for (gold, result), count in sorted(outcome.items())
+        },
         "benign_acceptance": round(acceptance, 4),
         "benign_families_dropped_entirely": whole_families,
     }

@@ -99,9 +99,7 @@ def test_linebreak_never_lands_inside_a_wrapper_that_it_would_break(corpus: list
     못 알아보고 `prose` 정책이 적용되면 S4 대조가 무의미해진다.
     """
     structured = [
-        record
-        for record in corpus
-        if record.meta["doc_shape"] == "structured" and record.spans
+        record for record in corpus if record.meta["doc_shape"] == "structured" and record.spans
     ]
     assert structured, "structured 행이 없으면 이 테스트가 아무것도 안 지킨다"
     for record in structured:
@@ -116,16 +114,12 @@ def test_paired_values_are_left_standard(corpus: list) -> None:
     assert all(record.meta["notation"] == STANDARD for record in paired)
     values = {record.pair_id: record.text for record in paired}
     negatives = {
-        record.pair_id: record.text
-        for record in corpus
-        if record.pair_id and not record.spans
+        record.pair_id: record.text for record in corpus if record.pair_id and not record.spans
     }
     shared = set(values) & set(negatives)
     assert shared, "쌍이 하나도 안 맞으면 대조가 성립하지 않는다"
     for pair_id in sorted(shared)[:50]:
-        positive = next(
-            record for record in paired if record.pair_id == pair_id
-        )
+        positive = next(record for record in paired if record.pair_id == pair_id)
         value = positive.text[positive.spans[0].start : positive.spans[0].end]
         assert value in negatives[pair_id], (pair_id, value)
 

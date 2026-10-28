@@ -46,12 +46,8 @@ def main() -> int:
     parser.add_argument("--sources-manifest", default="train/sources.yaml")
     parser.add_argument("--asset-manifest", default="data/asset-manifest.json")
     parser.add_argument("--config", default="train/training.yaml")
-    parser.add_argument(
-        "--input-manifest", default="data/training-input-manifest.json"
-    )
-    parser.add_argument(
-        "--evaluation-manifest", default="data/evaluation-input-manifest.json"
-    )
+    parser.add_argument("--input-manifest", default="data/training-input-manifest.json")
+    parser.add_argument("--evaluation-manifest", default="data/evaluation-input-manifest.json")
     args = parser.parse_args()
 
     results = [
@@ -88,9 +84,7 @@ def main() -> int:
         "train/MODEL_CARD_TEMPLATE.md",
         "docs/LABELING_GUIDE.md",
     )
-    results.extend(
-        _check(f"file:{path}", Path(path).is_file(), path) for path in required_files
-    )
+    results.extend(_check(f"file:{path}", Path(path).is_file(), path) for path in required_files)
     try:
         model_registry = load_model_registry(args.models_manifest)
         source_registry = load_source_registry(args.sources_manifest)
@@ -168,9 +162,7 @@ def main() -> int:
             evaluation_contract = verify_evaluation_input_manifest(
                 args.evaluation_manifest, training_manifest_path=args.input_manifest
             )
-            results.append(
-                _check("sealed-evaluation-inputs", True, evaluation_contract)
-            )
+            results.append(_check("sealed-evaluation-inputs", True, evaluation_contract))
         except (OSError, ValueError) as exc:
             results.append(_check("sealed-evaluation-inputs", False, str(exc)))
 

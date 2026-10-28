@@ -184,9 +184,7 @@ def _l0_silent(text: str) -> bool:
     return not (detect_kr_pii(text) + detect_common_pii(text))
 
 
-def _number(
-    rng: random.Random, length: int, *, hyphen: bool, leading_zero: bool = False
-) -> str:
+def _number(rng: random.Random, length: int, *, hyphen: bool, leading_zero: bool = False) -> str:
     """음성 번호. 다른 PII 형식으로 읽힐 모양은 피한다 — 이 범주가 가르치려는 것은 문맥이다.
 
     `leading_zero` 면 앞자리를 0 으로 둔다. R1 의 나머지 bc 오탐(`04760327` 의 `04` 를 전화로)이
@@ -205,7 +203,7 @@ def _number(
         # 세 덩어리, 가운데 3~4자리 — 사업자등록번호(3-2-5) · 주민번호(6-7) 모양이 나올 수 없다.
         cut = rng.choice([cut for cut in (3, 4, 5) if cut < length - 3])
         second = rng.choice([size for size in (3, 4) if cut + size < length])
-        return f"{digits[:cut]}-{digits[cut:cut + second]}-{digits[cut + second:]}"
+        return f"{digits[:cut]}-{digits[cut : cut + second]}-{digits[cut + second :]}"
 
 
 def _hidden(text: str, position: int) -> tuple[str, str]:
@@ -283,14 +281,23 @@ def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
         positive = template.format(num=digits)
         records.append(
             _record(
-                len(records), positive, family, "account_pair_positive",
+                len(records),
+                positive,
+                family,
+                "account_pair_positive",
                 spans=[CorpusSpan(start=start, end=start + len(digits), label="KR_ACCOUNT")],
                 pair_id=pair_id,
             )
         )
         records.append(
-            _record(len(records), partner_template.format(num=digits), partner_family,
-                    "numeric_context_negative", pair_id=pair_id, extra={"paired": True})
+            _record(
+                len(records),
+                partner_template.format(num=digits),
+                partner_family,
+                "numeric_context_negative",
+                pair_id=pair_id,
+                extra={"paired": True},
+            )
         )
     for local_index in range(NUMERIC_NEGATIVES - ACCOUNT_PAIRS):
         family, template = numeric[local_index % len(numeric)]
@@ -299,8 +306,13 @@ def generate_pii_negatives_r2(*, seed: int = 20261027) -> list[CorpusRecord]:
         while not _l0_silent(template.format(num=number)):
             number = _number(rng, rng.randint(8, 14), **shape)
         records.append(
-            _record(len(records), template.format(num=number), family,
-                    "numeric_context_negative", extra={"paired": False})
+            _record(
+                len(records),
+                template.format(num=number),
+                family,
+                "numeric_context_negative",
+                extra={"paired": False},
+            )
         )
     obfuscated = [
         *((f"pii-plain-{i:02d}", text) for i, text in enumerate(_PLAIN)),

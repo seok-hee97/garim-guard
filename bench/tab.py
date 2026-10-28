@@ -160,9 +160,7 @@ def evaluate(documents: Sequence[TabDocument], detector: Detector, *, name: str)
     return TabReport(
         detector=name,
         documents=len(documents),
-        recall_by_identifier_type={
-            key: hits[key] / totals[key] for key in totals if totals[key]
-        },
+        recall_by_identifier_type={key: hits[key] / totals[key] for key in totals if totals[key]},
         recall_by_entity_type={
             key: entity_hits[key] / entity_totals[key]
             for key in entity_totals

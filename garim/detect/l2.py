@@ -180,9 +180,7 @@ class LocalChatL2Backend:
             # 모르는 서버는 무시한다.
             "chat_template_kwargs": {"enable_thinking": False},
         }
-        body = self._transport(
-            f"{self.base_url}/chat/completions", payload, self.timeout_seconds
-        )
+        body = self._transport(f"{self.base_url}/chat/completions", payload, self.timeout_seconds)
         try:
             content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

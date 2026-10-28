@@ -43,9 +43,7 @@ def test_kdpii_adapter_narrows_account_and_does_not_guess_unknown_labels() -> No
         }
     ]
     records, report = adapt_kdpii_dialogues(dialogues, split="train")
-    assert records[0].text[records[0].spans[0].start : records[0].spans[0].end] == (
-        "123-4567-8901"
-    )
+    assert records[0].text[records[0].spans[0].start : records[0].spans[0].end] == ("123-4567-8901")
     assert report.ignored_labels == Counter({"OG_COMPANY": 1})
 
 

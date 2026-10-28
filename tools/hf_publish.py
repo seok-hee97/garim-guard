@@ -64,17 +64,36 @@ SKIP_PARTS = {".cache", ".git", "__pycache__", "kotip"}
 
 # (이름, 저장소, 종류, 스테이징, 패턴) — 앞일수록 다시 만들기 어렵다.
 PHASES = (
-    ("배포 R1 INT8", MODEL, "model", "model",
-     ["l1/r1/onnx/garim_l1.int8.onnx", "l1/r1/onnx/*.json"]),
+    (
+        "배포 R1 INT8",
+        MODEL,
+        "model",
+        "model",
+        ["l1/r1/onnx/garim_l1.int8.onnx", "l1/r1/onnx/*.json"],
+    ),
     ("공개 데이터 · 학습 기록", DATASET, "dataset", "public", None),
-    ("R2 INT8 · 학습 보고서", MODEL, "model", "model", [
-        "l1/r2/onnx/garim_l1.int8.onnx", "l1/r2/onnx/*.json", "l1/*/checkpoints/*.json",
-        "l1/*/checkpoints/*/training-report.json", "l1/*/checkpoints/*/encoder/*",
-    ]),
+    (
+        "R2 INT8 · 학습 보고서",
+        MODEL,
+        "model",
+        "model",
+        [
+            "l1/r2/onnx/garim_l1.int8.onnx",
+            "l1/r2/onnx/*.json",
+            "l1/*/checkpoints/*.json",
+            "l1/*/checkpoints/*/training-report.json",
+            "l1/*/checkpoints/*/encoder/*",
+        ],
+    ),
     ("배포 seed 37 체크포인트", MODEL, "model", "model", ["l1/*/checkpoints/seed-37/joint_l1.pt"]),
     ("FP32 · INT8 원본", MODEL, "model", "model", ["l1/*/onnx/*"]),
-    ("비공개 — 합성 주민번호 파일", PRIVATE, "dataset", "private",
-     ["corpus/**", "merged/**", "runpod/**"]),
+    (
+        "비공개 — 합성 주민번호 파일",
+        PRIVATE,
+        "dataset",
+        "private",
+        ["corpus/**", "merged/**", "runpod/**"],
+    ),
     ("나머지 seed 체크포인트", MODEL, "model", "model", ["l1/**"]),
     ("비공개 — 원천 데이터", PRIVATE, "dataset", "private", ["raw/**"]),
     ("L2 GGUF", MODEL, "model", "model", ["l2/**"]),
@@ -170,8 +189,11 @@ def stage(staged: dict[str, list[tuple[Path, str]]], workdir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--workdir", default=str(ROOT / ".hf-staging"),
-                        help="하드링크 스테이징 위치(같은 볼륨이어야 디스크를 안 쓴다). Git 밖이다")
+    parser.add_argument(
+        "--workdir",
+        default=str(ROOT / ".hf-staging"),
+        help="하드링크 스테이징 위치(같은 볼륨이어야 디스크를 안 쓴다). Git 밖이다",
+    )
     args = parser.parse_args()
 
     staged = plan()
@@ -197,8 +219,12 @@ def main() -> int:
     for name, repo, kind, folder, patterns in PHASES:
         print(f"== {name} → {kind} {repo}", flush=True)
         api.upload_large_folder(
-            repo_id=repo, repo_type=kind, folder_path=str(workdir / folder),
-            allow_patterns=patterns, num_workers=4, print_report=False,
+            repo_id=repo,
+            repo_type=kind,
+            folder_path=str(workdir / folder),
+            allow_patterns=patterns,
+            num_workers=4,
+            print_report=False,
         )
     print("완료", flush=True)
     return 0

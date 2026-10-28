@@ -34,8 +34,16 @@ def _deepset_test_row(index: int, label: object) -> CorpusRecord:
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [(1, "INJECTION"), ("1", "INJECTION"), ("injection", "INJECTION"), ("INJECTION", "INJECTION"),
-     (0, "NONE"), ("0", "NONE"), ("legitimate", "NONE"), (" Legitimate ", "NONE")],
+    [
+        (1, "INJECTION"),
+        ("1", "INJECTION"),
+        ("injection", "INJECTION"),
+        ("INJECTION", "INJECTION"),
+        (0, "NONE"),
+        ("0", "NONE"),
+        ("legitimate", "NONE"),
+        (" Legitimate ", "NONE"),
+    ],
 )
 def test_deepset_binary_labels_map_one_to_one(value: object, expected: str) -> None:
     assert map_deepset_label(value) == expected

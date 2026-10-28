@@ -81,9 +81,7 @@ class KananaBackend(TeacherBackend):
         # ★ kanana 는 decoupled `head_dim` 구성이라 transformers>=5 의
         #   `validate_architecture` 에 막힌다. 우회 없이는 GPU 박스의 교사 추론이
         #   첫 줄에서 실패한다 — `training/compat.py` 참고.
-        self.model = load_local_causal_lm(
-            model_dir, dtype="auto", device_map=device
-        ).eval()
+        self.model = load_local_causal_lm(model_dir, dtype="auto", device_map=device).eval()
         if self.tokenizer.pad_token_id is None:
             if self.tokenizer.eos_token_id is None:
                 raise ValueError(f"{name}: tokenizer has neither pad nor EOS token")
@@ -298,9 +296,9 @@ class Qwen3GuardGenBackend(TeacherBackend):
     def _next_token_probabilities_many(
         self, prompts: Sequence[str], token_ids: list[int]
     ) -> list[list[float]]:
-        inputs = self.tokenizer(
-            list(prompts), return_tensors="pt", padding=True
-        ).to(self.model.device)
+        inputs = self.tokenizer(list(prompts), return_tensors="pt", padding=True).to(
+            self.model.device
+        )
         with self.torch.inference_mode():
             next_token_logits = last_position_logits(
                 self.model, inputs["input_ids"], inputs["attention_mask"]
@@ -330,16 +328,11 @@ class Qwen3GuardGenBackend(TeacherBackend):
             for probabilities in tier_probabilities
         ]
         category_probabilities = self._next_token_probabilities_many(
-            [
-                f"{base}Safety: {tier}\nCategories:"
-                for base, tier in zip(bases, tiers, strict=True)
-            ],
+            [f"{base}Safety: {tier}\nCategories:" for base, tier in zip(bases, tiers, strict=True)],
             self._category_ids,
         )
         artifacts: list[TeacherArtifact] = []
-        for record, tier, probabilities in zip(
-            records, tiers, category_probabilities, strict=True
-        ):
+        for record, tier, probabilities in zip(records, tiers, category_probabilities, strict=True):
             jailbreak = float(probabilities[self.jailbreak_index])
             # `Safe` 로 판정한 글은 카테고리를 물을 이유가 없다. 그 조건부 확률을 그대로
             # 쓰면 "안전하다고 본 글의 카테고리" 를 JAILBREAK 확률로 보고하게 된다.

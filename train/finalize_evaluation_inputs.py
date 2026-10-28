@@ -14,9 +14,7 @@ from garim.training.evaluation_seal import (
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", action="append", required=True)
-    parser.add_argument(
-        "--training-input-manifest", default="data/training-input-manifest.json"
-    )
+    parser.add_argument("--training-input-manifest", default="data/training-input-manifest.json")
     parser.add_argument("--labeling-guide", default="docs/LABELING_GUIDE.md")
     parser.add_argument("--models-manifest", default="train/models.yaml")
     parser.add_argument("--sources-manifest", default="train/sources.yaml")
@@ -33,9 +31,7 @@ def main() -> int:
         },
     )
     destination = write_evaluation_input_manifest(args.output, payload)
-    print(
-        f"sealed {payload['contract']['records']} final-evaluation rows -> {destination}"
-    )
+    print(f"sealed {payload['contract']['records']} final-evaluation rows -> {destination}")
     return 0
 
 

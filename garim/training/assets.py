@@ -57,9 +57,7 @@ _DATASET_PATTERNS = {
 
 # 패턴이 받아도 되는 확장자. 데이터만 받고 **실행 가능한 것은 받지 않는다** —
 # 제3자 저장소가 데이터와 스크립트를 같이 배포하는 일이 흔하다(KoreanGuardrail 이 그렇다).
-_ALLOWED_ASSET_SUFFIXES = frozenset(
-    {".md", ".json", ".jsonl", ".parquet", ".csv", ".txt", ".tsv"}
-)
+_ALLOWED_ASSET_SUFFIXES = frozenset({".md", ".json", ".jsonl", ".parquet", ".csv", ".txt", ".tsv"})
 
 
 def build_asset_plan(
@@ -107,9 +105,7 @@ def build_asset_plan(
     for source in sources:
         identifier = source.hf_id or source.url
         destination_name = (
-            "bc-pii-ko"
-            if source.name == "bc-pii-ko-augmented-negative"
-            else source.name
+            "bc-pii-ko" if source.name == "bc-pii-ko-augmented-negative" else source.name
         )
         plan.append(
             AssetPlan(
@@ -199,8 +195,7 @@ def _download_github_archive(source: Source, destination: Path) -> None:
                 # tarball 최상위는 `{repo}-{sha}/` 다. 그 아래 경로로 검토 패턴을 맞춘다.
                 relative = member.name.partition("/")[2]
                 if not relative or not any(
-                    relative == pattern or relative.startswith(pattern)
-                    for pattern in patterns
+                    relative == pattern or relative.startswith(pattern) for pattern in patterns
                 ):
                     continue
                 target = (destination / relative).resolve()
@@ -282,9 +277,7 @@ def verify_cached_hf_snapshot(destination: Path, revision: str) -> None:
             raise ValueError(f"{destination}: cached Git blob mismatch for {relative}")
 
 
-def asset_manifest_drift(
-    destination: Path, expected: object
-) -> dict[str, list[str]]:
+def asset_manifest_drift(destination: Path, expected: object) -> dict[str, list[str]]:
     """Compare an asset directory exactly, including files added after download."""
     if not isinstance(expected, dict):
         return {"missing": [], "modified": [], "unrecorded": ["<invalid-manifest>"]}
@@ -323,9 +316,7 @@ def _download_kdpii(source: Source, destination: Path) -> None:
             shutil.copyfileobj(response, stream, length=1024 * 1024)
         digest = _sha256(temporary)
         if digest != source.sha256:
-            raise ValueError(
-                f"KDPII sha256 mismatch (expected {source.sha256}, got {digest})"
-            )
+            raise ValueError(f"KDPII sha256 mismatch (expected {source.sha256}, got {digest})")
         temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
@@ -474,9 +465,7 @@ def inspect_asset_plan(plan: list[AssetPlan]) -> list[dict[str, object]]:
     return status
 
 
-def verify_asset_manifest(
-    path: str | Path, plan: list[AssetPlan]
-) -> list[dict[str, object]]:
+def verify_asset_manifest(path: str | Path, plan: list[AssetPlan]) -> list[dict[str, object]]:
     manifest_path = Path(path)
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))

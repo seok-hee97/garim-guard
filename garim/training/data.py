@@ -15,9 +15,7 @@ from garim.training.teachers import ATTACK_LABELS, AttackLabel
 
 Task = Literal["pii", "attack"]
 Split = Literal["train", "validation", "test"]
-PII_ENTITY_LABELS = frozenset(
-    label[2:] for label in PII_LABELS if label.startswith("B-")
-)
+PII_ENTITY_LABELS = frozenset(label[2:] for label in PII_LABELS if label.startswith("B-"))
 
 
 class CorpusSpan(BaseModel):

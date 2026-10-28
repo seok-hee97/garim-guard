@@ -29,17 +29,25 @@ _PREFIX_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"KakaoAK\s+[A-Za-z0-9]{20,}"), "kakao_admin_key"),
     # ★ 전수 검토(2026-10-28) — 흔히 붙여 넣는 형식인데 없었다.
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*"), "bearer_token"),
-    (re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]{20,}"),
-     "slack_webhook"),
-    (re.compile(r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]{40,}"),
-     "discord_webhook"),
+    (
+        re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]{20,}"),
+        "slack_webhook",
+    ),
+    (
+        re.compile(
+            r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]{40,}"
+        ),
+        "discord_webhook",
+    ),
     (re.compile(r"GOCSPX-[A-Za-z0-9_-]{24,}"), "google_oauth_client_secret"),
     (re.compile(r"(?<![A-Za-z0-9])ya29\.[A-Za-z0-9_-]{20,}"), "google_oauth_access_token"),
     (re.compile(r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9])"), "npm_token"),
     (re.compile(r"pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{40,}"), "pypi_token"),
     (re.compile(r"(?<![A-Za-z0-9])dop_v1_[a-f0-9]{64}(?![a-f0-9])"), "digitalocean_token"),
-    (re.compile(r"(?<![A-Za-z0-9])SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"),
-     "sendgrid_key"),
+    (
+        re.compile(r"(?<![A-Za-z0-9])SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"),
+        "sendgrid_key",
+    ),
     (re.compile(r"AccountKey=[A-Za-z0-9+/]{60,}={0,2}"), "azure_storage_key"),
 )
 _KOREAN_HEADER = re.compile(
@@ -86,8 +94,28 @@ _SECRET_LAST_WORDS = frozenset({"password", "passwd", "passphrase", "secret", "t
 # 아니다(재검토).
 _WEAK_LAST_WORDS = frozenset({"pass", "pwd"})
 _WEAK_QUALIFIERS = frozenset(
-    {"db", "user", "admin", "root", "redis", "mysql", "postgres", "pg", "smtp", "mail", "ftp",
-     "sftp", "ldap", "app", "api", "service", "svc", "master", "login", "account"}
+    {
+        "db",
+        "user",
+        "admin",
+        "root",
+        "redis",
+        "mysql",
+        "postgres",
+        "pg",
+        "smtp",
+        "mail",
+        "ftp",
+        "sftp",
+        "ldap",
+        "app",
+        "api",
+        "service",
+        "svc",
+        "master",
+        "login",
+        "account",
+    }
 )
 _KEY_QUALIFIERS = frozenset(
     {"api", "access", "secret", "private", "encryption", "signing", "master", "client", "auth"}
@@ -95,9 +123,33 @@ _KEY_QUALIFIERS = frozenset(
 # 비밀 낱말 뒤에 붙는 꼬리(`DB_PASSWORD_PROD`, `API_KEY_V2`, `SECRET_KEY_BASE`) — ★ 재검토: 마지막
 # 낱말만 봐서 이 꼴을 전부 놓쳤다.
 _TRAILING_QUALIFIERS = frozenset(
-    {"prod", "production", "dev", "develop", "development", "stage", "staging", "test", "qa",
-     "local", "base", "b64", "base64", "hash", "hex", "ro", "rw", "old", "new", "primary",
-     "secondary", "default", "value", "enc", "encrypted"}
+    {
+        "prod",
+        "production",
+        "dev",
+        "develop",
+        "development",
+        "stage",
+        "staging",
+        "test",
+        "qa",
+        "local",
+        "base",
+        "b64",
+        "base64",
+        "hash",
+        "hex",
+        "ro",
+        "rw",
+        "old",
+        "new",
+        "primary",
+        "secondary",
+        "default",
+        "value",
+        "enc",
+        "encrypted",
+    }
 )
 # 값이 식 · 참조인가 — `os.getenv(…)`, `form.data["…"]`, `$VAR`, `${…}`, YAML `&anchor` · `*alias`.
 # ★ 재검토: 괄호 · `$` · `@` 가 든 값을 통째로 버려 `P@ss(w0rd)2024` · `$ecr3tP4ss!` 를 놓쳤다.
@@ -242,9 +294,7 @@ def detect_secrets(text: str) -> list[Finding]:
         )
         upper_env = at_line_start and op == "=" and name.isupper()
         if _secret_name(name) and _literal_secret(raw, env_style=env_style, upper_env=upper_env):
-            findings.append(
-                Finding("L-SEC-04", value_match.span(), 0.9, "L0", "secret_assignment")
-            )
+            findings.append(Finding("L-SEC-04", value_match.span(), 0.9, "L0", "secret_assignment"))
     for match in _KOREAN_PASSWORD.finditer(text):
         if _literal_secret(match.group("value"), env_style=True):
             findings.append(

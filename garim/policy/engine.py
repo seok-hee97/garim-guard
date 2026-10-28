@@ -106,15 +106,11 @@ class PolicyEngine:
             base += origin_policy.system_secret_threshold_delta
         return min(1.0, max(0.0, base))
 
-    def accepts(
-        self, finding: Finding, content_type: str, *, origin: str | None = None
-    ) -> bool:
+    def accepts(self, finding: Finding, content_type: str, *, origin: str | None = None) -> bool:
         policy = self.config.content_type_policy.get(content_type)
         if policy is not None and finding.code in policy.suppress:
             return False
-        return finding.confidence >= self.threshold_for(
-            finding, content_type, origin=origin
-        )
+        return finding.confidence >= self.threshold_for(finding, content_type, origin=origin)
 
     def apply_origin_policy(
         self, findings: list[Finding], origins: dict[int, str]

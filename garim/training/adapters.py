@@ -242,9 +242,7 @@ def adapt_kdpii_dialogues(
             spans = _merge_adjacent_address_spans(text, spans)
             try:
                 record = CorpusRecord(
-                    id=_stable_id(
-                        "kdpii", sentence.get("id") or f"{dialogue_id}:{sentence_index}"
-                    ),
+                    id=_stable_id("kdpii", sentence.get("id") or f"{dialogue_id}:{sentence_index}"),
                     task="pii",
                     text=text,
                     spans=spans,

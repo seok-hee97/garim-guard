@@ -153,8 +153,7 @@ def connected_group_split(
     names = ("train", "validation", "test")
     ratio_total = sum(ratios)
     targets = {
-        name: len(records) * ratio / ratio_total
-        for name, ratio in zip(names, ratios, strict=True)
+        name: len(records) * ratio / ratio_total for name, ratio in zip(names, ratios, strict=True)
     }
     assigned: dict[str, list[int]] = {name: [] for name in names}
     for component in ordered:
@@ -167,8 +166,7 @@ def connected_group_split(
         )
         assigned[destination].extend(component)
     return {
-        name: [records[index] for index in sorted(indexes)]
-        for name, indexes in assigned.items()
+        name: [records[index] for index in sorted(indexes)] for name, indexes in assigned.items()
     }
 
 
@@ -208,9 +206,7 @@ def assert_identifier_disjoint(splits: dict[str, Sequence[dict[str, Any]]]) -> N
                     )
 
 
-def assert_fingerprint_disjoint(
-    train_texts: Iterable[str], eval_texts: Iterable[str]
-) -> None:
+def assert_fingerprint_disjoint(train_texts: Iterable[str], eval_texts: Iterable[str]) -> None:
     train = {fingerprint_text(text) for text in train_texts}
     evaluation = {fingerprint_text(text) for text in eval_texts}
     overlap = train & evaluation

@@ -57,9 +57,7 @@ def main() -> int:
                 "original_text_sha256": hashlib.sha256(record.text.encode()).hexdigest(),
             }
         )
-        output.append(
-            record.model_copy(update={"text": replacement["text"], "meta": meta})
-        )
+        output.append(record.model_copy(update={"text": replacement["text"], "meta": meta}))
     validate_corpus(output)
     count = write_jsonl(args.output, output)
     print(f"applied {count} split-preserving translations -> {args.output}")

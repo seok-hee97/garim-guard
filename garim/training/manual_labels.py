@@ -41,9 +41,7 @@ def load_manual_labels(path: str | Path) -> dict[str, ManualLabel]:
     return labels
 
 
-def blind_labeling_rows(
-    records: Sequence[CorpusRecord], *, purpose: str
-) -> list[dict[str, str]]:
+def blind_labeling_rows(records: Sequence[CorpusRecord], *, purpose: str) -> list[dict[str, str]]:
     """Expose only text and stable identity; source labels, teachers, and metadata stay hidden."""
     if purpose not in {"teacher-review", "final-evaluation"}:
         raise ValueError("purpose must be teacher-review or final-evaluation")

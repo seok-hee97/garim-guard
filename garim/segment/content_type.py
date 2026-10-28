@@ -17,9 +17,7 @@ _CODE_SIGNAL = re.compile(
     r"(?m)(?:^[ \t]*(?:def|class|func|function|import|from|const|let|var|SELECT|INSERT)\b|"
     r"[{};][ \t]*$|=>|</?[A-Za-z][^<>\n]*>)"
 )
-_STRUCTURED_LINE = re.compile(
-    r"(?m)^[ \t]*(?:[-\w가-힣]+[ \t]*:(?:[ \t]*\S|[ \t]*$)|[\[{][ \t]*$)"
-)
+_STRUCTURED_LINE = re.compile(r"(?m)^[ \t]*(?:[-\w가-힣]+[ \t]*:(?:[ \t]*\S|[ \t]*$)|[\[{][ \t]*$)")
 
 
 def _is_json(text: str) -> bool:

@@ -63,10 +63,7 @@ class Inspector:
         self.l2_backend = l2_backend
         self.vault = vault or Vault(scope="session")
         backend_max_length = getattr(l1_backend, "max_length", None)
-        if (
-            isinstance(backend_max_length, int)
-            and config.limits.chunk_size > backend_max_length
-        ):
+        if isinstance(backend_max_length, int) and config.limits.chunk_size > backend_max_length:
             raise ValueError(
                 "policy chunk_size cannot exceed the L1 backend max_length "
                 f"({config.limits.chunk_size} > {backend_max_length})"
@@ -356,7 +353,6 @@ class Inspector:
             latency_ms={key: round(value, 3) for key, value in latency.items()},
             degraded_reasons=sorted(set(degraded_reasons)),
         )
-
 
     def _l2_findings(self, job: _L1Job) -> list[Finding]:
         """Judge one chunk on the recovered streams; the first attack label wins.

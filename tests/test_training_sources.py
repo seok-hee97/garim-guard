@@ -35,9 +35,7 @@ def test_hf_authorization_checks_pinned_license() -> None:
         seen.append((hf_id, revision))
         return "cc-by-4.0"
 
-    authorization = registry.authorize(
-        "PolyGuardMix", purpose="train", license_resolver=resolver
-    )
+    authorization = registry.authorize("PolyGuardMix", purpose="train", license_resolver=resolver)
     assert authorization.verified_license == "cc-by-4.0"
     assert seen == [(source.hf_id, source.revision)]
 

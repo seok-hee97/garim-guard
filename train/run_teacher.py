@@ -36,8 +36,7 @@ def main() -> int:
     policy = load_teacher_policy(args.policy)
     if args.teacher not in policy.teachers:
         raise SystemExit(
-            f"unknown teacher {args.teacher!r}; {args.policy} defines "
-            f"{sorted(policy.teachers)}"
+            f"unknown teacher {args.teacher!r}; {args.policy} defines {sorted(policy.teachers)}"
         )
     spec = policy.teachers[args.teacher]
     records = load_jsonl(args.input)

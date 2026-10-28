@@ -64,13 +64,9 @@ def generator_agreement(
     eligible_labels: set[str],
 ) -> dict[str, Any]:
     """교사 라벨 vs 생성기 라벨. 교사가 투표하지 않는 클래스는 셈에서 뺀다."""
-    shared = sorted(
-        key for key in set(artifacts) & set(gold) if gold[key] in eligible_labels
-    )
+    shared = sorted(key for key in set(artifacts) & set(gold) if gold[key] in eligible_labels)
     if not shared:
-        raise ValueError(
-            "no eligible overlapping ids between artifacts and the generator sidecar"
-        )
+        raise ValueError("no eligible overlapping ids between artifacts and the generator sidecar")
     matches = sum(artifacts[key].label == gold[key] for key in shared)
     confusion: Counter[tuple[str, str]] = Counter(
         (gold[key], artifacts[key].label) for key in shared
@@ -99,9 +95,7 @@ def jailbreak_independence(
         # 임계를 넘으면 두 번째 표가 정보를 더하지 않는다 — 교체 실패 신호다.
         "is_rubber_stamp": bool(positive) and rate >= RUBBER_STAMP_THRESHOLD,
         "jailbreak_on_primary_negative": len(negative) and round(flip / len(negative), 4),
-        "note": (
-            "can_flip_none=false 가 마지막 항목의 피해를 막지만, 크면 교사가 과탐한다"
-        ),
+        "note": ("can_flip_none=false 가 마지막 항목의 피해를 막지만, 크면 교사가 과탐한다"),
     }
 
 
@@ -168,9 +162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             or artifact.revision != spec.revision
         ]
         if drifted:
-            raise SystemExit(
-                f"{name}: {len(drifted)} artifacts have teacher/model/revision drift"
-            )
+            raise SystemExit(f"{name}: {len(drifted)} artifacts have teacher/model/revision drift")
     # 읽지 못해 기권한 행(신뢰도 0, `:unparsed`)은 표를 던지지 않았다. 일치도·독립성에 넣으면
     # 그 행의 자리표시 라벨이 숫자를 흐린다 — 빼고 세고, 몇 행인지 따로 적는다.
     abstained = {
@@ -194,7 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rows, gold, eligible_labels=set(policy.teachers[name].votes_for)
             )
             for name, rows in sorted(voting.items())
-        }
+        },
     }
     if args.primary in loaded and args.secondary in loaded:
         payload["jailbreak_independence"] = jailbreak_independence(
@@ -221,8 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(f"-> {args.output}")
     if independence and (
-        independence["agreement_on_jailbreak"] is None
-        or independence["is_rubber_stamp"]
+        independence["agreement_on_jailbreak"] is None or independence["is_rubber_stamp"]
     ):
         return 2
     return 0

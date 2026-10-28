@@ -127,9 +127,7 @@ def scan(
             if hit.code in L1_ONLY_CODES:
                 l1_only += 1
             if collect is not None:
-                collect.append(
-                    Hit(segment_id, hit.code, hit.rule, hit.span, hit.excerpt)
-                )
+                collect.append(Hit(segment_id, hit.code, hit.rule, hit.span, hit.excerpt))
     if not total:
         raise ValueError("corpus is empty")
     return AlertReport(
@@ -227,9 +225,7 @@ def main() -> int:
     print(f"L1 전담 히트: {payload['l1_only_axis_hits']}  ← FP/N 근사가 깨지는 행")
     print("⚠️ 경보율은 FPR 이 아니다 — 히트 중 진탐 비율(§7.2.3 ②)은 사람 판정이 필요하다.")
     if args.queue:
-        count = write_adjudication_queue(
-            args.queue, sample_hits(collected, args.queue_size)
-        )
+        count = write_adjudication_queue(args.queue, sample_hits(collected, args.queue_size))
         print(f"판정 큐 {count}건 -> {args.queue}")
     if args.output:
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
