@@ -1,6 +1,6 @@
 # 가림 구현 현황
 
-> 기준일: 2026-10-27 — RunPod 교사·학습·평가 완료 (이전 판 2026-10-26)
+> 기준일: 2026-10-28 — R1 배포 · R2 판정(불채택) · 공개 준비 완료 (이전 판 2026-10-27)
 > 범위: 고정 자산 준비와 로컬 교사 추론을 포함한 현재 구현·실행 상태
 
 이 문서는 [DESIGN.md](DESIGN.md)의 기획을 현재 저장소 코드에 대응시킨 실행 현황이다.
@@ -14,16 +14,16 @@
 | P0/L0 런타임 | **구현 완료** | 세그먼트, 가역 정규화, 규칙 탐지, 병합, 정책, 볼트, API/CLI | 실 운영 트래픽 성능 측정 |
 | L1 런타임 계약 | **구현 완료 · 학습 가중치로 확인** | 512/64 토큰 청킹, bounded budget, 타임아웃·회로 차단, ONNX 백엔드, `--l1-model-dir`, 프록시 스레드 간 공유. `train/artifacts/l1-onnx` 로 CLI 전 구간 통과(PERSON 마스킹 · 인젝션 classifier) | — |
 | 모델·데이터 고정 | **구현·로컬 검증 완료** | 활성 자산 18개, revision/라이선스 레지스트리, 원격 tree/LFS 검증, exact 파일 manifest, `uv.lock` | 새 머신에서 동일 자산 재현 |
-| 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | deepset 번역본 적용 |
+| 코퍼스 준비 | **구현·로컬 생성 완료** | 공통 JSONL 계약, 원천별 어댑터, 분할·중복·누수 차단, `data/corpus/` 산출물 | — |
 | 합성 PII/공격 데이터 | **구현·로컬 생성 완료** | 5만 건 기본 분포 생성기, 템플릿·값 split 격리, span 검증 | 외부 분포에서 품질 검증 |
 | 번역 | **완료** | deepset 662행 — Gemini 3.8 Flash 50 + Claude 612(한도 초과로 전환, 행별 `method`), `train/translations/`, `deepset-ko-{train,test}` 적용 | — |
 | 교사·수동 라벨링 | **완료(RTX 3090, 2026-10-27)** | 교사 3종 × 19,157행(기권 0) — kanana · Gemma 4 E2B · **Qwen3Guard-Gen-4B**(0.6B 가 한국어 탈옥을 못 봐 교체). 클래스별 2표 합의 14,020 수용 / 5,137 폐기(감사 기록) | R2 실행 완료 — 새 합성 2,466행만 교사 실행(17,734행 R1 재사용), C3 로 생성기 정상 채택률 0.998 |
 | L1 공동 학습 | **완료 — 3 seed × 5 epoch** | bf16, micro-batch 16×2. 검증 hmean 0.896 / **0.922** / 0.918 → seed 37 | R2(3 seed, seed 37) 학습·판정 완료 — **불채택**(O1 · O4 미달, [RESULTS_L1_R2.md](RESULTS_L1_R2.md)). SYSTEM_LEAK 보강은 R3 |
 | 내보내기·평가 | **완료** | QInt8 152MB · 양자화 저하 −0.0002 · 봉인 test 17,146행 · 외부 KoreanGuardrail 0.342/0.007 · TAB · 제품 경로 PII(`bench/l1_product_path.py`) — [RESULTS_L1.md](RESULTS_L1.md) | 노트북 지연 재측정(pod CPU 값만 있음). 배포 INT8 은 `reduce_range` 판으로 교체 — VNNI 없는 x86 의 U8S8 포화 수정 |
 | L2 | **구현 · Gemma 4 E2B 판정기 연결** | `garim/detect/l2.py` — 루프백 llama-server, 교사와 같은 정책 프롬프트, 3-스트림 분리, 파싱 실패 warn+degraded. 고정 revision → Q8_0 → Q4_K_M GGUF | interactive 에스컬레이션(§6.4.6 W1 게이트), kanana L2-fast |
-| RunPod 실행 | **완료(2026-10-27)** | R1: RTX 3090 · torch cu126(드라이버 CUDA 12.8), 결함 셋 수정(Gemma 설명 출력 · KDPII 앞 공백 · Qwen 교체). R2: 해시 게이트 · 교사 재사용 · 학습 · 판정, 평가 단계 결함 둘 수정(CPU 할당량 스레드 · INT8 포화) — `docs/RUNPOD.md`. 산출물 회수·sha256 대조, HF 비공개 저장소 보관 | — |
+| RunPod 실행 | **완료(2026-10-27)** | R1: RTX 3090 · torch cu126(드라이버 CUDA 12.8), 결함 셋 수정(Gemma 설명 출력 · KDPII 앞 공백 · Qwen 교체). R2: 해시 게이트 · 교사 재사용 · 학습 · 판정, 평가 단계 결함 둘 수정(CPU 할당량 스레드 · INT8 포화) — `docs/RUNPOD.md`. 산출물 회수·sha256 대조, HF 보관(model 공개 · 합성 주민번호 파일은 비공개 dataset) | — |
 | 합성 코퍼스 축 | **표기·은닉 축 신설** | §5.3.2 표기 5분할(`notation.py`) · §2.2 은닉 9종(`hiding.py`) · 라벨 누수 제거(§6.3.0) · 델타 feature 8→7칸 | 없음 |
-| §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 키가 Free Tier(모델당 일 20회)로 확정, 유료 키 필요 |
+| §7.3 베이스라인 | **하네스 완료 / 7종 실측** | 축 (b) 정규화 ON/OFF 대조, PolyGuard·kanana·**Gemma 4 L2**, detect-secrets·CredSweeper(축 d), Presidio 3팔(H1) | Gemini — 유료 tier 키 필요(§7.4) |
 | 평가 하네스 | **H1·H2·S4·8f·축(a)·지연·13b 완료** | `bench/` — attack_eval · leak_eval · ko_guardrail · tab · cred_data · type_eval · real_fpr · latency · presidio_baseline · secret_baselines · mask_quality | 코퍼스 수집 확대, Gemini 팔, 학습 ONNX 실측 |
 | 로컬 프록시(§8.1-17) | **구현 완료** | OpenAI 호환 `garim proxy`, 차단 미전달, 돌아오는 길 복원, **스트리밍은 모아서 복원한 뒤 SSE**(실모델 확인, `--refuse-streaming` 선택), 엄격 프로필(`config/policy.strict.yaml`), **`tool_calls` 인자 검사·복원**, 상류 오류 본문 전달, `--upstream-timeout`, **실모델 전 구간 통과**(`bench/proxy_e2e.py`, 로컬 Gemma 상류) | Gemini 상류 실호출(유료 키) |
 | 외부통신 0(§8.1-15b) | **검증 완료** | `tools/no_external_calls.py` — 소켓 봉인, CI 게이트 | — |
@@ -363,7 +363,6 @@ OpenAI 호환 상류로 보낸다. 모델에게 받은 줄을 `<>`→`[]` 로 �
 - **KoreanGuardrail 라이선스** — CC-BY-4.0 확인, DESIGN §8.5-14 닫음.
 - **구 프로젝트 잔여물 삭제** — `app/` `eval/` `src/` `scripts/`(캐시뿐), `report/`(빈 폴더),
   `results/`(구 로그), `models/gpu_trained/`(682MB, 가림 미사용·재배포 금지 모델). 전부 Git 밖이었다.
-  `TEMP.md` 는 사용자 기획 메모라 남겼다.
 - **지연·메모리 예산** — 기계가 한가할 때 재측정 후 결정(§9). RunPod 과 무관.
 
 ## 학습을 시작하기 전에 남은 실행

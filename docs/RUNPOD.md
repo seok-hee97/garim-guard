@@ -155,9 +155,9 @@ fc305d710e93efbd4dd59b49e1d8b792de6f1b2f1782f19fb468c62c456f4b9d  data/corpus/at
 - **디스크 60GB 이상** — 고정 자산 약 17GB(교사 3종 15GB · 원천 데이터 2.5GB) + venv(torch·CUDA
   라이브러리) + 코퍼스·체크포인트·ONNX.
 - `HF_TOKEN` 이 필요하다(gated 아닌 저장소도 rate limit 때문에 있는 편이 낫다).
-- `main` 이 가림이다(2026-10-28 부터 — 이전 프로젝트는 `legacy-safeagent` 브랜치). 저장소가 비공개인
-  동안에는 pod 에 자격 증명을 남기지 않도록 **git bundle** 로 올린다(아래 "CUDA 12.8 pod" 절). 공개 후에는
-  그냥 clone 한다.
+- `main` 이 가림이다(2026-10-28 부터 — 이전 프로젝트는 `legacy-safeagent` 브랜치). 공개 저장소라 그냥
+  clone 한다. 비공개 포크라면 pod 에 자격 증명을 남기지 않도록 **git bundle** 로 올린다(아래 "CUDA 12.8
+  pod" 절).
 
 ```
 pip install uv
@@ -313,8 +313,9 @@ glob 순서가 달라져도 같은 집합이 나오고, 원천이 커져도 대�
     ValueError: evaluation text fingerprints overlap training inputs:
         ['syn-attack-0056', 'syn-attack-0099', ...]
 
-봉인 대상은 넷이다 — 합성 PII test · 합성 공격 test · **T4 2,800** · **T4′ 400**
-(총 5,872행).
+처음 설계한 봉인 대상은 넷이었다 — 합성 PII test · 합성 공격 test · **T4 2,800** · **T4′ 400**
+(총 5,872행). 실제 R1 봉인은 외부 셋 넷(공격 외부 gold · KDPII · KLUE · bc 음성)을 더한 **여덟 파일
+17,146행**이다(11단계 명령, RESULTS_L1).
 
 ⚠️ **8번(봉인)이 5~7번 뒤에 온다.** 교사 라벨이 붙은 코퍼스를 봉인해야 한다. 봉인은
 `train/training.yaml` 까지 덮으므로 하이퍼파라미터를 바꾸면 **재봉인**이다 — 바꾸고
@@ -399,7 +400,8 @@ JAILBREAK 는 Gemma·Qwen 2표가 있어야 받으므로 합의 결과가 **학�
 이 경우를 덮지 않는다 — 그래서 **교사 산출물을 본 뒤, 학습·평가 전**에 내린 결정임을 적어 둔다.
 L1 결과는 아무것도 보지 않았다. 검증 5행으로는 JAILBREAK head 를 고를 수도 잴 수도 없고,
 같은 계열의 상위 모델로 바꾸는 것이 합의 규칙(2표)을 느슨하게 하는 것보다 덜 자의적이다.
-0.6B 산출물과 6b 보고서는 pod 의 `/workspace/backup-qwen0p6b/` 에 남겨 두고 결과와 함께 보고한다.
+0.6B 산출물과 6b 보고서는 pod 의 `/workspace/backup-qwen0p6b/` 에 남겨 두고 결과와 함께 보고한다
+(회수본: HF dataset `cycloevan/garim-guard` 의 `runpod/2026-10-27/backup-qwen0p6b/`).
 
 ## 학습 전 확인할 것 — 해소됨
 

@@ -4,8 +4,9 @@
 > 짝 문서: [RESULTS.md](RESULTS.md) — **학습 전** 수치. 이 문서는 그 위에 L1 을 얹은 결과만 다룬다.
 > **갱신(2026-10-27)** — 2차 학습(R2)은 채택되지 않았다([RESULTS_L1_R2.md](RESULTS_L1_R2.md)). 그 측정 중
 > INT8 이 VNNI 없는 x86 에서 깨지는 결함을 찾아 배포 INT8 을 `reduce_range` 판으로 바꿨다. 이 문서의
-> INT8 수치는 원래 파일(`garim_l1.int8.u8s8.onnx`)로 잰 것이고, 새 판으로 다시 재도 KoreanGuardrail ·
-> KDPII · bc 음성이 같은 값으로 나왔다(RESULTS_L1_R2 §4-①).
+> INT8 수치는 원래 파일(`garim_l1.int8.u8s8.onnx`)로 잰 것이다. 새 판으로 다시 재면 KoreanGuardrail 은
+> 0.342 / 0.007 그대로이고, PII 제품 경로는 소수 셋째 자리 · 1행 다르다 — KDPII 0.979 / 0.977, KLUE PERSON
+> 0.890 / 0.931, bc 음성 63행(8.8%). README · 모델 카드는 새 판 값을 쓴다(RESULTS_L1_R2 §0 · §4-①).
 
 RESULTS.md 와 같은 규칙을 따른다 — **각 수치 옆에 그 수치가 지탱하지 못하는 것을 같이 적는다**
 (§7.6-2 "재현율 옆에 항상 FPR", §7.6-3 "자작 셋은 헤드라인이 아니다").
@@ -282,8 +283,8 @@ L1 시간 예산만 60초로 푼 벤치 정책으로 했고 degraded 문서는 0
 - **seed 간 우열** — validation 소수 클래스가 13·8행이다.
 - **T4 · 합성 공격 test 의 절대값** — 자작이고, 기본 문장이 전부 학습에도 있으며(§5-③), NONE 분모는
   기본 문장 5개다. 방향(NONE→SYSTEM_LEAK, 인코딩 PII 오탐)만 쓴다.
-- **지연 99ms(128토큰)** — pod CPU(16코어 컨테이너)다. §7.1.3 의 노트북 기준이 아니다. 로컬
-  M1 은 다른 실험이 돌고 있어(load 16, swap 21.5/22.5GB) 이번에 재지 않았다.
+- **지연 99ms(128토큰)** — pod CPU(16코어 컨테이너)에서 원래 INT8 파일로 잰 값이다. §7.1.3 의 노트북
+  기준이 아니며, 노트북 측정은 아직 하지 않았다.
 - **KDPII 0.987** — 원천은 외부지만 train 과 같은 분포의 분할이다. 실 업무 텍스트 재현율이 아니다.
 - **VNNI 없는 x86 에서 잰 INT8 값** — 원래 INT8 은 AVX2 만 있는 CPU(Zen2 · Zen3 · Ice Lake 이전 Intel)에서
   int16 포화로 판정이 깨진다(RESULTS_L1_R2 §4-①). R1 pod 의 CPU 는 기록하지 않았지만, Mac(ARM)과 행 단위까지
@@ -304,11 +305,16 @@ L1 시간 예산만 60초로 푼 벤치 정책으로 했고 degraded 문서는 0
 | `data/runpod/2026-10-27/` | 교사 원출력 3종, 합의·폐기 감사, 봉인 manifest 둘, 6b 보고서, 0.6B 대조본, pod 로그 |
 
 전부 Git 밖이다(`data/` 에 체크섬을 통과하는 합성 주민등록번호가 있다). ONNX 와 seed 37
-체크포인트는 pod 와 sha256 이 일치함을 확인했다.
+체크포인트는 pod 와 sha256 이 일치함을 확인했다. 공개 위치는 HF model `cycloevan/garim-guard` 의
+`l1/r1/onnx/` · `l1/r1/checkpoints/`, HF dataset `cycloevan/garim-guard` 의 `results/r1/`(평가 JSON) ·
+`runpod/2026-10-27/`(교사 원출력 · 감사 · manifest · pod 로그)다.
+
+R1 은 학습 코드 커밋 `1cd63d1` 에서 재현한다 — 지금 `main` 의 `runpod_pipeline.py` 는 R2 경로다.
 
 ```bash
+git checkout 1cd63d1
 python train/runpod_pipeline.py --device cuda --train          # 3b ~ 10
-bash logs/step11.sh                                            # RUNPOD.md 11
+bash data/runpod/2026-10-27/logs/step11.sh                     # RUNPOD.md 11 (dataset 의 같은 경로)
 python -m bench.run_axis_b --benchmark data/raw/KoreanGuardrail/benchmark.jsonl \
   --judge garim-l0 --judge garim-l1 --l1-model-dir train/artifacts/l1-onnx
 python -m bench.l1_product_path --l1-model-dir train/artifacts/l1-onnx \

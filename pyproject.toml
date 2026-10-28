@@ -54,6 +54,10 @@ bench = [
   "presidio-analyzer>=2.2,<3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/seok-hee97/garim-guard"
+Models = "https://huggingface.co/cycloevan/garim-guard"
+
 [project.scripts]
 garim = "garim.cli:main"
 

@@ -54,6 +54,11 @@ PII 병합 → 교사 풀 → 교사 3종 → 합의 → 학습 · 평가 봉인
 [`train/runpod_pipeline.py`](../train/runpod_pipeline.py) 하나가 유일한 출처다. 차단 목록과 입력 조합이
 문서 여러 곳에 따로 적혀 있다가 어긋났기 때문이다. 단계표는 [RUNPOD.md](RUNPOD.md).
 
+**`main` 의 이 파일은 R2 경로다** — 산출물은 `train/artifacts/l1-r2/` · `data/*-manifest-r2.json` 에 생긴다.
+**배포 모델 R1** 을 다시 만들려면 학습 코드 커밋 `1cd63d1` 을 checkout 해 같은 명령을 부른다(산출물
+`train/artifacts/l1/` · `data/*-manifest.json`). 아래 4절 명령은 R1 경로 기준이고, R2 판정 명령은
+RUNPOD.md 의 R2 11단계에 있다.
+
 ```bash
 # GPU 없이 전체 배선을 먼저 검증한다 — 교사 대역, 산출물은 train/artifacts/rehearsal/, 학습은 dry-run
 python train/runpod_pipeline.py --rehearse
@@ -91,6 +96,9 @@ python train/apply_review_labels.py \
 
 seed 는 검증 `best_joint_recall_hmean`(PII char-recall 과 공격 macro-recall 의 조화평균) 최댓값으로
 고른다(동률이면 앞 seed). 내보내기는 FP32 와 INT8(QInt8 per-channel · `reduce_range`)을 같이 만든다.
+아래는 R1 산출물 경로다 — R2 는 `l1` → `l1-r2`, `l1-onnx` → `l1-r2-onnx`, manifest 는 `-r2` 판이다.
+`reduce_range` 는 `1cd63d1` 이후에 들어갔으므로, R1 을 그 커밋에서 학습했다면 내보내기는 `main` 으로
+돌아와서 한다.
 
 ```bash
 S=<고른 seed>

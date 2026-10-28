@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -155,6 +156,9 @@ def _iter_files(path: Path) -> list[Path]:
 def _l1_backend(args: argparse.Namespace) -> L1Backend | None:
     if args.l1_model_dir is None:
         return None
+    # `[l1]` 설치는 torch 없이 토크나이저만 쓴다. transformers 가 임포트마다 "PyTorch was not
+    # found" 안내를 찍어 판정 출력 앞에 섞인다 — CLI 에서만 끄고, 사용자가 정한 값은 존중한다.
+    os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
     from garim.detect.l1 import OnnxL1Backend
 
     return OnnxL1Backend(args.l1_model_dir, model_filename=args.l1_model_file)

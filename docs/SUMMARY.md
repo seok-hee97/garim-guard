@@ -66,7 +66,7 @@
 |---|---|---|---|
 | L1 백본 | `skt/A.X-Encoder-base` (한국어 ModernBERT, 0.15B) | Apache-2.0 | 토큰 분류에는 양방향 인코더가 필요하다 |
 | **L2 판정** | **`google/gemma-4-E2B-it`** (Q4_K_M GGUF, 온디바이스) | **Apache-2.0** | 정책 프롬프트로 판정하는 생성 모델 자리 |
-| **R2 교사** | **Gemma 4 E2B** + kanana-safeguard-prompt-2.1b + Qwen3Guard-Gen-4B | Apache-2.0 | 클래스별 2표 합의로 공격 라벨 증류 |
+| **공격 라벨 교사** | **Gemma 4 E2B** + kanana-safeguard-prompt-2.1b + Qwen3Guard-Gen-4B | Apache-2.0 | 클래스별 2표 합의로 공격 라벨 증류 |
 
 **Gemma 4 가 L1 에 들어가지 못한 이유는 조사로 확인했다.** transformers 의 Gemma 4 에는
 분류 헤드가 없고(인과 마스크 생성 모델, 임베딩 포함 5.1B), Gemma 계열 인코더 파생
@@ -96,7 +96,7 @@ KLUE-NER(CC-BY-SA-4.0)가 들어 있어 L1 가중치는 CC-BY-SA-4.0 으로 배�
 | 조기 중단 | PII char-recall 과 공격 macro-recall **둘 다** 정체될 때 |
 | 내보내기 | ONNX FP32 → dynamic per-channel QInt8(`reduce_range` — VNNI 없는 x86 의 int16 포화 회피), opset 18 |
 
-**교사 증류(R2).** 공개 공격 풀에 교사 3종을 돌려 **클래스별 최소 2표 합의**만 학습에
+**교사 증류(공격 헤드).** 공개 공격 풀에 교사 3종을 돌려 **클래스별 최소 2표 합의**만 학습에
 쓴다. 불일치는 `NONE`으로 흡수하지 않고 검토 큐로 보내거나 감사 기록과 함께 폐기한다.
 교사 하나가 과탐해서 사실상 단독 판정이 되는지(JAILBREAK 동의율 ≥ 0.95)를 별도 게이트로
 잰다.
@@ -157,7 +157,7 @@ deepset 은 학습·평가 split 을 먼저 봉인한 뒤 번역했다. 번역�
 | 노트북 L1 지연 | **남음** — 컨테이너 CPU 값만 있다 |
 | 가중치 공개 라이선스 | 완료 — L1 가중치 CC-BY-SA-4.0, 코드 Apache-2.0 |
 | R3 | 미정 — 새 사전 등록이 먼저(SYSTEM_LEAK 보강 · 검증 셋 교체 · PII 음성 비중) |
-| Gemini 측정(마스킹 품질·베이스라인·프록시 상류) | **남음 — 유료 키 필요.** 현 키는 Free Tier(모델당 일 20회) |
+| Gemini 측정(마스킹 품질·베이스라인·프록시 상류) | **남음 — 유료 tier 키 필요**(Free Tier 는 입력이 학습에 쓰일 수 있어 §7.4 가 금지) |
 | 수동 골드셋(T3) · Cohen's κ | 사람 검수 없는 운영으로 미수행 |
 
 **범위 밖 (의도적).** 조직 단위 강제(관리 콘솔·사용자별 정책·감사 대시보드), 브라우저
@@ -168,9 +168,11 @@ deepset 은 학습·평가 split 을 먼저 봉인한 뒤 번역했다. 번역�
 ## 10. 실행
 
 ```bash
-uv sync --extra train --extra dev            # Python 3.11
+python -m pip install -e '.[l1]'             # Python 3.11, 저장소 루트에서
 garim check '연락처는 010-1234-5678 입니다'      # → mask, <PHONE_1>
-hf download cycloevan/garim-guard --include 'l1/r1/onnx/*' 'l2/gguf/*Q4_K_M*' --local-dir models/garim
+hf download cycloevan/garim-guard l1/r1/onnx/garim_l1.int8.onnx l1/r1/onnx/labels.json \
+  l1/r1/onnx/tokenizer.json l1/r1/onnx/tokenizer_config.json \
+  l2/gguf/gemma-4-E2B-it-Q4_K_M.gguf --local-dir models/garim
 garim --l1-model-dir models/garim/l1/r1/onnx check '...'   # L1 연결
 llama-server -m models/garim/l2/gguf/gemma-4-E2B-it-Q4_K_M.gguf --host 127.0.0.1 --port 8081 \
   --alias gemma-4-e2b-it --jinja
