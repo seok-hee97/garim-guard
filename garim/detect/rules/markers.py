@@ -81,6 +81,19 @@ _GRADE_LABEL = re.compile(
 )
 _LABEL_WINDOW = 40
 _NUMERIC_GRADE = re.compile(r"(?:[1-4]|[ⅠⅡⅢIV]{1,3})\s*급\s*비?밀?")
+# 숫자 등급은 `비밀` 이 붙거나 보안 · 비밀 등급 라벨 뒤에 올 때만 표식이다 — `장애 등급 분류: 2급`,
+# 등급 목록(`1급\n2급`)은 아니다(전수 검토 2026-10-28).
+_SECURITY_LABEL = re.compile(r"(보안|비밀)[ \t]{0,3}등급[ \t]*(?:[:：][ \t]*)?$")
+# `비밀번호` · `기밀성` 처럼 낱말이 이어지면 표식이 아니다(조사는 아래 `_PARTICLE` 이 감점한다).
+_WORD_CONTINUES = frozenset({"비밀", "기밀"})
+_OPENERS = {
+    "[": "]", "(": ")", "（": "）", "【": "】", "「": "」", "『": "』", "<": ">", "《": "》",
+}
+_HEADER_SEPARATOR = re.compile(r"[ \t]*[-:|–—][ \t]")
+# `본 문서는 대외비입니다` — 문서를 표시하는 문장이다. 조사 감점을 하지 않고 단독 표식처럼 센다.
+_DECLARATION_BEFORE = re.compile(
+    r"(?:본|이|해당)[ \t]*(?:문서|자료|메일|파일|보고서)(?:는|은)[ \t]*$"
+)
 _WRAPPED = "「」『』[]（）()【】<>《》"
 # 조사·어미가 붙으면 문장 속 언급이다 — "대외비인데", "기밀이라서".
 _PARTICLE = re.compile(r"인데|이라|라서|입니다|이었|였|니까|지만|이고|여서|라고|이며|인")
@@ -99,8 +112,19 @@ def _standalone(line: str, term: str) -> bool:
         # 긴 줄은 단독 표식일 수 없다 — 표식마다 줄 전체를 다듬으면 공백 제거 스트림(한 줄)에서
         # 제곱 시간이 됐다(`"비밀\n" * 5000` 에 23초, 5차 검토).
         return False
-    stripped = line.strip().strip(_WRAPPED).strip()
+    stripped = line.strip().strip(_WRAPPED + "#*_>※ \t").strip()
     return stripped.casefold() == term.casefold()
+
+
+def _header_like(line: str, start: int, end: int) -> bool:
+    """괄호 · 강조로 감쌌거나(`[대외비]`, `**대외비**`), 줄 머리에서 구분자가 뒤따른다
+    (`대외비 - …`)."""
+    before, after = line[max(0, start - 2) : start], line[end : end + 2]
+    if before.endswith("**") and after.startswith("**"):
+        return True
+    if before and after and _OPENERS.get(before[-1]) == after[0]:
+        return True
+    return not line[:start].strip(" \t#*>※-") and bool(_HEADER_SEPARATOR.match(line, end))
 
 
 def score_marker(line: str, line_index: int, match: re.Match[str]) -> int:
@@ -109,11 +133,13 @@ def score_marker(line: str, line_index: int, match: re.Match[str]) -> int:
     score = 0
     if line_index < FIRST_LINES:
         score += SCORE_FIRST_LINES
-    if _standalone(line, term):
+    before = line[max(0, match.start() - _LABEL_WINDOW) : match.start()]
+    declared = bool(_DECLARATION_BEFORE.search(before))
+    if _standalone(line, term) or _header_like(line, match.start(), match.end()) or declared:
         score += SCORE_STANDALONE
-    if _GRADE_LABEL.search(line[max(0, match.start() - _LABEL_WINDOW) : match.start()]):
+    if _GRADE_LABEL.search(before):
         score += SCORE_GRADE_LABEL
-    if _PARTICLE.match(line, match.end()):
+    if _PARTICLE.match(line, match.end()) and not declared:
         score += SCORE_PARTICLE
     return score
 
@@ -126,6 +152,21 @@ def detect_markers(text: str, *, score_threshold: int = DEFAULT_SCORE_THRESHOLD)
         patterns = ((_MARKER, "confidential_marker"), (_NUMERIC_GRADE, "classified_grade"))
         for pattern, rule in patterns:
             for match in pattern.finditer(line):
+                following = line[match.end() : match.end() + 1]
+                if (
+                    match.group(0) in _WORD_CONTINUES
+                    and following
+                    and 0xAC00 <= ord(following) <= 0xD7A3
+                    and not _PARTICLE.match(line, match.end())
+                ):
+                    continue
+                label = line[max(0, match.start() - _LABEL_WINDOW) : match.start()]
+                if (
+                    rule == "classified_grade"
+                    and "비밀" not in match.group(0)
+                    and not _SECURITY_LABEL.search(label)
+                ):
+                    continue
                 score = score_marker(line, line_index, match)
                 if score < score_threshold:
                     continue

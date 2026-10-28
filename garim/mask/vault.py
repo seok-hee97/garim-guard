@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
 
 from garim.mask.josa import correct_particle
 from garim.models import Finding
@@ -16,6 +15,9 @@ _TOKEN = re.compile(
 )
 
 
+# 입력의 토큰 모양 글자를 피해 번호를 매길 때 따라가는 상한 — 발급 번호가 9자리를 넘지 않게.
+_RESERVE_CEILING = 10**8
+
 # 조사 바로 뒤에 붙어 조사로 읽히게 하는 음절 — `과의` · `과도` · `로만` · `로는` · `로서` · `은요`.
 _PARTICLE_CONTINUATIONS = frozenset("의도만요는서써")
 
@@ -24,18 +26,24 @@ def _coreference_key(value: str) -> str:
     return "".join(unicodedata.normalize("NFKC", value).split())
 
 
-@dataclass(slots=True)
 class Vault:
-    scope: str = "session"
-    entries: dict[str, str] = field(default_factory=dict, repr=False)
-    counters: dict[str, int] = field(default_factory=dict, repr=False)
-    _reverse: dict[tuple[str, str], str] = field(default_factory=dict, repr=False)
-    # 입력에 원래 있던 토큰 모양 글자 — 복원하지 않고, "없는 토큰" 으로 세지도 않는다.
-    _literals: set[str] = field(default_factory=set, repr=False)
+    """토큰 ↔ 원문 표.
 
-    def __post_init__(self) -> None:
-        if self.scope not in {"task", "session"}:
+    ★ 데이터클래스가 아니다 — 데이터클래스였을 때 `dataclasses.asdict(result)` 같은 범용
+      직렬화가 `entries` 를 평범한 dict 로 펼쳐 원문 값을 꺼냈다(전수 검토 2026-10-28).
+    """
+
+    __slots__ = ("scope", "entries", "counters", "_reverse", "_literals")
+
+    def __init__(self, scope: str = "session") -> None:
+        if scope not in {"task", "session"}:
             raise ValueError("vault scope must be 'task' or 'session'")
+        self.scope = scope
+        self.entries: dict[str, str] = {}
+        self.counters: dict[str, int] = {}
+        self._reverse: dict[tuple[str, str], str] = {}
+        # 입력에 원래 있던 토큰 모양 글자 — 복원하지 않고, "없는 토큰" 으로 세지도 않는다.
+        self._literals: set[str] = set()
 
     def __repr__(self) -> str:
         return f"Vault(scope={self.scope!r}, entries=<redacted:{len(self.entries)}>)"
@@ -51,7 +59,10 @@ class Vault:
             canonical = f"<{label}_{number}>"
             if canonical not in self.entries:
                 self._literals.add(canonical)
-                self.counters[label] = max(self.counters.get(label, 0), number)
+                # ★ 큰 번호(`<PHONE_999999999>`)를 그대로 따르면 다음 토큰이 10자리가 되어 복원
+                #   정규식(9자리)에 걸리지 않았다 — 복원도, "없는 토큰" 보고도 안 됐다(전수 검토).
+                if number < _RESERVE_CEILING:
+                    self.counters[label] = max(self.counters.get(label, 0), number)
 
     def token_for(self, value: str, label: str) -> str:
         key = (label, _coreference_key(value))

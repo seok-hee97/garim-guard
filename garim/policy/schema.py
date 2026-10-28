@@ -126,9 +126,13 @@ class CustomPattern(BaseModel):
         # ★ 검증하지 않으면 `re.error` 가 정책 로드가 아니라 엔진 생성에서 터졌다 — CLI 는
         #   트레이스백과 종료 코드 1(= warn)을 냈고, CI 게이트는 그것을 경고로 읽었다.
         try:
-            re.compile(value)
+            compiled = re.compile(value)
         except re.error as exc:
             raise ValueError(f"invalid regex: {exc}") from exc
+        # ★ 빈 문자열에 맞는 패턴(`(?:EMP-)?\d{0,6}`)은 길이 0 탐지를 만들어 모든 검사가
+        #   마스킹 단계에서 예외로 멈췄다(전수 검토 2026-10-28).
+        if compiled.search("") is not None:
+            raise ValueError("custom pattern must not match an empty string")
         return value
 
 
@@ -171,13 +175,15 @@ BUILTIN_PROFILES = frozenset({"strict"})
 def load_policy(path: str | Path | None = None) -> PolicyConfig:
     """정책 파일을 읽는다. `"strict"` 처럼 내장 프로필 이름도 받는다.
 
-    같은 이름의 파일이 있으면 파일이 이긴다 — 사용자가 둔 것을 내장값으로 덮지 않는다.
+    ★ 처음엔 같은 이름의 파일이 있으면 파일이 이겼다. 저장소에 `strict` 라는 파일을 하나 넣으면
+      `--policy strict` 로 도는 CI 게이트가 조용히 그 파일(전부 allow)로 바뀌었다(전수 검토).
+      내장 이름은 늘 내장 프로필이다. 그 이름의 파일을 쓰려면 `./strict` 처럼 경로로 준다.
     """
     if path is None:
         return PolicyConfig()
     policy_path = Path(path)
     try:
-        if not policy_path.exists() and str(path) in BUILTIN_PROFILES:
+        if str(path) in BUILTIN_PROFILES:
             source = files("garim.policy").joinpath("profiles", f"{path}.yaml")
             text = source.read_text(encoding="utf-8")
         else:

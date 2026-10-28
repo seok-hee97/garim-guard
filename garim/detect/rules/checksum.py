@@ -16,10 +16,12 @@ def rrn_date_sex_valid(value: str) -> bool:
         return False
     century = 1900 if number[6] in "1256" else 2000
     try:
-        date(century + int(number[:2]), int(number[2:4]), int(number[4:6]))
+        born = date(century + int(number[:2]), int(number[2:4]), int(number[4:6]))
     except ValueError:
         return False
-    return True
+    # ★ 2000년대 성별 코드(3 · 4 · 7 · 8)에 미래 생년(`88…-4…` → 2088년)을 받아, 13자리 바코드 ·
+    #   송장이 주민번호로 block 됐다(전수 검토 2026-10-28).
+    return born <= date.today()
 
 
 def rrn_checksum_valid(value: str) -> bool:

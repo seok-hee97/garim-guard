@@ -55,7 +55,13 @@ MASK_LABELS = {
 class PolicyEngine:
     def __init__(self, config: PolicyConfig) -> None:
         self.config = config
-        self._custom_modes = {pattern.code: pattern.mode for pattern in config.custom_patterns}
+        # ★ 같은 코드의 사용자 패턴이 여럿이면 마지막 것이 이겼다 — 기본 코드(L-CT-03)를 공유하는
+        #   block 패턴이 뒤의 mask 패턴에 묻혔다(전수 검토). 가장 무거운 모드를 쓴다.
+        self._custom_modes: dict[str, Mode] = {}
+        for pattern in config.custom_patterns:
+            current = self._custom_modes.get(pattern.code)
+            if current is None or SEVERITY[pattern.mode] > SEVERITY[current]:
+                self._custom_modes[pattern.code] = pattern.mode
         self.custom_patterns = [
             (pattern, re.compile(pattern.regex)) for pattern in config.custom_patterns
         ]

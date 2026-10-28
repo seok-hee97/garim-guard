@@ -218,6 +218,14 @@ def merge_overlaps(findings: list[Finding], mode_for: ModeResolver) -> list[Find
         # ★ 스팬은 합집합으로 넓힌다. 초판은 채택된 쪽 스팬만 남겨서, L1 PERSON (0, 14) 와
         #   전화번호 (4, 17) 이 겹치면 `<PERSON_1>678 끝` — 폐기된 쪽의 꼬리 숫자가 원문으로
         #   나갔다. 마스킹 경계는 탐지된 글자를 하나도 남기지 않아야 한다.
+        # ★ 전수 검토(2026-10-28) — warn(L-SEC-05)이 겹친 이메일(mask)을 이기면 채택된 코드는
+        #   warn 이라 아무것도 가리지 않았고, 프록시는 warn 에서 원문을 그대로 보냈다
+        #   (`password reset mail goes to <긴 이메일>`). 흡수한 쪽이 가려야 하는 탐지였으면 남긴다.
+        mask_required = (
+            current.mask_required
+            or finding.mask_required
+            or "mask" in {mode_for(current.code), mode_for(finding.code)}
+        )
         output[index] = replace(
             selected,
             span=(
@@ -226,5 +234,6 @@ def merge_overlaps(findings: list[Finding], mode_for: ModeResolver) -> list[Find
             ),
             confidence=confidence,
             evasion=sorted(set(current.evasion + finding.evasion)),
+            mask_required=mask_required,
         )
     return sorted(output, key=lambda item: item.span)

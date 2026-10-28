@@ -167,7 +167,8 @@ def test_l0_scans_whole_segment_before_l1_chunking() -> None:
     from garim.detect.rules.secrets import detect_secrets
 
     token = ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_+/=-" * 2)[:100]
-    source = "가" * 180 + " api_key: " + token + " 끝"
+    # 문장 꼴이라 대입 규칙(L-SEC-04)이 아닌 엔트로피 규칙(L-SEC-05)만 본다.
+    source = "가" * 180 + " api key 는 " + token + " 끝"
     direct = next(finding for finding in detect_secrets(source) if finding.code == "L-SEC-05")
     result = Inspector().check(source)
     inspected = next(finding for finding in result.leaks if finding.code == "L-SEC-05")
@@ -261,7 +262,7 @@ def test_trusted_system_origin_strengthens_secret_detection() -> None:
         thresholds={"l0": 0.75},
         origin_policy={"trust_declared": True, "system_secret_threshold_delta": -0.1},
     )
-    text = "api_key: AbCd1234EfGh5678IjKl9012"
+    text = "api key 는 AbCd1234EfGh5678IjKl9012"  # `api_key: …` 는 이제 대입 규칙(block)이 받는다
     user = Inspector(config).check([Segment(text, origin="user")])
     system = Inspector(config).check([Segment(text, origin="system")])
     assert not any(finding.code == "L-SEC-05" for finding in user.leaks)

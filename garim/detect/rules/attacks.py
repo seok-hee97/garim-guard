@@ -5,34 +5,65 @@ from __future__ import annotations
 import re
 
 from garim.models import Finding, Origin
-from garim.normalize.chosung import chosung_signature, has_bare_chosung
+from garim.normalize.chosung import chosung_signature
 
+# ★ 전수 검토(2026-10-28) — 가장 흔한 꼴(`이전 지시사항을 모두 무시하고`, `지금까지의 모든 명령을
+#   무시해`, `ignore your instructions`)을 놓쳤고, 반대로 `위 규칙을 무시하면 벌점` · `앞선 지시를
+#   잊지 마세요` 를 공격으로 봤다. 명사 뒤 `사항` · 조사 · `모두/전부` 를 받고, 조건 · 부정
+#   꼴은 뺀다.
 _INJECTION = re.compile(
-    r"(?:이전|앞선|위의?)\s*(?:모든\s*)?(?:지시|명령|규칙)(?:을|를)?\s*(?:무시|잊|폐기)|"
-    r"(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?",
+    r"(?:이전|앞선|앞|위|기존|지금까지|그\s?전)의?\s*(?:모든\s*)?"
+    r"(?:지시|지침|명령|규칙|설정|프롬프트)(?:사항|들)?(?:을|를|은|는|이|가)?"
+    r"\s*(?:모두|전부|다|싹|완전히)?\s*"
+    r"(?:무시(?!하면|할\s?경우|하지|하셔도|해도)|잊(?!지)|폐기|버리)|"
+    r"(?:앞의|위의?|이전의?)\s*내용(?:은|을|들은)\s*(?:모두|전부|다)?\s*무시(?!하면|하지|하셔도|해도)|"
+    r"(?:ignore|disregard|forget)\s+(?:all\s+(?:of\s+)?|any\s+)?(?:(?:the|your)\s+)?"
+    r"(?:previous|prior|above|earlier|preceding|original|system)\s+"
+    r"(?:instructions?|prompts?|rules|guidelines)|"
+    r"(?:ignore|disregard|forget)\s+(?:all\s+(?:of\s+)?)?your\s+(?:instructions?|prompts?|rules|guidelines)",
     re.IGNORECASE,
 )
+# 시스템 프롬프트를 **목적어**로 요구할 때만 — `시스템 메시지가 화면에 출력되지 않습니다`,
+# `시스템 프롬프트 작성 요령을 보여줘` 는 공격이 아니다(전수 검토).
 _SYSTEM_LEAK = re.compile(
-    r"(?:시스템|개발자)\s*(?:프롬프트|지시|메시지).{0,16}(?:보여|출력|공개|그대로)|"
-    r"(?:reveal|show|print|repeat).{0,20}(?:system|developer)\s+(?:prompt|message|instructions?)",
+    r"(?:시스템|개발자)\s*(?:프롬프트|지시(?:사항)?|메시지)(?:를|을|의\s*내용을?|\s*내용을?|\s*전문을?)"
+    r"\s*.{0,10}?(?:보여|출력|공개|알려|말해|적어|그대로)|"
+    r"(?:시스템|개발자)\s*(?:프롬프트|메시지)(?:가|이|는|은)\s*(?:뭐|무엇)|"
+    r"(?:reveal|show|print|repeat|output|tell\s+me).{0,20}(?:system|developer|initial|hidden)\s+"
+    r"(?:prompt|message|instructions?)|"
+    r"what(?:'s|\s+is|\s+are)\s+your\s+(?:system\s+)?(?:prompt|instructions)",
     re.IGNORECASE,
 )
 # ★ `제한(이|은)? 없는` 은 앵커로 쓸 수 없다. 한국어 위키 12,000 문장 실측에서
 #   이 패턴만으로 오탐 2건이 나왔다 — "제한 없는 연분수", "제한이 없는 소프트웨어".
 #   §8.1-8f 하네스가 처음 잡아낸 것이고, 정확히 그것을 하라고 만든 항목이다.
 #   → 대상어(AI·모델·정책·필터…)를 앞뒤 좁은 창 안에서 함께 요구한다.
+#   ★ 전수 검토 — 뒤쪽 `정책` · `규칙` 은 `제한이 없는 요금제 정책` 에 걸렸다. 앞쪽(`정책 제한
+#   없는 모드`)에서만 받는다.
 _UNRESTRICTED_TARGET = (
+    r"(?:AI|인공지능|모델|어시스턴트|assistant|챗봇|필터|가이드라인|검열|제약)"
+)
+_UNRESTRICTED_TARGET_BEFORE = (
     r"(?:AI|인공지능|모델|어시스턴트|assistant|챗봇|정책|규칙|필터|가이드라인|검열|제약)"
 )
+# ★ 전수 검토 — `\bDAN\b` 가 대소문자를 가리지 않아 `Dan Abramov` · 인도네시아어 `dan`(그리고)에
+#   걸렸고, 한글이 단어 문자라 `너는 DAN이야` 는 못 잡았다. `너는 이제 … 역할` · `…인 척해` 는
+#   `영어 회화 선생님 역할을 해줘` · `면접관인 척해 줘` 같은 평범한 역할 놀이에 걸렸다 — 제한을
+#   벗기려는 표지가 함께 있을 때만 받는다. `developer mode` 도 AI 를 향할 때만
+#   (`Android developer mode` 는 아니다).
 _JAILBREAK_PERSONA = re.compile(
-    r"\bDAN\b|developer\s+mode|"
-    rf"{_UNRESTRICTED_TARGET}.{{0,12}}제한(?:이|은)?\s*없는|"
-    rf"제한(?:이|은)?\s*없는.{{0,12}}{_UNRESTRICTED_TARGET}|"
-    r"너는\s*이제.{0,20}(?:이다|역할)|.{1,20}인\s*척해",
-    re.IGNORECASE,
+    r"(?<![A-Za-z])DAN(?![A-Za-z])|"  # 대소문자를 가린다 — 나머지는 (?i:…)
+    r"(?i:(?:ChatGPT|GPT|AI|너|assistant).{0,20}developer\s+mode)|"
+    r"(?<!Android )(?<!android )(?<!안드로이드 )(?<!iOS )(?<!Chrome )(?<!크롬 )"
+    r"(?i:developer\s+mode\s*(?:활성화|enabled|on\b))|"
+    rf"(?i:{_UNRESTRICTED_TARGET_BEFORE}.{{0,12}}제한(?:이|은)?\s*없는)|"
+    rf"(?i:제한(?:이|은)?\s*없는.{{0,12}}{_UNRESTRICTED_TARGET})|"
+    r"(?:제한|검열|규칙|필터|윤리)\s*(?:이|은)?\s*없는.{0,15}(?:척해|역할|인\s*것처럼)"
 )
 _JAILBREAK_OTHER = re.compile(
-    r"(?:안전|보안|윤리)\s*(?:규칙|정책|필터)(?:을|를)?\s*(?:우회|해제)|jailbreak|bypass\s+(?:safety|policy|filter)",
+    # `보안 정책 해제` 는 방화벽 · 계정 업무에 흔하다 — 모델의 안전 장치를 가리킬 때만 받는다.
+    r"(?:안전|윤리|콘텐츠)\s*(?:규칙|정책|필터|가이드라인|지침)(?:을|를)?\s*(?:무시|우회|해제|어기)|"
+    r"jailbreak\s+(?:mode|prompt)|jailbroken|bypass\s+(?:safety|policy|filter)",
     re.IGNORECASE,
 )
 # ★ 초성 서명 사전 — A-KO-02. 초성화는 가역이 아니므로 복원하지 않고 양쪽을 같은
@@ -91,22 +122,49 @@ def detect_attacks(text: str, *, origin: Origin = "user") -> list[Finding]:
     return findings
 
 
+# 채팅에서 흔한 맨 자음 묶음 — 웃음(`ㅋㅋ`, `ㅎㅎ`)과 줄임말. 이것만 있는 줄은 초성체가 아니다.
+_CHAT_JAMO = re.compile(
+    r"[ㅋㅎ]+|ㅇㅋ|ㄱㅅ|ㅇㅇ|ㄴㄴ|ㄷㄷ|ㅊㅋ|ㅎㅇ|ㅂㅂ|ㅃㅃ|ㄱㄱ|ㅅㄱ|ㅇㄷ|ㄱㄷ|ㅈㅅ|ㅁㅊ|ㅅㅂ"
+)
+_BARE_CONSONANTS = re.compile(r"[ㄱ-ㅎ]+")
+_DECOMPOSED = re.compile(r"[ㄱ-ㅎ][ㅏ-ㅣ]")
+
+
+def _choseong_lines(text: str):
+    """초성체로 쓴 줄과 그 시작 위치.
+
+    ★ 전수 검토(2026-10-28) — 처음엔 글 어디에든 맨 자음이 하나라도 있으면 **글 전체**의 초성
+      서명을 맞췄다. `ㅋㅋ` 하나가 든 채팅 기록 8줄의 58%가 공격으로 잡혔고(줄과 화자를 건너
+      `전화 안내` → `ㅈㅎㅇㄴ`), 반대로 맨 모음 하나(`ㅠㅠ`)가 어디든 있으면 규칙 전체가 꺼졌다.
+      채팅 줄임말이 아닌 맨 자음 묶음이 있는 줄만, 그 줄 안에서만 맞춘다. 자모 분해(`ㅇㅣ`)는
+      자음 바로 뒤에 모음이 올 때만 본다.
+    """
+    start = 0
+    for line in text.splitlines(keepends=True):
+        runs = _BARE_CONSONANTS.findall(line)
+        if any(not _CHAT_JAMO.fullmatch(run) for run in runs) and not _DECOMPOSED.search(line):
+            yield start, line
+        start += len(line)
+
+
 def _detect_choseong(text: str, *, origin: Origin) -> list[Finding]:
-    """맨 초성 자모가 있을 때만 서명 매칭을 켠다 — 정상 산문은 이 경로에 오지 않는다."""
-    if not has_bare_chosung(text):
-        return []
-    signature, interval_map = chosung_signature(text)
-    if not signature:
-        return []
+    """초성체로 쓴 줄에서만 서명 매칭을 켠다 — 정상 산문은 이 경로에 오지 않는다."""
     codes = {"INJ": _injection_code(origin), "LEAK": "A-LEAK-01", "JB": "A-JB-02"}
     findings: list[Finding] = []
-    for pattern, kind, rule in _CHOSEONG_SIGNATURES:
-        for match in pattern.finditer(signature):
-            covered = interval_map[match.start() : match.end()]
-            if not covered:
-                continue
-            span = (min(item[0] for item in covered), max(item[1] for item in covered))
-            findings.append(
-                Finding(codes[kind], span, 0.65, "L0", rule, evasion=["A-KO-02"])
-            )
+    for offset, line in _choseong_lines(text):
+        signature, interval_map = chosung_signature(line)
+        if not signature:
+            continue
+        for pattern, kind, rule in _CHOSEONG_SIGNATURES:
+            for match in pattern.finditer(signature):
+                covered = interval_map[match.start() : match.end()]
+                if not covered:
+                    continue
+                span = (
+                    offset + min(item[0] for item in covered),
+                    offset + max(item[1] for item in covered),
+                )
+                findings.append(
+                    Finding(codes[kind], span, 0.65, "L0", rule, evasion=["A-KO-02"])
+                )
     return findings

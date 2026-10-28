@@ -314,7 +314,11 @@ class Inspector:
         masked_text: str | None = None
         masked_segments: list[str] | None = None
         result_vault: Vault | None = None
-        maskable = [finding for finding in leaks if self.policy.mode_for(finding.code) == "mask"]
+        maskable = [
+            finding
+            for finding in leaks
+            if finding.mask_required or self.policy.mode_for(finding.code) == "mask"
+        ]
         if verdict != "block" and maskable:
             for segment in inputs:
                 self.vault.reserve_literals(segment.text)
@@ -392,7 +396,9 @@ class Inspector:
                 stream=f"l2-{stream}",
             )
             if not self.policy.accepts(finding, job.content_type, origin=job.origin):
-                return []
+                # ★ 처음엔 `return []` 라 첫 스트림이 임계 아래면 더 확신하는 다음 스트림을 묻지
+                #   않았다(전수 검토). 다음 스트림으로 넘어간다.
+                continue
             return [finding]
         return []
 

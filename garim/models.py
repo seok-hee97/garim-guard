@@ -42,6 +42,8 @@ class Finding:
     # 규칙은 패키지와 함께 배포된다 — 규칙셋 버전 = 배포 버전.
     rule_version: str = __version__
     stream: str = field(default="raw", repr=False, compare=False)
+    # 겹침 병합에서 mask 모드 탐지를 흡수했다 — 채택된 코드가 warn 이어도 이 스팬은 가린다.
+    mask_required: bool = field(default=False, repr=False, compare=False)
 
     @property
     def is_attack(self) -> bool:
@@ -50,6 +52,7 @@ class Finding:
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("stream", None)
+        data.pop("mask_required", None)
         return data
 
 

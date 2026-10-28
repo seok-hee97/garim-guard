@@ -63,11 +63,13 @@ def test_builtin_profile_name_and_its_file_load_the_same_policy() -> None:
     assert by_name.codes["A-INJ-01"] == "block"
 
 
-def test_a_file_named_like_a_builtin_profile_wins(
+def test_a_builtin_profile_name_cannot_be_shadowed_by_a_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """★ 전수 검토 — 파일이 이기면 `strict` 파일 하나로 `--policy strict` CI 게이트가 약해졌다."""
     from garim.policy.schema import load_policy
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / "strict").write_text("version: 1\ncodes:\n  A-INJ-01: allow\n", encoding="utf-8")
-    assert load_policy("strict").codes["A-INJ-01"] == "allow"
+    assert load_policy("strict").codes["A-INJ-01"] == "block"
+    assert load_policy("./strict").codes["A-INJ-01"] == "allow"  # 파일은 경로로 준다

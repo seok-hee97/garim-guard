@@ -66,8 +66,9 @@ def test_longer_terms_win_over_their_substrings() -> None:
 
 def test_threshold_is_policy_controlled_not_hardcoded() -> None:
     """§2.5 says the 10-sample threshold must be recalibrated on a real corpus."""
-    # 첫 3줄(+2)뿐이고 단독도 등급표기도 아니라 점수가 정확히 2다.
-    body_mention = "참고로 이 자료는 대외비 로 분류됩니다"
+    # 첫 3줄(+2)뿐이고 단독도 등급표기도 아니라 점수가 정확히 2다. (`이 자료는 대외비` 같은
+    # 표시 문장은 단독 표식처럼 센다 — 전수 검토 2026-10-28.)
+    body_mention = "참고로 대외비 자료 목록을 정리했습니다"
     assert not detect_markers(body_mention, score_threshold=3)
     assert detect_markers(body_mention, score_threshold=2)
 

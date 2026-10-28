@@ -94,14 +94,19 @@ _HORIZONTAL_SPACE = re.compile(r"[ \t\u3000]+")
 #   통째로 비껴갔다.
 #   지우되 `zero_width` 델타에는 **세지 않는다**: 델타는 L1 입력 feature 다(§3.2.5). 학습 때 없던
 #   카운트를 늘리면 이모지의 변이 선택자(U+FE0F)만으로 공격 점수가 움직인다.
+#   ★ 전수 검토(2026-10-28) — 몽골어 자유 변이 선택자(U+180B~180D · U+180F, 범주 Mn)와 C0 · C1
+#     제어 문자(`\x00` · `\x1b` · `\x9b` …)도 같은 구멍이었다. 제어 문자는 아래에서 지운다.
 _INVISIBLE_EXTRA = frozenset(
-    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0}
+    {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F, 0x2800, 0x3164, 0xFFA0}
 )
 # 대시류 → `-`. 전화 · 계좌 · 주민번호의 구분자로 쓰이면 규칙이 못 읽었다. 동형 문자 델타에도
 # 세지 않는다 — 문장 부호 `—` 는 평범한 한국어에 흔하고, 세면 위와 같은 이유로 L1 이 흔들린다.
 _DASHES = {
     chr(code): "-" for code in (0x2010, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0x2E3A, 0x2E3B)
 }
+# 한글 모음 `ㅡ` 를 숫자 사이 구분자로 쓰는 표기(`010ㅡ1234ㅡ5678`). 숫자 사이에서만 바꾼다 —
+# 다른 자리의 `ㅡ` 는 자모 결합 단계가 읽어야 한다.
+_DIGIT_DASH = re.compile(r"(?<=\d)\u3161(?=\d)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,11 +164,13 @@ def _drop_controls(text: str, source_map: IntervalMap) -> tuple[str, IntervalMap
         ):
             zero_width += 1
             continue
+        category = unicodedata.category(character)
         if (
             code in _INVISIBLE_EXTRA
             or 0xFE00 <= code <= 0xFE0F
             or 0xE0100 <= code <= 0xE01EF
-            or unicodedata.category(character) == "Cf"
+            or category == "Cf"
+            or (category == "Cc" and not character.isspace())
         ):
             continue  # 지우되 세지 않는다(위 `_INVISIBLE_EXTRA` 주석)
         output.append(character)
@@ -183,6 +190,31 @@ def _translate(
         output.extend(replacement)
         mapped.extend([interval] * len(replacement))
     return "".join(output), mapped, changed
+
+
+def _tag_views(text: str) -> list[NormalizedView]:
+    """유니코드 태그 문자(U+E0020~E007E) 묶음을 ASCII 로 되돌린 뷰.
+
+    ★ 전수 검토(2026-10-28) — 태그 문자는 화면에 보이지 않고 모델은 읽는다("ASCII smuggling").
+      정규화가 지우기만 해서, 그 안에 쓴 지시 · 전화번호 · 키를 아무 규칙도 보지 못했다.
+    """
+    views: list[NormalizedView] = []
+    start: int | None = None
+    for index in range(len(text) + 1):
+        inside = index < len(text) and 0xE0000 <= ord(text[index]) <= 0xE007F
+        if inside and start is None:
+            start = index
+        elif not inside and start is not None:
+            decoded = "".join(
+                chr(ord(character) - 0xE0000)
+                for character in text[start:index]
+                if 0xE0020 <= ord(character) <= 0xE007E
+            )
+            if decoded.strip():
+                span = (start, index)
+                views.append(NormalizedView(decoded, [span] * len(decoded), "tags", span))
+            start = None
+    return views
 
 
 def _conservative_spaces(text: str, source_map: IntervalMap) -> tuple[str, IntervalMap]:
@@ -216,6 +248,7 @@ def normalize(text: str) -> NormalizedBundle:
     )
     current, current_map, delta["homoglyph"] = _translate(current, current_map, _CONFUSABLE)
     current, current_map, _ = _translate(current, current_map, _DASHES)
+    current = _DIGIT_DASH.sub("-", current)  # 1:1 치환이라 위치 표는 그대로다
     current, current_map, delta["jamo_composed"] = compose_jamo(current, current_map)
     current, current_map, delta["hanja"] = _translate(current, current_map, _HANJA)
     current, current_map = _conservative_spaces(current, current_map)
@@ -236,7 +269,7 @@ def normalize(text: str) -> NormalizedBundle:
     detensified_text, _ = detensify(current)
 
     decoded = decoded_views(current, current_map)
-    delta["b64_decoded"] = len(decoded)
+    delta["b64_decoded"] = len(decoded)  # L1 feature — 태그 뷰는 세지 않는다(tag_chars 가 센다)
     return NormalizedBundle(
         raw=NormalizedView(text, raw_map, "raw"),
         norm=NormalizedView(current, current_map, "norm"),
@@ -245,6 +278,7 @@ def normalize(text: str) -> NormalizedBundle:
         decoded=[
             NormalizedView(item.text, item.interval_map, item.encoding, item.source_span)
             for item in decoded
-        ],
+        ]
+        + _tag_views(text),
         delta=delta,
     )

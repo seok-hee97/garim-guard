@@ -44,12 +44,20 @@ class L1BusyError(RuntimeError):
     """A previous timed-out inference still owns the bounded L1 worker."""
 
 
+# 백엔드마다 "예산을 넘겨 버려졌지만 아직 도는" 추론 수. id(백엔드) 로 센다 — 버려진 워커가
+# 백엔드를 붙잡고 있으므로 수가 0 이 될 때까지 id 가 바뀌지 않는다.
+_ABANDONED: dict[int, int] = {}
+_ABANDONED_LOCK = threading.Lock()
+_MAX_ABANDONED_PER_BACKEND = 2
+
+
 def _call_with_deadline(
     func: Callable[[], _T],
     budget_seconds: float,
     *,
     gate: threading.Lock,
     on_timeout: Callable[[int | None], None] | None = None,
+    owner: object | None = None,
 ) -> _T:
     """`budget_seconds` 안에 결과를 못 받으면 포기한다 — §3.6.
 
@@ -70,10 +78,21 @@ def _call_with_deadline(
     gate 하나만 허용한다. 타임아웃 난 워커가 끝나기 전에는 다음 추론을 시작하지
     않아 공격자가 타임아웃 호출마다 새 백그라운드 추론을 쌓을 수 없다. ONNX
     백엔드는 `cancel_current()` 로 ORT RunOptions 종료도 함께 요청한다.
+
+    ★ 전수 검토(2026-10-28) — 프록시는 요청마다 Inspector(= 파이프라인 · gate)를 새로 만들고
+      백엔드만 공유한다. 그래서 gate 의 상한이 요청 하나 안에서만 걸렸고, 느린 플러그인
+      백엔드에 동시 요청 12개를 보내면 버려진 추론 12개가 살아 있었다. `owner`(백엔드)마다
+      버려진 추론을 세어 상한을 넘으면 새 추론을 시작하지 않는다(`l1_busy`).
     """
+    key = None if owner is None else id(owner)
+    if key is not None:
+        with _ABANDONED_LOCK:
+            if _ABANDONED.get(key, 0) >= _MAX_ABANDONED_PER_BACKEND:
+                raise L1BusyError("too many abandoned L1 inferences on this backend")
     if not gate.acquire(blocking=False):
         raise L1BusyError("previous L1 inference is still running")
     box: dict[str, object] = {}
+    state = {"done": False, "abandoned": False}
 
     def runner() -> None:
         try:
@@ -82,11 +101,24 @@ def _call_with_deadline(
             box["error"] = exc
         finally:
             gate.release()
+            with _ABANDONED_LOCK:
+                state["done"] = True
+                if state["abandoned"] and key is not None:
+                    remaining = _ABANDONED.get(key, 1) - 1
+                    if remaining > 0:
+                        _ABANDONED[key] = remaining
+                    else:
+                        _ABANDONED.pop(key, None)
 
     worker = threading.Thread(target=runner, daemon=True, name="garim-l1")
     worker.start()
     worker.join(budget_seconds)
     if worker.is_alive():
+        if key is not None:
+            with _ABANDONED_LOCK:
+                if not state["done"]:  # 막 끝났으면 버려진 것이 아니다
+                    state["abandoned"] = True
+                    _ABANDONED[key] = _ABANDONED.get(key, 0) + 1
         if on_timeout is not None:
             try:
                 # 워커 id 를 넘긴다 — 백엔드를 공유하는 다른 요청의 추론을 끊지 않는다.
@@ -140,6 +172,10 @@ def _code_identifier_spans(text: str, allowlist: list[str]) -> list[tuple[int, i
         r"(?![\w])(?=\s*(?::|=(?!=)))"
     )
     return [match.span("name") for match in pattern.finditer(text)]
+
+
+# 손실 스트림에서 이어 붙은 주민 · 외국인번호가 원문에서 공백 · 하이픈으로만 나뉘어 있었는가.
+_SPLIT_IDENTIFIER = re.compile(r"\d{6}[\s\-]{1,5}[1-8]\d{6}")
 
 
 def _evasion_codes(bundle: NormalizedBundle, stream: str) -> list[str]:
@@ -200,7 +236,7 @@ class DetectionPipeline:
         self,
         view: NormalizedView,
         *,
-        source_len: int,
+        source_text: str,
         origin: Origin,
         stream: str,
     ) -> list[Finding]:
@@ -215,17 +251,30 @@ class DetectionPipeline:
         )
         for pattern, compiled in self.policy.custom_patterns:
             for match in compiled.finditer(view.text):
-                local.append(Finding(pattern.code, match.span(), 0.9, "L0", pattern.name))
+                if match.start() < match.end():  # 길이 0 탐지는 마스킹을 멈춘다(스키마도 막는다)
+                    local.append(Finding(pattern.code, match.span(), 0.9, "L0", pattern.name))
 
         mapped: list[Finding] = []
+        source_len = len(source_text)
         for finding in local:
+            source_span = to_source_span(finding.span, view.interval_map, source_len)
             if stream in {"nospace", "detensified"}:
                 # 손실 스트림이다 — 체크섬 없이 형태만 맞은 식별자는 채택하지 않고,
                 # 나머지는 신뢰도를 깎는다(§2.3).
-                if finding.code in {"L-KR-01", "L-KR-02"} and finding.confidence < 1.0:
+                if finding.code == "L-KR-08":
+                    # ★ 공백을 지우면 날짜 · 시각 · 금액이 붙어 계좌 모양이 된다
+                    #   (`입금 확인: 2025 01 15 1200` → 12자리). 계좌는 원문 · 정규화
+                    #   스트림에서만 받는다(전수 검토).
                     continue
-                finding = replace(finding, confidence=finding.confidence * 0.8)
-            source_span = to_source_span(finding.span, view.interval_map, source_len)
+                split = _SPLIT_IDENTIFIER.fullmatch(source_text[source_span[0] : source_span[1]])
+                if finding.code in {"L-KR-01", "L-KR-02"} and finding.confidence < 1.0:
+                    if not split:
+                        continue
+                    # ★ 앵커가 있는 주민 · 외국인번호를 줄바꿈 · 띄어쓰기로 나누면(`주민번호
+                    #   900101\n1234569`) 이 스트림만 보는데, 여기서 버려 통째로 나갔다(전수 검토).
+                    #   2020년 10월 이후 번호는 체크섬이 없어 앵커가 유일한 길이다.
+                else:
+                    finding = replace(finding, confidence=finding.confidence * 0.8)
             mapped.append(
                 replace(
                     finding,
@@ -316,22 +365,22 @@ class DetectionPipeline:
         all_l0: list[Finding] = []
         if use_l0:
             raw_findings = self._scan_view(
-                bundle.raw, source_len=len(text), origin=origin, stream="raw"
+                bundle.raw, source_text=text, origin=origin, stream="raw"
             )
             all_l0.extend(raw_findings)
             all_l0.extend(
-                self._scan_view(bundle.norm, source_len=len(text), origin=origin, stream="norm")
+                self._scan_view(bundle.norm, source_text=text, origin=origin, stream="norm")
             )
             all_l0.extend(
                 self._scan_view(
-                    bundle.nospace, source_len=len(text), origin=origin, stream="nospace"
+                    bundle.nospace, source_text=text, origin=origin, stream="nospace"
                 )
             )
             if bundle.detensified.text != bundle.norm.text:
                 all_l0.extend(
                     self._scan_view(
                         bundle.detensified,
-                        source_len=len(text),
+                        source_text=text,
                         origin=origin,
                         stream="detensified",
                     )
@@ -340,7 +389,7 @@ class DetectionPipeline:
                 all_l0.extend(
                     self._scan_view(
                         decoded,
-                        source_len=len(text),
+                        source_text=text,
                         origin=origin,
                         stream=decoded.name,
                     )
@@ -372,6 +421,7 @@ class DetectionPipeline:
                     budget,
                     gate=self._l1_gate,
                     on_timeout=self._cancel_l1,
+                    owner=self.l1_backend,
                 )
             except TimeoutError:
                 # ★ §3.6 — 예산 초과면 L0 결과를 채택하고 degraded 로 알린다.
