@@ -51,7 +51,9 @@
 R1 기준선([RESULTS_L1_R2 §0](https://github.com/seok-hee97/garim-guard/blob/main/docs/RESULTS_L1_R2.md)). 지연 · 메모리만 원래 INT8 파일로 잰 값이다. 첫 측정
 ([RESULTS_L1 §0](https://github.com/seok-hee97/garim-guard/blob/main/docs/RESULTS_L1.md))과는 PII 행이 소수 셋째 자리 · 1행 다르다.
 공개 뒤 검토(2026-10-28)에서 L0 규칙을 더 고쳤다 — 유선전화 · 점 구분 휴대폰 · 차세대 여권 · 개인키 머리 · 키 접두,
-보이지 않는 문자 제거, 이메일 경계. 표의 수치는 그 **전** 측정이고 다시 재지 않았다.
+보이지 않는 문자 제거, 이메일 경계. 표의 수치는 그 **전** 측정이다. L0 만 다시 재 보니 KDPII L0 재현율이
+0.374 → 0.528(정밀도 0.944 → 0.960, 유선전화 · 이메일), 음성 셋 L0 오탐 0행 그대로, 공격 · 시크릿 축은 변화가
+없었다([RESULTS §8](https://github.com/seok-hee97/garim-guard/blob/main/docs/RESULTS.md)). L1 을 포함한 표는 다시 재지 않았다.
 
 - **교사 대비** — 같은 600 표본에서 L1 0.327 / 0.003, kanana-safeguard 0.630 / 0.017, Gemma 4 L2 단독
   0.633 / 0.017, Gemma 4 L2 + 스트림 분리 0.810 / 0.057. L1 은 교사의 절반 수준이고, 정확도가 필요하면
