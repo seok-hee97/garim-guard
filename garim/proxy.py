@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import urllib.error
 import urllib.request
@@ -85,6 +86,9 @@ class ProxyConfig:
             raise ValueError("streaming must be 'buffered' or 'refuse'")
         if self.mode not in {"interactive", "thorough"}:
             raise ValueError("mode must be 'interactive' or 'thorough'")
+        if not (math.isfinite(self.timeout_seconds) and self.timeout_seconds > 0):
+            # ★ `-1` · `nan` 도 받고 떠서, 모든 요청이 상류 호출에서 실패했다.
+            raise ValueError("timeout_seconds must be a positive number")
 
 
 def _is_text_part(item: Any) -> bool:

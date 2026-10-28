@@ -76,7 +76,7 @@ garim scan ./prompts
 정책 예시(`config/policy.yaml`) · 평가 하네스(`bench/`) · 학습 코드 실행은 소스 저장소가 필요하다.
 
 종료 코드는 `0` allow · mask, `1` warn, `2` block, `3` degraded(일부 파일을 읽지 못한 scan 포함), `4` 실행 오류
-(정책 · 모델 로드 실패, 한 파일도 검사하지 못함)다 — `garim scan` 을 CI 게이트로 쓸 수 있다. 디렉터리 scan 은 숨은
+(잘못된 인자, 정책 · 모델 로드 실패, 한 파일도 검사하지 못함)다 — `garim scan` 을 CI 게이트로 쓸 수 있다. 디렉터리 scan 은 숨은
 디렉터리를 건너뛰되 `.env` 파일은 검사한다.
 
 ### L1 모델 붙이기

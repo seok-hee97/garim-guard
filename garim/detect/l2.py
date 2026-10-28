@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import re
 import urllib.error
 import urllib.request
@@ -160,6 +161,9 @@ class LocalChatL2Backend:
         _require_loopback(base_url)
         if not model:
             raise ValueError("L2 model name is required")
+        if not (math.isfinite(timeout_seconds) and timeout_seconds > 0):
+            # ★ `-1` · `nan` 이면 모든 호출이 실패해 매 요청이 degraded 가 됐다 — 시작하지 않는다.
+            raise ValueError("L2 timeout_seconds must be a positive number")
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.name = f"local-chat:{model}"

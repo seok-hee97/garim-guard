@@ -127,6 +127,51 @@ def test_invalid_custom_regex_fails_at_startup_with_exit_4(tmp_path: Path) -> No
     assert main(["--policy", str(policy), "check", "안녕하세요"]) == 4
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["check", "--typo", "안녕하세요"],
+        ["proxy"],
+        ["proxy", "--upstream", "http://127.0.0.1:9", "--port", "99999"],
+        ["proxy", "--upstream", "http://127.0.0.1:9", "--port=-1"],
+        ["--l2-timeout", "abc", "check", "안녕하세요"],
+    ],
+)
+def test_usage_errors_exit_4_not_block(argv: list[str]) -> None:
+    """★ argparse 기본 종료 코드 2 는 여기서 block 이고, 범위 밖 포트는 1(warn)로 끝났다."""
+    from garim.cli import main
+
+    with pytest.raises(SystemExit) as raised:
+        main(argv)
+    assert raised.value.code == 4
+
+
+@pytest.mark.parametrize("timeout", ["-1", "0", "nan"])
+def test_invalid_timeouts_fail_at_startup_with_exit_4(timeout: str) -> None:
+    """★ 받고 떠서 프록시는 모든 상류 호출이, L2 는 모든 판정이 실패했다."""
+    from garim.cli import main
+
+    proxy = ["proxy", "--upstream", "http://127.0.0.1:9", "--port", "0"]
+    assert main([*proxy, "--upstream-timeout", timeout]) == 4
+    l2 = ["--l2-endpoint", "http://127.0.0.1:9/v1", "--l2-timeout", timeout]
+    assert main([*l2, "--mode", "thorough", "check", "안녕하세요"]) == 4
+
+
+def test_version_flag_reports_the_installed_distribution(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import importlib.metadata
+
+    from garim.cli import main
+
+    with pytest.raises(SystemExit) as raised:
+        main(["--version"])
+    assert raised.value.code == 0
+    assert capsys.readouterr().out.strip() == (
+        f"garim-guard {importlib.metadata.version('garim-guard')}"
+    )
+
+
 def test_directory_scan_includes_dotenv_but_not_hidden_directories(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

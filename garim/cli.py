@@ -8,7 +8,9 @@ import os
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import NoReturn
 
+from garim._version import __version__
 from garim.api import Inspector
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
@@ -61,8 +63,23 @@ _MAX_SCAN_BYTES = 64 * 1024 * 1024
 _WINDOW_OVERLAP = 2_000
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        # ★ argparse 는 사용법 오류에 2 를 내는데 여기서 2 는 block 이다 — 실행 오류(4)로 낸다.
+        self.print_usage(sys.stderr)
+        self.exit(4, f"{self.prog}: error: {message}\n")
+
+
+def _port(value: str) -> int:
+    # ★ 범위 밖 포트는 bind() 의 OverflowError 트레이스백 · 종료 코드 1(warn)로 끝났다.
+    if not value.isdigit() or int(value) > 65535:
+        raise argparse.ArgumentTypeError(f"port must be 0-65535: {value!r}")
+    return int(value)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="garim", description="로컬 프롬프트 사전 검사기")
+    parser = _Parser(prog="garim", description="로컬 프롬프트 사전 검사기")
+    parser.add_argument("--version", action="version", version=f"garim-guard {__version__}")
     parser.add_argument("--policy", help="정책 YAML 경로")
     parser.add_argument("--mode", choices=("interactive", "thorough"), default="interactive")
     parser.add_argument(
@@ -109,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=60.0,
         help="상류 응답 대기(초). 사고(thinking) 모델은 60초를 넘기기도 한다",
     )
-    proxy.add_argument("--port", type=int, default=8080)
+    proxy.add_argument("--port", type=_port, default=8080)
     proxy.add_argument(
         "--refuse-streaming",
         action="store_const",
