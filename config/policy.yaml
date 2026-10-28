@@ -54,3 +54,10 @@ custom_patterns:
     name: employee_id
     regex: 'EMP-\d{6}'
     mode: mask
+
+# 프록시 첨부(내장 기본값과 같다). `unmaskable` — 문서(PDF · DOCX · XLSX · PPTX · HWPX)에서 꺼낸 글에
+# 가려야 할 값이 나왔을 때 block | warn. `uninspected` — 글을 꺼내지 못한 첨부(이미지 등)에
+# allow | warn | block.
+attachments:
+  unmaskable: block
+  uninspected: allow

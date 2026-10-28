@@ -40,6 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from garim.api import Inspector
+from garim.attachments import Extraction, extract_document
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
 from garim.models import CheckResult, Origin, Segment
@@ -257,8 +258,12 @@ def _decoded_text(raw: bytes) -> tuple[str, str] | None:
     return None
 
 
-def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedText:
-    """`"plain"`(문자열로 검사) · `"binary"`(건너뜀) · `_EncodedText`(푼 글을 검사)."""
+def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedText | Extraction:
+    """`"plain"`(문자열로 검사) · `"binary"`(글을 꺼내지 못한 이진) · `_EncodedText`(푼 글을 검사해
+    가린다) · `Extraction`(문서에서 꺼낸 글 — 탐지에만 쓴다).
+
+    문서를 텍스트보다 먼저 본다 — ASCII 로만 된 PDF 를 텍스트로 보고 다시 인코딩하면 파일이 깨진다.
+    """
     match = _DATA_URL.fullmatch(value)
     if match is not None:
         prefix, body = match.group("prefix"), match.group("body")
@@ -278,10 +283,13 @@ def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedTe
         return "plain"
     if not raw:
         return "plain"
+    document = extract_document(raw)
+    if document is not None:
+        return document
     decoded = _decoded_text(raw)
     if decoded is not None:
         return _EncodedText(value, prefix, decoded[0], decoded[1], urlsafe)
-    return "plain" if len(value) <= _SHORT_PAYLOAD else "binary"
+    return "binary"
 
 
 # 메시지의 프로토콜 키 — 이 키 이름은 검사하지 않는다.
@@ -401,9 +409,25 @@ def _working_copy(payload: dict[str, Any]) -> dict[str, Any]:
     return working
 
 
-def _prepare_part(part: Any) -> Any:
-    """내용 파트의 첨부를 검사할 꼴로 바꾼다. 텍스트 첨부는 제자리에서 `_EncodedText` 가 되고,
-    돌려주는 보기에서는 이진 본문만 빠진다. 경로는 원래 파트와 같다."""
+@dataclass(frozen=True, slots=True)
+class _Attachment:
+    """가리지 못하는 첨부 — 문서(꺼낸 글이 `text`)이거나 글을 꺼내지 못한 것(`text` 가 None)."""
+
+    message: int
+    origin: Origin
+    kind: str
+    text: str | None
+    reason: str | None = None
+
+
+def _prepare_part(part: Any, attachments: list[_Attachment], message: int, origin: Origin) -> Any:
+    """내용 파트의 첨부를 검사할 꼴로 바꾼다. 경로는 원래 파트와 같다.
+
+    - 텍스트 첨부는 제자리에서 `_EncodedText` 가 되어 다른 값처럼 가린다.
+    - 문서는 꺼낸 글을 `attachments` 에 담고, 보기에서 본문을 뺀다 — 탐지만 하고 가리지 않는다.
+    - 글을 꺼내지 못한 이진은 `attachments` 에 담는다. 짧은 값은 보기에 남겨 원문도 검사한다
+      (base64 글자만으로 된 평문이 이진처럼 보일 수 있다). 원격 이미지 주소도 내용은 못 본다.
+    """
     if not isinstance(part, dict):
         return part
     view = dict(part)
@@ -415,8 +439,15 @@ def _prepare_part(part: Any) -> Any:
         kind = _classify_payload(value, require_data_url=inner == "url")
         if isinstance(kind, _EncodedText):
             holder[inner] = kind
-        elif kind == "binary":
+        elif isinstance(kind, Extraction):
+            attachments.append(_Attachment(message, origin, kind.kind, kind.text, kind.reason))
             view[outer] = {k: v for k, v in holder.items() if k != inner}
+        elif kind == "binary":
+            attachments.append(_Attachment(message, origin, outer, None, "binary"))
+            if len(value) > _SHORT_PAYLOAD:
+                view[outer] = {k: v for k, v in holder.items() if k != inner}
+        elif outer == "image_url" and value.startswith(("http://", "https://")):
+            attachments.append(_Attachment(message, origin, "image_url", None, "remote"))
     return view
 
 
@@ -441,7 +472,9 @@ def _collect(node: Any, path: tuple[Any, ...], origin: Origin, out: list[_Leaf])
             _collect(value, (*path, index), origin, out)
 
 
-def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
+def _field_leaves(
+    working: dict[str, Any], attachments: list[_Attachment] | None = None
+) -> list[_Leaf]:
     """본문(`content` 의 텍스트) 밖에서 상류로 가는 문자열을 전부 모은다.
 
     ★ **원문 유출이 있었다.** 초판은 `content` 만 읽었고, 다음에 도구 인자를 더했지만
@@ -476,7 +509,10 @@ def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
                 for part_index, part in enumerate(value):
                     if _is_text_part(part):
                         part = {k: v for k, v in part.items() if k != "text"}
-                    _collect(_prepare_part(part), (*path, part_index), origin, leaves)
+                    prepared = _prepare_part(
+                        part, attachments if attachments is not None else [], index, origin
+                    )
+                    _collect(prepared, (*path, part_index), origin, leaves)
             elif key == "tool_calls" and isinstance(value, list):
                 for call_index, call in enumerate(value):
                     call_id = call.get("id") if isinstance(call, dict) else None
@@ -563,7 +599,9 @@ def _leaf_message(group: list[_Leaf], offset: int) -> int | None:
     return None
 
 
-def _blocked_body(results: list[tuple[CheckResult, Any]], verdict: str) -> dict[str, Any]:
+def _blocked_body(
+    results: list[tuple[CheckResult, Any]], verdict: str, extra_reasons: set[str] = frozenset()
+) -> dict[str, Any]:
     """`results` 는 (검사 결과, 세그먼트 · 오프셋 → (메시지 세그먼트 번호, 메시지 번호)) 쌍이다.
 
     필드 묶음의 세그먼트 번호는 메시지 번호와 겹치므로 내보내지 않는다(null).
@@ -576,6 +614,7 @@ def _blocked_body(results: list[tuple[CheckResult, Any]], verdict: str) -> dict[
             "degraded": any(result.degraded for result, _ in results),
             "degraded_reasons": sorted(
                 {reason for result, _ in results for reason in result.degraded_reasons}
+                | set(extra_reasons)
             ),
             "findings": [
                 {
@@ -672,9 +711,10 @@ class ProxyService:
 
         messages = payload.get("messages")
         segments = segments_from_messages(messages)
+        attachments: list[_Attachment] = []
         try:
             working = _working_copy(payload)
-            groups = _field_groups(_field_leaves(working))
+            groups = _field_groups(_field_leaves(working, attachments))
         except RecursionError as exc:
             raise ProxyError(400, "request is nested too deeply") from exc
         inspector = self._inspector_factory()
@@ -706,9 +746,36 @@ class ProxyService:
             checked.append(
                 (fields, lambda segment, offset: (None, _leaf_message(groups[segment][1], offset)))
             )
-        verdict = max((item.verdict for item, _ in checked), key=SEVERITY.__getitem__)
+        verdicts = [item.verdict for item, _ in checked]
+        extra_reasons: set[str] = set()
+        # 첨부 — 문서는 꺼낸 글을 따로 검사하고(가릴 수는 없다), 글을 못 꺼낸 첨부는 정책을 따른다.
+        attachment_policy = inspector.policy.config.attachments
+        documents = [item for item in attachments if item.text]
+        if documents:
+            documents_result = inspector.check(
+                [Segment(item.text or "", origin=item.origin) for item in documents],
+                mode=self.config.mode,
+            )
+            checked.append(
+                (
+                    documents_result,
+                    lambda segment, offset: (None, documents[segment].message),
+                )
+            )
+            document_verdict = documents_result.verdict
+            if document_verdict == "mask":
+                document_verdict = attachment_policy.unmaskable
+                extra_reasons.add("attachment_unmaskable")
+            verdicts.append(document_verdict)
+        uninspected = [item for item in attachments if item.text is None]
+        if uninspected and attachment_policy.uninspected != "allow":
+            verdicts.append(attachment_policy.uninspected)
+            extra_reasons.add("attachment_not_inspected")
+        verdict = max(verdicts, key=SEVERITY.__getitem__)
         degraded = any(item.degraded for item, _ in checked)
-        reasons = sorted({reason for item, _ in checked for reason in item.degraded_reasons})
+        reasons = sorted(
+            {reason for item, _ in checked for reason in item.degraded_reasons} | extra_reasons
+        )
         response_headers = {
             "X-Garim-Verdict": verdict,
             "X-Garim-Degraded": "true" if degraded else "false",
@@ -717,7 +784,7 @@ class ProxyService:
             response_headers["X-Garim-Degraded-Reasons"] = ",".join(reasons)
 
         if verdict == "block":
-            return 400, _blocked_body(checked, verdict), response_headers
+            return 400, _blocked_body(checked, verdict, extra_reasons), response_headers
 
         outbound = working
         if fields is not None and fields.masked_segments is not None:

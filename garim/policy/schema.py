@@ -155,6 +155,21 @@ class OriginPolicy(BaseModel):
     system_secret_threshold_delta: float = -0.10
 
 
+class AttachmentPolicy(BaseModel):
+    """프록시가 받은 첨부(이미지 · 오디오 · 파일)를 어떻게 다룰지.
+
+    - `unmaskable` — 문서 첨부(PDF · DOCX · XLSX · PPTX · HWPX)에서 꺼낸 글에 가려야 할 값이
+      나왔을 때.
+      문서 안은 가릴 수 없으므로 막거나(`block`) 경고하고 그대로 보낸다(`warn`).
+    - `uninspected` — 글을 꺼내지 못한 첨부(이미지 · 레거시 HWP/DOC · 암호 걸린 PDF · `[docs]` 없이
+      받은 PDF). `allow` 는 지금처럼 보내고, `warn` 은 경고와 함께 보내고, `block` 은 막는다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    unmaskable: Literal["block", "warn"] = "block"
+    uninspected: Literal["allow", "warn", "block"] = "allow"
+
+
 class PolicyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1
@@ -166,6 +181,7 @@ class PolicyConfig(BaseModel):
     limits: Limits = Field(default_factory=Limits)
     origin_policy: OriginPolicy = Field(default_factory=OriginPolicy)
     custom_patterns: list[CustomPattern] = Field(default_factory=list)
+    attachments: AttachmentPolicy = Field(default_factory=AttachmentPolicy)
 
 
 # 패키지에 들어 있는 내장 프로필 — pip 설치에는 저장소의 `config/` 가 없다.

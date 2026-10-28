@@ -72,6 +72,7 @@ L0 만 다시 잰 값은 다음과 같다. 음성 셋 L0 오탐은 0행 그대�
 
 ```bash
 pip install 'garim-guard[l1]'           # Python 3.11 ~ 3.14(Intel Mac 은 3.13 까지 — onnxruntime 휠). L0 만: pip install garim-guard
+pip install 'garim-guard[l1,docs]'      # PDF 첨부 · 파일도 검사하려면 docs 를 더한다
 garim check '연락처는 010-1234-5678 입니다'          # → mask: 연락처는 <PHONE_1> 입니다
 printf '검사할 프롬프트' | garim check --json
 garim scan ./prompts
@@ -88,7 +89,8 @@ garim scan ./prompts
 - `3` degraded — 일부 파일이나 디렉터리를 읽지 못한 scan 포함
 - `4` 실행 오류 — 잘못된 인자, 정책 · 모델 로드 실패, 한 파일도 검사하지 못함
 
-디렉터리 scan 은 숨은 디렉터리를 건너뛰되 `.env` 파일은 검사한다. 형식 필터로 뺀 파일 수는 알린다. 탐지 목록만
+디렉터리 scan 은 숨은 디렉터리를 건너뛰되 `.env` 파일은 검사한다. PDF · DOCX · XLSX · PPTX · HWPX 는 글을 꺼내
+검사하고, 꺼내지 못하면 검사하지 못한 파일(3)로 알린다. 형식 필터로 뺀 파일 수는 알린다. 탐지 목록만
 출력하고, 파일의 마스킹본은 `--show-masked` 를 줄 때만 출력한다. warn 탐지와 놓친 값은 마스킹본에 원문 그대로라
 CI 로그에 남기 때문이다.
 
@@ -140,9 +142,14 @@ macOS 의 python.org 빌드에서 L0 만 설치(`pip install garim-guard`)했다
   - 도구 인자, 도구 결과, `tools` 설명, `prediction`, `user`, 메시지 `name`, 파일 이름, URL, 값 안의 JSON 키
     등이다. JSON 의 `\uXXXX` 이스케이프(겹친 것 포함)는 정규화가 풀어 읽고, 마스킹은 원문 자리에서 해서
     JSON 모양이 그대로 남는다.
-  - 빼는 것은 셋이다. 모양이 맞는 모델 설정 값, 모양이 맞는 대화 ID(`tool_call_id` 등), 그리고 이진 본문이다.
-    첨부는 base64 로 풀어 본다. 텍스트로 읽히면(UTF-8 · CP949 · UTF-16) 푼 글을 검사하고, 가렸으면 다시
-    인코딩해 보낸다. 텍스트로 읽히지 않는 이진(이미지 · 오디오 · PDF 등)은 검사하지 않는다.
+  - 빼는 것은 모양이 맞는 모델 설정 값과 모양이 맞는 대화 ID(`tool_call_id` 등)다.
+  - 첨부는 base64 로 풀어 본다.
+    - 텍스트(UTF-8 · CP949 · UTF-16)면 푼 글을 검사하고, 가렸으면 다시 인코딩해 보낸다.
+    - 문서(PDF · DOCX · XLSX · PPTX · HWPX)면 글을 꺼내 검사한다. 문서 안은 가릴 수 없으므로, 가려야 할
+      값이 나오면 정책 `attachments.unmaskable`(기본 `block`)을 따른다. PDF 는 `garim-guard[docs]` 가 있을
+      때만 읽는다.
+    - 글을 꺼내지 못한 첨부(이미지 · 오디오 · 레거시 HWP/DOC · 암호 걸린 PDF)는 정책
+      `attachments.uninspected`(기본 `allow`, 엄격 프로필 `warn`)를 따른다. 이미지 안의 글자(OCR)는 읽지 않는다.
   - 도구 인자 · 설정 필드의 숫자 값은 검사하지 않는다. 타임스탬프 · ID 가 체크섬에 우연히 맞아 차단되기
     때문이다.
   - 응답에서는 `content` · `refusal` · 추론 본문 · 도구 인자의 토큰을 원문으로 복원한다.
@@ -220,7 +227,8 @@ GARIM_NAME_LIST=names.txt garim --l1-backend examples/backends/l1_name_list.py:b
   표기 · `본 문서는 대외비입니다` 를 잡는다. 문장 속 언급(`대외비 처리 절차가 궁금합니다`)은 일부러 잡지 않는다
   (위치 가중치, DESIGN §2.5).
 - L0 공격 규칙은 흔한 문구(이전 지시 무시 · 시스템 프롬프트 요구 · 탈옥 표지)만 잡는다. 공격 탐지는 L1 · L2 몫이다.
-- 프록시는 이미지 · 오디오 · PDF 같은 이진 첨부 안과, 도구 인자 · 설정 필드의 숫자 값은 검사하지 않는다.
+- 프록시는 이미지 안의 글자(OCR) · 오디오 · 레거시 HWP/DOC 첨부와, 도구 인자 · 설정 필드의 숫자 값은 검사하지
+  않는다. 검사하지 못한 첨부는 정책 `attachments.uninspected` 로 막거나 경고할 수 있다.
 - 영어 텍스트의 문맥 개체는 거의 못 본다(TAB DIRECT 0.036).
 - 노트북 CPU 지연은 아직 재지 않았다.
 

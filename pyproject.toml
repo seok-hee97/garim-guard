@@ -34,6 +34,8 @@ dependencies = [
 
 [project.optional-dependencies]
 l1 = ["numpy>=1.26,<3", "onnxruntime>=1.18,<2", "transformers>=5.5,<6"]
+# 프록시 · scan 이 PDF 첨부에서 글을 꺼낸다(DOCX · XLSX · PPTX · HWPX 는 표준 라이브러리로 읽는다).
+docs = ["pypdf>=6,<7"]
 train = [
   "accelerate>=1.10,<2",
   # macOS 의 python.org 빌드는 시스템 루트 인증서를 안 쓴다. 라이선스 게이트 셋이
@@ -62,7 +64,7 @@ train = [
   "torch>=2.6,<3",
   "transformers>=5.5,<6",
 ]
-dev = ["pytest>=8,<9", "ruff>=0.6,<1"]
+dev = ["pytest>=8,<9", "ruff>=0.6,<1", "pypdf>=6,<7"]
 bench = [
   # macOS 의 python.org 빌드는 시스템 루트 인증서를 안 쓴다. §8.1-13b 하네스가 API 키를
   # 들고 나가므로 TLS 검증을 끄는 대신 인증서 번들을 명시적으로 들고 간다.

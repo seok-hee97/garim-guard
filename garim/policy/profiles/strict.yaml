@@ -74,3 +74,9 @@ custom_patterns:
     name: employee_id
     regex: 'EMP-\d{6}'
     mode: mask
+
+# 프록시 첨부 — 문서 안에서 가려야 할 값이 나오면 막는다(문서는 가릴 수 없다). 글을 꺼내지 못한
+# 첨부(이미지 등)는 경고와 함께 보낸다 — 막으려면 `uninspected: block`.
+attachments:
+  unmaskable: block
+  uninspected: warn

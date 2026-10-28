@@ -12,6 +12,7 @@ from typing import NoReturn
 
 from garim._version import __version__
 from garim.api import Inspector
+from garim.attachments import DOCUMENT_SUFFIXES, extract_document
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
 from garim.models import CheckResult
@@ -212,7 +213,8 @@ def _is_scan_target(relative: Path) -> bool:
     if name == ".env" or name.startswith(".env."):
         # ★ 숨은 파일 필터가 `.env` 를 늘 건너뛰었다 — 시크릿이 가장 많은 파일이다.
         return True
-    return not name.startswith(".") and Path(name).suffix.lower() in _TEXT_SUFFIXES
+    suffix = Path(name).suffix.lower()
+    return not name.startswith(".") and (suffix in _TEXT_SUFFIXES or suffix in DOCUMENT_SUFFIXES)
 
 
 def _iter_files(path: Path) -> tuple[list[Path], list[str], int]:
@@ -419,7 +421,16 @@ def main(argv: list[str] | None = None) -> int:
                 if path.stat().st_size > _MAX_SCAN_BYTES:
                     skipped.append(f"{path}: larger than {_MAX_SCAN_BYTES // (1024 * 1024)}MB")
                     continue
-                source = path.read_text(encoding="utf-8")
+                if path.suffix.lower() in DOCUMENT_SUFFIXES:
+                    # 문서는 글을 꺼내 검사한다 — 꺼내지 못하면 검사하지 못한 파일이다.
+                    extraction = extract_document(path.read_bytes())
+                    if extraction is None or extraction.text is None:
+                        reason = extraction.reason if extraction is not None else "not a document"
+                        skipped.append(f"{path}: {reason}")
+                        continue
+                    source = extraction.text
+                else:
+                    source = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 # ★ 조용히 넘기면 안 된다. 읽지 못한 파일은 **검사되지 않은 파일**이고,
                 #   CI 게이트가 `garim scan` 종료 코드를 보고 있으면 그대로 fail-open 이
