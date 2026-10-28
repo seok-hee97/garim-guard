@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib.metadata
+
+import garim
 from garim import Inspector, Segment
 
 
@@ -417,3 +420,11 @@ def test_email_lists_and_sentence_punctuation_mask_each_address_exactly() -> Non
         assert Inspector().check(text).masked_text == expected, text
     # 식별자처럼 이어지는 것은 여전히 주소가 아니다.
     assert Inspector().check("user@host.name_x").masked_text is None
+
+
+def test_reported_version_is_the_installed_distribution_version() -> None:
+    """★ PyPI 0.1.1 이 `garim.__version__` · 탐지의 `rule_version` 으로 `0.1.0` 을 보고했다."""
+    installed = importlib.metadata.version("garim-guard")
+    assert garim.__version__ == installed
+    leak = Inspector().check("메일 kim@example.com").leaks[0]
+    assert leak.public_dict()["rule_version"] == installed

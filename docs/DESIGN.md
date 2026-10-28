@@ -659,7 +659,7 @@ class Finding:
     evasion: list[str]     # ["A-KO-01", ...] — 은닉 코드 (§2.2.4)
     normalized_only: bool  # 정규화본에서만 발견 = 은닉 시도
     decoded_from: tuple[int, int] | None  # base64 덩어리 스팬 (§3.2.4 예외)
-    rule_version: str      # 규칙셋 버전 — 회귀 추적용
+    rule_version: str      # 규칙셋 버전 — 회귀 추적용(= 배포 버전, pyproject.toml)
 
 @dataclass
 class CheckResult:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from garim._version import __version__
+
 if TYPE_CHECKING:
     from garim.mask.vault import Vault
 
@@ -37,7 +39,8 @@ class Finding:
     evasion: list[str] = field(default_factory=list)
     normalized_only: bool = False
     decoded_from: tuple[int, int] | None = None
-    rule_version: str = "0.1.0"
+    # 규칙은 패키지와 함께 배포된다 — 규칙셋 버전 = 배포 버전.
+    rule_version: str = __version__
     stream: str = field(default="raw", repr=False, compare=False)
 
     @property
