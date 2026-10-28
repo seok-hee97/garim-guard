@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -180,3 +181,17 @@ def test_unlabeled_pii_utterances_still_may_not_repeat(
             training_manifest_path=training_manifest,
             provenance_files={"labeling_guide": guide},
         )
+
+
+def test_evaluation_seal_is_bound_to_the_training_manifest_in_use(
+    tmp_path: Path, in_directory: None
+) -> None:
+    """★ 전수 검토 — 다른 학습 manifest 로 학습을 시작해도 평가 봉인 게이트를 통과했다."""
+    os.chdir(tmp_path)
+    evaluation, seal = _seal_evaluation(Path("."))
+    sealed_against = json.loads(seal.read_text(encoding="utf-8"))["training_manifest"]["path"]
+    verify_evaluation_input_manifest(seal, training_manifest_path=sealed_against)
+    other = Path("other-training-manifest.json")
+    other.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="different training manifest"):
+        verify_evaluation_input_manifest(seal, training_manifest_path=other)

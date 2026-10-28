@@ -12,7 +12,15 @@ import sys
 from datetime import date
 from pathlib import Path
 
-PATTERN = re.compile(r"(?<!\d)\d{6}[- ]?[1-4]\d{6}(?!\d)")
+# ★ 구분자가 `-` · 공백 하나뿐이라 합성기 자신의 `linebreak`(`-\n`) · 대시류 변이를 놓쳤다.
+#   JSONL 에서는 줄바꿈이 두 글자 `\n` 으로 저장된다 — 그 이스케이프도 구분자로 본다.
+PATTERN = re.compile(
+    r"(?<!\d)\d{6}(?:[\s\-\u2010-\u2015\u2212\uff0d.]|\\[nrt]){0,3}[1-4]\d{6}(?!\d)"
+)
+# 합성기의 `spoken` 표기(`구공공일공일 일이삼사오육칠`) — 숫자로 되돌려 같은 검증을 건다.
+_SPOKEN_DIGITS = {"공": "0", "영": "0", "일": "1", "이": "2", "삼": "3", "사": "4",
+                  "오": "5", "육": "6", "칠": "7", "팔": "8", "구": "9"}
+SPOKEN = re.compile(r"[공영일이삼사오육칠팔구]{6}\s{0,3}[일이삼사][공영일이삼사오육칠팔구]{6}")
 
 
 def resident_candidate_valid(value: str) -> bool:
@@ -35,6 +43,16 @@ def resident_candidate_valid(value: str) -> bool:
     return (11 - total % 11) % 10 == int(digits[-1])
 
 
+def resident_candidates(text: str) -> list[int]:
+    """체크섬 · 생년월일이 맞는 주민등록번호 후보의 시작 위치. 값은 돌려주지 않는다."""
+    starts = [m.start() for m in PATTERN.finditer(text) if resident_candidate_valid(m.group(0))]
+    for match in SPOKEN.finditer(text):
+        digits = "".join(_SPOKEN_DIGITS.get(character, "") for character in match.group(0))
+        if resident_candidate_valid(digits):
+            starts.append(match.start())
+    return sorted(starts)
+
+
 def visible_files(root: Path) -> list[Path]:
     output = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -52,9 +70,8 @@ def scan(root: Path) -> list[tuple[Path, int]]:
             body = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        for match in PATTERN.finditer(body):
-            if resident_candidate_valid(match.group(0)):
-                hits.append((path.relative_to(root), body.count("\n", 0, match.start()) + 1))
+        for start in resident_candidates(body):
+            hits.append((path.relative_to(root), body.count("\n", 0, start) + 1))
     return hits
 
 

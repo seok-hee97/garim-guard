@@ -15,9 +15,13 @@ README 가 "deepset train/test 를 별도로 번역" 하라고만 적고 방법�
 - 공개 데이터(CC-BY-4.0)만 보낸다. 검사 경로가 아니라 학습 데이터 준비 단계다 —
   §1 의 "외부 통신 0" 은 검사기에 대한 주장이다.
 
-    python train/translate_with_gemini.py \\
+    python train/translate_with_gemini.py --execute \\
       --queue data/corpus/deepset_train_queue-train.jsonl \\
       --output data/local/deepset-train-ko.jsonl
+
+★ 처음엔 `--execute` 없이 바로 보냈고 입력을 보지 않았다 — 큐 자리에 합성 PII 코퍼스를 넘기면
+  체크섬 유효 주민번호가 Google 로 나갔다(전수 검토 2026-10-28). 이제 `--execute` 가 있어야 보내고,
+  체크섬 유효 주민번호 후보가 든 행이 하나라도 있으면 아무것도 보내지 않는다.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from garim.tls import https_context  # noqa: E402
+from tools.no_committed_pii import resident_candidates  # noqa: E402
 
 PROMPT_VERSION = "deepset-ko-v1"
 INSTRUCTIONS = """너는 프롬프트 인젝션 탐지 벤치마크를 한국어로 옮기는 번역가다.
@@ -154,6 +159,7 @@ def main() -> int:
     parser.add_argument("--model", default="gemini-3.5-flash")
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--env", default=".env")
+    parser.add_argument("--execute", action="store_true", help="실제로 Gemini 를 부른다")
     parser.add_argument(
         "--no-row-retry",
         action="store_true",
@@ -184,6 +190,16 @@ def main() -> int:
     pending = [row for row in queue if row["id"] not in done]
     method = f"gemini:{args.model}:{PROMPT_VERSION}"
     print(f"{len(queue)} rows, {len(done)} already translated, {len(pending)} to go")
+    flagged = [row["id"] for row in pending if resident_candidates(str(row.get("text", "")))]
+    if flagged:
+        print(
+            f"체크섬 유효 주민번호 후보가 든 행 {len(flagged)}개 — 보내지 않는다(예: {flagged[0]})",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.execute:
+        print("--execute 없이는 보내지 않는다")
+        return 0
 
     failed: list[str] = []
     with output.open("a", encoding="utf-8") as stream:

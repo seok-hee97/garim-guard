@@ -105,14 +105,19 @@ def main() -> int:
     print(f"OK: 검사 {checked}회, 소켓 생성 0회 (socket/create_connection/getaddrinfo 봉인)")
 
     # 경계 확인 — 프록시의 전송은 봉인 밖 코드다. 봉인 안에서 부르면 반드시 실패해야 한다.
-    from garim.proxy import ProxyConfig, ProxyService
+    from garim.proxy import ProxyConfig, ProxyError, ProxyService
 
     service = ProxyService(ProxyConfig(upstream_base_url="https://upstream.invalid/v1"))
     request = {"model": "x", "messages": [{"role": "user", "content": "안녕하세요"}]}
-    with sealed_network():
+    with sealed_network() as proxy_attempts:
         try:
             service.handle_chat_completions(request, {})
-        except Exception as exc:  # ProxyError(502) 또는 ExternalCallDetected
+        except (ExternalCallDetected, ProxyError) as exc:
+            # ★ 처음엔 `except Exception` 이라 API 가 바뀌어 난 TypeError 도 "봉인에 걸렸다"
+            #   가 됐다. 봉인이 실제로 소켓 시도를 기록했을 때만 경계가 갈린 것이다.
+            if not proxy_attempts:
+                print(f"FAIL — 프록시가 소켓을 시도하기 전에 실패했다({type(exc).__name__})")
+                return 1
             print(f"OK: 프록시 전송은 봉인에 걸린다 ({type(exc).__name__}) — 경계가 갈린다")
         else:
             print("FAIL — 프록시가 봉인 안에서 상류에 도달했다")

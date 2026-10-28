@@ -7,7 +7,7 @@
 없었다. §8.1-15c 가 이 스크립트를 요구한 이유다.
 
     python train/license_check.py            # 활성 모델·소스 전부
-    python train/license_check.py --include-disabled --include-baselines
+    python train/license_check.py --include-disabled
 
 네트워크가 필요하므로 CI 기본 잡에 넣지 않는다. 게이트가 실패하면 종료 코드 1 이다.
 """

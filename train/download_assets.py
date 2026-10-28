@@ -32,7 +32,8 @@ def main() -> int:
     parser.add_argument(
         "--record-existing",
         action="store_true",
-        help="verify cached pinned revisions and refresh the manifest without network access",
+        help="verify cached pinned revisions and refresh the manifest without downloading "
+        "(revision and license metadata are still queried from the Hugging Face API)",
     )
     args = parser.parse_args()
 

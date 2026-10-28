@@ -278,7 +278,7 @@ def main() -> int:
     # The final test corpus must be frozen before optimizer creation.  Otherwise a
     # disappointing result can be followed by an unnoticed test-set edit.
     report["sealed_evaluation_contract"] = verify_evaluation_input_manifest(
-        args.evaluation_manifest
+        args.evaluation_manifest, training_manifest_path=args.input_manifest
     )
     encoder_dir = Path(args.encoder_dir)
     if not encoder_dir.is_dir():

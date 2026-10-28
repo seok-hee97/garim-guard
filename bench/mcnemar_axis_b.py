@@ -29,6 +29,11 @@ def exact_mcnemar(only_baseline: int, only_candidate: int) -> float:
     return min(1.0, 2 * tail)
 
 
+def _coverage(path: Path) -> tuple[Any, Any, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload.get("rows"), payload.get("sampled"), payload.get("seed")
+
+
 def _flagged(path: Path, judge: str | None) -> tuple[str, set[str]]:
     reports = json.loads(path.read_text(encoding="utf-8"))["reports"]
     if judge is not None:
@@ -69,6 +74,12 @@ def main() -> int:
     rows = load_benchmark(args.benchmark)
     baseline_name, baseline = _flagged(Path(args.baseline), args.judge)
     candidate_name, candidate = _flagged(Path(args.candidate), args.judge)
+    # ★ 전수 검토 — 전수 실행과 600 표본 실행을 비교하면 표본 밖 행이 전부 불일치로 세어졌다
+    #   (같은 판정자끼리 p=7e-71). 두 산출물이 같은 행을 쟀을 때만 비교한다.
+    if _coverage(Path(args.baseline)) != _coverage(Path(args.candidate)):
+        raise SystemExit(
+            "두 산출물의 rows · sampled · seed 가 다르다 — 같은 행을 잰 산출물끼리만 비교한다"
+        )
     known = {row.id for row in rows}
     if not (baseline | candidate) <= known:
         raise SystemExit("flagged_ids 에 벤치마크에 없는 id 가 있다 — 다른 셋의 산출물이다")

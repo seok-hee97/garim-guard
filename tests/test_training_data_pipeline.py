@@ -205,6 +205,42 @@ def test_joint_encoder_uses_normalized_offsets_and_masks_missing_task() -> None:
     ]
 
 
+def test_an_entity_cut_by_a_window_edge_is_ignored_not_taught_as_o() -> None:
+    """★ 전수 검토 — 창 경계에 걸린 개체의 창 안 토큰이 `O` 로 학습됐다."""
+
+    class WindowTokenizer:
+        def __call__(self, text, **kwargs):  # noqa: ANN001
+            del kwargs
+            windows = [(0, 6), (4, len(text))]  # 개체 3..7 이 첫 창 끝에 걸린다
+            return {
+                "input_ids": [[101, *range(start, end), 102] for start, end in windows],
+                "attention_mask": [[1] * (end - start + 2) for start, end in windows],
+                "offset_mapping": [
+                    [(0, 0), *[(i, i + 1) for i in range(start, end)], (0, 0)]
+                    for start, end in windows
+                ],
+                "overflow_to_sample_mapping": [0, 0],
+            }
+
+    record = CorpusRecord(
+        id="cut",
+        task="pii",
+        text="연락처 홍길동님 확인",
+        spans=[CorpusSpan(start=4, end=7, label="PERSON")],
+        source="fixture",
+        split="train",
+    )
+    first, second = encode_corpus_record(WindowTokenizer(), record)
+    # 첫 창(0..6)에서 개체 글자 4·5 는 -100, 개체 밖 글자는 O.
+    assert first["pii_labels"][1:7] == [PII_LABELS.index("O")] * 4 + [-100, -100]
+    # 둘째 창(4..)은 개체 전체를 담아 B · I · I 로 배운다.
+    assert second["pii_labels"][1:4] == [
+        PII_LABELS.index("B-PERSON"),
+        PII_LABELS.index("I-PERSON"),
+        PII_LABELS.index("I-PERSON"),
+    ]
+
+
 def test_training_readiness_rejects_unresolved_manual_labels() -> None:
     pii_train = CorpusRecord(
         id="pii-train",

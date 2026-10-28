@@ -24,7 +24,7 @@ python train/preflight.py --stage implementation
 
 python train/download_assets.py            # 계획만 출력 — revision · 저장 위치 확인
 python train/download_assets.py --execute  # 검토된 revision 의 모델과 데이터만 받는다
-python train/download_assets.py --record-existing   # 이미 받은 자산을 네트워크 없이 검증
+python train/download_assets.py --record-existing   # 이미 받은 자산을 다시 받지 않고 검증(HF API 로 revision · 라이선스는 조회)
 ```
 
 ## 2. 코퍼스
@@ -42,7 +42,7 @@ deepset 영어 원문은 train/test 를 먼저 봉인한 뒤 번역했다. 번�
 `method` 에 남아 있다. 새로 만들 때:
 
 ```bash
-python train/translate_with_gemini.py --model gemini-3.8-flash --batch-size 50 --no-row-retry \
+python train/translate_with_gemini.py --execute --model gemini-3.8-flash --batch-size 50 --no-row-retry \
   --queue data/corpus/deepset_train_queue-train.jsonl --output train/translations/deepset-train-ko.jsonl
 ```
 

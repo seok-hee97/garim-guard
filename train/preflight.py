@@ -166,7 +166,7 @@ def main() -> int:
             results.append(_check("sealed-training-inputs", False, str(exc)))
         try:
             evaluation_contract = verify_evaluation_input_manifest(
-                args.evaluation_manifest
+                args.evaluation_manifest, training_manifest_path=args.input_manifest
             )
             results.append(
                 _check("sealed-evaluation-inputs", True, evaluation_contract)

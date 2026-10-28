@@ -85,6 +85,15 @@ def encode_corpus_record(
             if record.task == "pii"
             else [-100] * len(offsets)
         )
+        if record.task == "pii":
+            # ★ 창 경계에 걸린 개체는 고르지 않았다 — 그 개체의 창 안 토큰이 `O` 로 학습돼, 다음
+            #   창에서 같은 글자를 개체로 배우는 것과 충돌했다(전수 검토 2026-10-28). 손실에서 뺀다.
+            for entity in entity_spans:
+                partial = entity.start < char_end and char_start < entity.end
+                if partial and not (char_start <= entity.start and entity.end <= char_end):
+                    for token_index, (start, end) in enumerate(offsets):
+                        if start != end and start < entity.end and entity.start < end:
+                            pii_labels[token_index] = -100
         # ★ 손실과 지표를 분리한다. §6.0 은 공격 행에서 PII 손실을 마스킹하라고 하고
         #   `pii_labels` 가 그것을 한다. 그런데 평가까지 같은 텐서를 쓰면 공격 텍스트
         #   위의 PII 오탐이 `predicted_chars` 에 아예 들어가지 않아, §7.1.1 이 헤드라인으로

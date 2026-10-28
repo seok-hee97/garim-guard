@@ -140,7 +140,16 @@ def write_evaluation_input_manifest(path: str | Path, payload: dict[str, Any]) -
 def verify_evaluation_input_manifest(
     manifest_path: str | Path,
     paths: Sequence[str | Path] | None = None,
+    *,
+    training_manifest_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    """평가 봉인을 검증한다.
+
+    `training_manifest_path` 를 주면 봉인이 그 학습 manifest 로 만들어졌는지도 본다.
+
+    ★ 전수 검토(2026-10-28) — 평가 봉인은 자기가 만들어진 학습 manifest(A)와만 대조됐다. 학습은
+      다른 manifest(B)로 시작해도 두 게이트를 다 통과해서, B 에 평가 문장이 들어 있어도 막지 못했다.
+    """
     source = Path(manifest_path)
     try:
         payload = json.loads(source.read_text(encoding="utf-8"))
@@ -168,6 +177,13 @@ def verify_evaluation_input_manifest(
 
     training_entry = payload.get("training_manifest")
     training_manifest = _verify_entry(training_entry)
+    if training_manifest_path is not None and file_sha256(training_manifest) != file_sha256(
+        training_manifest_path
+    ):
+        raise ValueError(
+            "evaluation seal was made against a different training manifest — "
+            "re-seal the evaluation inputs against the current training manifest"
+        )
     training_records = _verified_training_records(training_manifest)
     _assert_disjoint(evaluation_records, training_records)
 
