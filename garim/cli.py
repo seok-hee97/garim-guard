@@ -174,7 +174,12 @@ def _iter_files(path: Path) -> list[Path]:
 
 
 def _windows(text: str, limit: int) -> list[tuple[int, str]]:
-    """`limit` 글자 이하의 겹치는 창으로 나눈다. 가능하면 줄 경계에서 자른다."""
+    """`limit` 글자 이하의 겹치는 창으로 나눈다. 가능하면 줄 경계에서 자른다.
+
+    겹침은 창의 1/4 을 넘지 않는다 — ★ 6차 검토: 상한을 작게 둔 정책에서 겹침이 창만 해져
+    한 글자씩 전진했다(3천 자 파일에 522회).
+    """
+    overlap = min(_WINDOW_OVERLAP, limit // 4)
     windows: list[tuple[int, str]] = []
     start = 0
     while True:
@@ -186,7 +191,7 @@ def _windows(text: str, limit: int) -> list[tuple[int, str]]:
         windows.append((start, text[start:end]))
         if end >= len(text):
             return windows
-        start = max(start + 1, end - _WINDOW_OVERLAP)
+        start = max(start + 1, end - overlap)
 
 
 def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
@@ -202,7 +207,7 @@ def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
     results = []
     seen: set[tuple[str, tuple[int, int]]] = set()
     leaks, attacks = [], []
-    for offset, window in _windows(source, limit - _WINDOW_OVERLAP):
+    for offset, window in _windows(source, limit):
         result = inspector.check(window, mode=mode)
         results.append(result)
         for bucket, findings in ((leaks, result.leaks), (attacks, result.attacks)):

@@ -13,10 +13,11 @@ from garim.detect.rules.checksum import (
 from garim.models import Finding
 
 _RRN = re.compile(r"(?<!\d)\d{6}[- ]?[1-8]\d{6}(?!\d)")
-# 구형 `M12345678` 과 2021년 차세대 여권 `M123A4567`(문자 · 숫자 셋 · 문자 · 숫자 넷).
-_PASSPORT = re.compile(
-    r"(?<![A-Z0-9])(?:[MSRO]\d{8}|[MSRODG]\d{3}[A-Z]\d{4})(?![A-Z0-9])", re.IGNORECASE
-)
+_PASSPORT = re.compile(r"(?<![A-Z0-9])[MSRO]\d{8}(?![A-Z0-9])", re.IGNORECASE)
+# 2021년 차세대 여권 `M123A4567`(대문자 · 숫자 셋 · 대문자 · 숫자 넷). 이 모양은 해시 · 제품 코드와
+# 겹치므로(6차 검토: `d123e4567`, `S100E2000`) 대문자만, 그리고 `여권` 앵커가 있을 때만 받는다.
+_PASSPORT_NEW = re.compile(r"(?<![A-Za-z0-9])[MSRODG]\d{3}[A-Z]\d{4}(?![A-Za-z0-9])")
+_PASSPORT_ANCHORS = ("여권", "passport", "Passport", "PASSPORT")
 _DRIVER = re.compile(r"(?<!\d)(?:1[1-9]|2[0-8])[- ]\d{2}[- ]\d{6}[- ]\d{2}(?!\d)")
 _BUSINESS = re.compile(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{5}(?!\d)")
 _CORPORATION = re.compile(r"(?<!\d)\d{6}[- ]?\d{7}(?!\d)")
@@ -64,6 +65,9 @@ def detect_kr_pii(text: str, *, rrn_anchor: bool = True) -> list[Finding]:
             findings.append(_finding("L-KR-06", match, 1.0, "corporation_checksum"))
     for match in _PASSPORT.finditer(text):
         findings.append(_finding("L-KR-03", match, 0.8, "passport_format"))
+    for match in _PASSPORT_NEW.finditer(text):
+        if _near_anchor(text, match.span(), _PASSPORT_ANCHORS):
+            findings.append(_finding("L-KR-03", match, 0.8, "passport_new_format"))
     for match in _DRIVER.finditer(text):
         findings.append(_finding("L-KR-04", match, 0.8, "driver_license_format"))
     for match in _NHI.finditer(text):

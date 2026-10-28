@@ -15,7 +15,7 @@ _LOG_LINE = re.compile(
 #   먹어서, 빈 줄 1만 개(`"x" + "\n" * 10000 + "x"`)에 15초가 걸렸다(5차 검토).
 _CODE_SIGNAL = re.compile(
     r"(?m)(?:^[ \t]*(?:def|class|func|function|import|from|const|let|var|SELECT|INSERT)\b|"
-    r"[{};][ \t]*$|=>|</?[A-Za-z][^>\n]*>)"
+    r"[{};][ \t]*$|=>|</?[A-Za-z][^<>\n]*>)"
 )
 _STRUCTURED_LINE = re.compile(
     r"(?m)^[ \t]*(?:[-\w가-힣]+[ \t]*:(?:[ \t]*\S|[ \t]*$)|[\[{][ \t]*$)"

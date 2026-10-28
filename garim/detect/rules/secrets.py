@@ -46,12 +46,12 @@ _JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[
 #   제곱 시간이 들었다(5차 검토). 실제 자격증명은 이 길이 안에 든다.
 _DB_URL = re.compile(
     r"(?i)(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://"
-    r"[^\s:/]{1,256}:[^\s@]{1,512}@[^\s]{1,1024}"
+    r"[^\s:/]{1,256}:[^\s@]{1,2048}@[^\s]{1,2048}"
 )
 # ★ 이름 안의 키워드는 코드에서 본다. `[A-Z0-9_]*(?:SECRET|…)[A-Z0-9_]*` 는 겹친 반복이라
 #   `"A" + "SECRET" * 8000` 에 22초, 여러 줄 모드 `^\s*` 는 빈 줄을 건너 제곱이었다(5차 검토).
 _ENV = re.compile(
-    r"(?im)^[ \t]*(?:export[ \t]+)?([A-Z][A-Z0-9_]{0,127})[ \t]*=[ \t]*([^\s#]{8,})"
+    r"(?im)^[ \t]*(?:export[ \t]+)?([A-Z][A-Z0-9_]*)[ \t]*=[ \t]*([^\s#]{8,})"
 )
 _ENV_NAME = re.compile(r"(?i)SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY")
 _GENERIC_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_+/=-]{20,}(?![A-Za-z0-9_-])")

@@ -65,6 +65,7 @@ def test_conjoining_final_after_a_syllable_is_composed() -> None:
         "분류" + " " * 30000 + "x대외비",
         '{"a":\n' + " " * 5000 + "1}",
         "비밀\n" * 3000,
+        "<a" * 30000,
     ],
 )
 def test_adversarial_inputs_finish_quickly(text: str) -> None:
@@ -140,7 +141,7 @@ def test_particle_correction_leaves_words_alone(returned: str, expected: str) ->
         ("본사 031-123-4567", "L-CM-02"),
         ("(02) 123-4567", "L-CM-02"),
         ("휴대폰 010.1234.5678", "L-CM-02"),
-        ("여권 M123A4567", "L-KR-03"),
+        ("여권번호 M123A4567", "L-KR-03"),
         ("-----BEGIN PGP PRIVATE KEY BLOCK-----", "L-SEC-03"),
         ("-----BEGIN ENCRYPTED PRIVATE KEY-----", "L-SEC-03"),
         ("gho_" + "a1B2" * 9, "L-SEC-01"),
@@ -152,9 +153,41 @@ def test_common_formats_are_detected(text: str, code: str) -> None:
     assert any(finding.code == code for finding in Inspector().check(text).leaks), text
 
 
-@pytest.mark.parametrize("text", ["주문번호 0212345678", "버전 02.1234.5678.9", "2026-10-28 회의"])
-def test_landline_rule_needs_separators_and_a_clean_end(text: str) -> None:
+@pytest.mark.parametrize(
+    "text",
+    [
+        "주문번호 0212345678",
+        "버전 02.1234.5678.9",
+        "2026-10-28 회의",
+        # 6차 검토 — 처음 판이 잡던 오탐
+        "공고 제02-2023-0045호",
+        "문서번호 031-2024-0001",
+        "기간: 02 2019 2020",
+        "시간 02.1530.1600",
+        "S100E2000",
+        "해시 d123e4567",
+    ],
+)
+def test_new_rules_do_not_fire_on_document_numbers_or_hashes(text: str) -> None:
     assert Inspector().check(text).leaks == []
+
+
+def test_a_phone_followed_by_a_period_and_digit_is_still_masked() -> None:
+    """★ 6차 검토 — 점 구분용 경계를 모든 구분자에 걸어 `010-1234-5678.3시` 가 통째로 나갔다."""
+    assert Inspector().check("연락처는 010-1234-5678.3시 이후 가능").masked_text == (
+        "연락처는 <PHONE_1>.3시 이후 가능"
+    )
+
+
+def test_an_account_number_keeps_its_account_label() -> None:
+    leaks = Inspector().check("계좌 032-1234-5678").leaks
+    assert [finding.code for finding in leaks] == ["L-KR-08"]
+
+
+def test_token_shaped_text_with_a_huge_number_does_not_stop_inspection() -> None:
+    """★ 6차 검토 — `<PHONE_111…(4,400자리)>` 가 `int()` 한도를 넘어 검사가 멈췄다."""
+    result = Inspector().check("<PHONE_" + "1" * 4400 + "> 010-1234-5678")
+    assert result.masked_text is not None and result.masked_text.endswith("<PHONE_1>")
 
 
 # ── garim scan ──────────────────────────────────────────────────────────────
@@ -190,3 +223,14 @@ def test_scan_does_not_follow_a_symlink_out_of_the_root(
     captured = capsys.readouterr()
     assert "symlink outside scan root" in captured.err
     assert "<EMAIL_1>" not in captured.out
+
+
+def test_scan_windows_stay_efficient_with_a_small_input_limit(tmp_path: Path) -> None:
+    """★ 6차 검토 — 상한을 작게 둔 정책에서 겹침이 창만 해져 한 글자씩 전진했다."""
+    from garim.cli import _windows
+
+    text = "가나다라마바사\n" * 400
+    windows = _windows(text, 2500)
+    assert len(windows) <= 3
+    assert windows[-1][0] + len(windows[-1][1]) == len(text)
+    assert all(len(window) <= 2500 for _, window in windows)

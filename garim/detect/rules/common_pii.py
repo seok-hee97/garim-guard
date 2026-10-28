@@ -14,16 +14,22 @@ _EMAIL = re.compile(
     r"(?<![A-Z0-9_.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}(?![A-Z0-9-])(?![._][A-Z0-9])",
     re.IGNORECASE,
 )
+# 점 구분(`010.1234.5678`)은 뒤에 `.숫자` 가 이어지면(버전 문자열) 받지 않는다. 그 검사는
+# 점 구분에만 건다 — ★ 6차 검토: 모든 구분자에 걸었더니 `010-1234-5678.3시 이후` 의 번호가
+# 통째로 나갔다.
 _PHONE = re.compile(
-    r"(?<!\d)(?:\+82[- .]?1[016789]|01[016789])[- .]?\d{3,4}[- .]?\d{4}(?!\d|\.\d)"
+    r"(?<!\d)(?:\+82[- .]?1[016789]|01[016789])"
+    r"(?:[- ]?\d{3,4}[- ]?\d{4}(?!\d)|\.\d{3,4}\.\d{4}(?!\.?\d))"
 )
-# 유선 · 인터넷 전화(02 · 031~064 · 070). 구분자가 있어야만 받는다 — 붙여 쓴 10자리는 주문 · 송장
-# 번호와 구별되지 않는다. ★ 5차 검토 전에는 휴대폰만 봐서 `02-1234-5678` 이 그대로 나갔다.
+# 유선 · 인터넷 전화(02 · 031~064 · 070). 하이픈 · 괄호 형식만 받는다 — 붙여 쓰거나 점 · 공백으로
+# 나눈 숫자는 문서 · 공고 · 시간 표기와 구별되지 않는다(6차 검토: `02.1530.1600`, `02 2019 2020`).
+# ★ 5차 검토 전에는 휴대폰만 봐서 `02-1234-5678` 이 그대로 나갔다.
 _AREA = r"(?:2|[3-6][1-5]|70)"
 _LANDLINE = re.compile(
-    rf"(?<![\d.-])(?:\(0{_AREA}\)[ ]?|(?:\+82[- ]?{_AREA}|0{_AREA})[-. ])"
-    r"\d{3,4}[-. ]\d{4}(?![\d-]|\.\d)"
+    rf"(?<![\d.-])(?:\(0{_AREA}\)[ ]?|(?:\+82-?{_AREA}|0{_AREA})-)\d{{3,4}}-\d{{4}}(?![\d-]|호)"
 )
+# 앞에 오면 전화가 아니다 — 문서 · 공고 · 접수 번호, 그리고 계좌(계좌 규칙이 받는다).
+_LANDLINE_ANTI = ("문서", "공고", "접수", "주문", "송장", "사번", "일련", "계좌", "입금", "은행")
 _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 _MAC = re.compile(r"(?<![0-9A-F])(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}(?![0-9A-F])", re.IGNORECASE)
@@ -36,6 +42,9 @@ def detect_common_pii(text: str) -> list[Finding]:
     for match in _PHONE.finditer(text):
         findings.append(Finding("L-CM-02", match.span(), 0.8, "L0", "phone_format"))
     for match in _LANDLINE.finditer(text):
+        before = text[max(0, match.start() - 12) : match.start()]
+        if before.endswith("제") or any(word in before for word in _LANDLINE_ANTI):
+            continue
         findings.append(Finding("L-CM-02", match.span(), 0.8, "L0", "landline_format"))
     for match in _CARD.finditer(text):
         if luhn_valid(match.group(0)):

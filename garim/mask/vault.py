@@ -10,7 +10,8 @@ from garim.mask.josa import correct_particle
 from garim.models import Finding
 
 _TOKEN = re.compile(
-    r"<\s*([A-Z][A-Z0-9_]*)\s*_\s*(\d+)\s*>(이|가|을|를|은|는|과|와|으로|로)?",
+    # 번호는 9자리까지 — ★ 6차 검토: `<PHONE_111…(4,400자리)>` 가 `int()` 한도를 넘어 검사가 멈췄다.
+    r"<\s*([A-Z][A-Z0-9_]*)\s*_\s*(\d{1,9})\s*>(이|가|을|를|은|는|과|와|으로|로)?",
     re.IGNORECASE,
 )
 
