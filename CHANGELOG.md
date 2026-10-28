@@ -3,6 +3,42 @@
 PyPI [`garim-guard`](https://pypi.org/project/garim-guard/) 릴리스마다 바뀐 것을 적는다. 각 항목의
 이유와 재현 입력은 커밋 메시지와 `tests/` 의 ★ 주석에 있다.
 
+## 0.1.4 — 2026-10-29
+
+0.1.3 까지 프록시는 텍스트로 읽히지 않는 첨부를 통째로 건너뛰어, PDF · 워드 파일에 실린 주민번호 · 연락처
+· 키가 그대로 상류로 나갔다(알려진 한계). 이제 문서 안의 글을 꺼내 검사한다. 0.1.3 규칙에 배포 L1 을 붙여
+README 성능 표를 다시 쟀다([RESULTS §10](docs/RESULTS.md)).
+
+### 추가 — 문서 첨부 검사
+
+- 프록시와 `garim scan` 이 DOCX · XLSX · PPTX · HWPX · ODF(ODT · ODS · ODP) · PDF 에서 글을 꺼내 검사한다.
+  - 오피스 · 한글 문서는 표준 라이브러리로 읽는다. XML 파서를 쓰지 않아 엔티티 확장이 닿지 않고, 압축을
+    푼 크기 · 멤버 수 · 꺼낸 글자 수에 상한이 있다. 메모 · 차트 · 문서 속성 · 대체 텍스트 · 내장 문서까지
+    읽고, 셀 · 탭 · 줄바꿈 경계를 지킨다.
+  - PDF 는 선택 의존성 `pypdf`(BSD-3-Clause)가 있을 때만 읽는다 — `pip install 'garim-guard[docs]'`.
+    본문 · 양식 필드 값 · 주석을 읽고, 별도 프로세스에서 20초 제한을 두고 돈다.
+- 새 정책 `attachments`:
+  - `unmaskable`(block | warn, 기본 block): 문서 안은 가릴 수 없으므로 가려야 할 값이 하나라도 나오면 따른다.
+  - `unreadable`(allow | warn | block, 기본 block): 문서인데 읽지 못한 것(상한 초과 · 깨짐 · 암호 · 시간
+    초과 · `[docs]` 없는 PDF). 일부만 읽은 문서는 믿지 않는다.
+  - `uninspected`(allow | warn | block, 기본 allow, 엄격 프로필 warn): 글을 꺼낼 수 없는 첨부(이미지 ·
+    오디오 · 레거시 HWP/DOC · 글 없는 문서 · `file_id` 만 있는 파일 · 원격 이미지 주소).
+  - 사유 `attachment_unmaskable` · `attachment_unreadable` · `attachment_not_inspected` 가 헤더와 차단
+    응답에 남고, 첨부 사유가 있으면 `degraded` 가 참이다. 차단 응답은 어느 메시지의 어떤 첨부인지 싣는다.
+- `input_file`(`file_data`) · 문자열 `image_url` · 대문자 `DATA:` URL 도 첨부로 읽는다.
+
+### 바뀐 동작
+
+- 기본 정책에서 **연락처 · 이메일처럼 가려야 할 값이 든 문서 첨부는 막힌다**(전에는 그대로 나갔다). 경고만
+  원하면 `attachments.unmaskable: warn`.
+- 읽지 못한 문서는 기본으로 막힌다. PDF 를 보내는 환경은 `[docs]` 를 같이 설치한다.
+- `garim scan` 이 문서 파일을 꺼내 검사하고, 꺼내지 못한 문서는 검사하지 못한 파일(3)로 알린다.
+
+### 문서
+
+- README 성능 표: 0.1.3 규칙 + 배포 L1 을 M1 에서 다시 쟀다. 공격 탐지율 0.342 → 0.349, KDPII
+  0.979 / 0.977 → 0.988 / 0.985, 정상 문장 공격 오탐 0.439 → 0.426. 모델은 같다.
+
 ## 0.1.3 — 2026-10-29
 
 외부 모델 연결을 더하고, 배포 전 전수 검사(검사 코어 · 프록시 · 탐지 품질 · 도구 · 패키징)와 그 수정의

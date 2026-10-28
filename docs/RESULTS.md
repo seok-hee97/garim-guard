@@ -5,6 +5,7 @@
 > **L1 학습 후(2026-10-27, RTX 3090)** 수치는 [RESULTS_L1.md](RESULTS_L1.md) — KoreanGuardrail
 > 탐지율 0.069 → 0.342(과방어 0.004 → 0.007), KDPII 제품 경로 0.980/0.977, 결함 셋(합의가 하드 네거티브를 지움 ·
 > 운송장번호를 계좌로 가림 · 낯선 문자열 PII 원출력 오탐).
+> **공개 뒤 재측정** — L0 만 §8 · §9, 0.1.3 규칙에 배포 L1 을 붙인 값은 §10(탐지율 0.349 · KDPII 0.988/0.985).
 
 이 문서는 §8.1-16 이다. 측정치가 커밋 메시지와 세 문서에 흩어져 있어 한 곳에 모은다.
 **각 수치 옆에 그 수치가 지탱하지 못하는 것을 같이 적는다** — §7.6-2("재현율 옆에
@@ -546,6 +547,59 @@ cd <전 또는 후> && python -m bench.secret_baselines
 python -m bench.run_axis_b --benchmark <KoreanGuardrail>/benchmark.jsonl --judge garim-l0
 python -m bench.secret_baselines
 # PII: bench/l1_product_path.py 의 product_path 셈을 L1 없는 Inspector() 로 — kdpii-test · bc 음성 · R2 test
+```
+
+## 10. 0.1.3 규칙 + 배포 L1 — 2026-10-29, L0 + L1 재측정
+
+§8 · §9 는 L0 만 다시 쟀다. 0.1.3 규칙에 배포 L1 을 붙여 README 의 L0 + L1 표를 다시 쟀다.
+
+- 코드: d6528b3 를 `git archive` 로 따로 풀어 그 디렉터리에서 돌았다. 다음 커밋 69e9e5f 는 첨부 · 프록시 ·
+  CLI 만 바꿨다. 검출 코드는 지금과 같다.
+- 모델: `garim_l1.int8.onnx`(`reduce_range` 판). sha256 `906f73ec…` 로 배포 파일과 같다.
+- 기계: Apple M1(arm64), `GARIM_L1_THREADS=2`, `nice -n 15`. 기준선은 x86 pod 에서 잰 R1 이다
+  ([RESULTS_L1_R2 §0](RESULTS_L1_R2.md)).
+- 정책: 기본 정책 사본에서 `l1_timeout_ms` 만 30000 으로 풀었다. 시간 예산을 넘겨 L0 로 떨어진 행이
+  수치에 섞이지 않게 하려는 것이다. 모델 품질을 재는 측정이고, 이 기계의 기본 예산 동작을 재지는 않았다.
+
+| 셋 | 지표 | R1 기준선(0.1.0 규칙, pod) | 0.1.3 규칙(M1) |
+|---|---|---:|---:|
+| KoreanGuardrail 5,555 | 공격 탐지율 / 과방어율 | 0.342 / 0.007 | **0.349** / 0.007 |
+| | 인젝션(A1) / 유출(A2) | 0.450 / 0.146 | 0.454 / 0.158 |
+| | 같은 600 표본(seed 13) | 0.330 / 0.003 | 0.340 / 0.003 |
+| KDPII test 5,438 | 제품 경로 문자 P / R | 0.979 / 0.977 | **0.988 / 0.985** |
+| | L1 원출력 R | 0.985 | 0.985 |
+| KLUE-NER validation 5,000 | 성명 제품 경로 P / R | 0.890 / 0.931 | 0.892 / 0.931 |
+| | L1 원출력 R | 0.933 | 0.933 |
+| bc-pii-ko 보강 음성 720 | PII 오탐 행 | 63 | 63 |
+| `t4-r2-test` 정상 700 · 27 family | NONE → 공격 FPR | 0.439 | 0.426 |
+| `pii-negative-r2-test` 1,589 · 20 family | PII 음성 오탐 행 | 0.515 | 0.515 |
+| `pii-negative-r2-test` 계좌 짝 250 | 계좌 양성 문자 재현율 | 1.000 | 1.000 |
+
+- 모델 쪽은 그대로다. L1 원출력 재현율이 두 기계에서 같아 PII 축에서는 arm64 · x86 INT8 차이가 보이지 않는다.
+- KDPII 제품 경로가 원출력과 같아졌다(전에는 원출력 0.985 > 제품 경로 0.977). §9 에서 걷어 낸 L0 의 잘못된
+  종류 판정(계좌를 카드로, 법인번호 우연일치)이 L1 의 맞는 판정을 덮지 않게 된 것으로 본다.
+- 공격 탐지 +0.007 은 §9 의 L0 공격 규칙 수정(L0 단독 0.0695 → 0.084)과 방향이 같다. 과방어율은 0.007 그대로다
+  (이번 2,244행 중 16행).
+- 오탐은 거의 그대로다. 숫자 문장 63행은 L1 에서 나온다(L0 는 0행, 대부분 12자리 운송장번호). 정상 문장 공격
+  오탐 0.426 도 여전히 높다. 기본 정책이 공격을 `warn` 으로 두는 이유는 바뀌지 않았다.
+- `t4-r2-test` · `pii-negative-r2-test` 는 자작 family 라 헤드라인에 쓰지 않는다. 방향만 본다.
+- 정규화가 되돌리지 않는 변이의 L1 탐지율: 된소리 0.121 · 초성 0.181 · 띄어쓰기 깨기 0.256. 변이 없는 원문은
+  0.545 다.
+- 이 기계에서 KoreanGuardrail 한 행(정규화 · L0 · L1 전체)에 평균 48ms 가 걸렸다(2스레드, nice). README 의
+  128토큰 p50 / p95(`bench.latency`, pod)와는 다른 측정이라 그 행을 바꾸지 않았다.
+
+```bash
+# d6528b3 를 풀어 둔 디렉터리에서, measure.yaml = 기본 정책 + l1_timeout_ms: 30000
+export GARIM_L1_THREADS=2
+python -m bench.r2_eval --l1-model-dir <l1-onnx> --policy measure.yaml \
+  --t4 data/corpus/t4-r2-test.jsonl --pii-negative data/corpus/pii-negative-r2-test.jsonl \
+  --bc data/corpus/bc_pii_augmented_negative-test.jsonl --output r2-eval.json
+python -m bench.run_axis_b --benchmark <KoreanGuardrail>/benchmark.jsonl --judge garim-l1 \
+  --l1-model-dir <l1-onnx> --policy measure.yaml --output axis-b.json
+python -m bench.l1_product_path --l1-model-dir <l1-onnx> --policy measure.yaml \
+  --input data/corpus/kdpii-test.jsonl --input data/corpus/klue_eval-test.jsonl \
+  --input data/corpus/bc_pii_augmented_negative-test.jsonl --output product-path.json
+# 600 표본: axis-b.json 의 flagged_ids 를 bench.ko_guardrail.balanced_sample(rows, 600, seed=13) 에 맞춰 셈
 ```
 
 ## 재현
