@@ -1,0 +1,3 @@
+# sdist 는 패키지와 고지만 싣는다. tests/ 는 bench · train · tools 를 import 하므로 sdist 에서는 돌지 않는다.
+prune tests
+include CHANGELOG.md SECURITY.md

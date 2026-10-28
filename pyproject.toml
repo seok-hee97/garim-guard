@@ -25,6 +25,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Security",
   "Topic :: Text Processing :: Linguistic",
+  "Typing :: Typed",
 ]
 dependencies = [
   "pydantic>=2.7,<3",
@@ -38,7 +39,7 @@ train = [
   # macOS 의 python.org 빌드는 시스템 루트 인증서를 안 쓴다. 라이선스 게이트 셋이
   # 전부 HTTPS 로 나가므로 없으면 CERTIFICATE_VERIFY_FAILED 로 학습 준비가 통째로
   # 막힌다 — 실제로 막혔다. `garim/tls.py` 가 있으면 쓰고 없으면 기본값으로 돈다.
-  "certifi>=2026.7.22",
+  "certifi>=2026.10.18",
   "datasets>=2.20,<4",
   "huggingface-hub>=0.36,<2",
   "numpy>=1.26,<3",
@@ -65,7 +66,7 @@ dev = ["pytest>=8,<9", "ruff>=0.6,<1"]
 bench = [
   # macOS 의 python.org 빌드는 시스템 루트 인증서를 안 쓴다. §8.1-13b 하네스가 API 키를
   # 들고 나가므로 TLS 검증을 끄는 대신 인증서 번들을 명시적으로 들고 간다.
-  "certifi>=2026.7.22",
+  "certifi>=2026.10.18",
   # §7.3 베이스라인. `Kr*Recognizer` 5종이 MIT 로 들어 있고, 끄고 비교하면 H1 의 유일한
   # 외부 도구 대조가 허수아비가 된다.
   "presidio-analyzer>=2.2,<3",
@@ -85,6 +86,7 @@ garim = "garim.cli:main"
 include = ["garim*"]
 
 [tool.setuptools.package-data]
+"garim" = ["py.typed"]
 "garim.policy" = ["profiles/*.yaml"]
 
 [tool.pytest.ini_options]

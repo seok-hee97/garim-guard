@@ -55,7 +55,7 @@ R1 기준선([RESULTS_L1_R2 §0](https://github.com/seok-hee97/garim-guard/blob/
 0.374 → 0.528(정밀도 0.944 → 0.960, 유선전화 · 이메일), 음성 셋 L0 오탐 0행 그대로, 공격 · 시크릿 축은 변화가
 없었다([RESULTS §8](https://github.com/seok-hee97/garim-guard/blob/main/docs/RESULTS.md)). L1 을 포함한 표는 다시 재지 않았다.
 
-- **교사 대비** — 같은 600 표본에서 L1 0.327 / 0.003, kanana-safeguard 0.630 / 0.017, Gemma 4 L2 단독
+- **교사 대비** — 같은 600 표본에서 L1 0.330 / 0.003(배포 파일, RESULTS_L1_R2 S5), kanana-safeguard 0.630 / 0.017, Gemma 4 L2 단독
   0.633 / 0.017, Gemma 4 L2 + 스트림 분리 0.810 / 0.057. L1 은 교사의 절반 수준이고, 정확도가 필요하면
   `thorough` 모드로 L2 를 붙인다.
 - **시크릿** — 재현율 0.910 / 오탐 0.000(자체 슬라이스 400). 같은 셋에서 CredSweeper 0.465 / 0.000,
@@ -66,7 +66,7 @@ R1 기준선([RESULTS_L1_R2 §0](https://github.com/seok-hee97/garim-guard/blob/
 ## 빠른 시작
 
 ```bash
-pip install 'garim-guard[l1]'           # Python 3.11 ~ 3.14. L0 만 쓸 때는 pip install garim-guard
+pip install 'garim-guard[l1]'           # Python 3.11 ~ 3.14(Intel Mac 은 3.13 까지 — onnxruntime 휠). L0 만: pip install garim-guard
 garim check '연락처는 010-1234-5678 입니다'          # → mask: 연락처는 <PHONE_1> 입니다
 printf '검사할 프롬프트' | garim check --json
 garim scan ./prompts
@@ -168,6 +168,7 @@ outbound = result.masked_segments        # 외부 API 로 보낼 것
 - 그 밖의 모델 · 사전은 파이썬 백엔드로 감싸 `--l1-backend` · `--l2-backend` 로 붙인다(`모듈:함수` 또는 `파일.py:함수`).
 
 ```bash
+printf '홍길동\n' > names.txt
 GARIM_NAME_LIST=names.txt garim --l1-backend examples/backends/l1_name_list.py:build check '홍길동 고객님 건입니다'
 # → mask: <PERSON_1> 고객님 건입니다
 ```
@@ -212,7 +213,7 @@ GARIM_NAME_LIST=names.txt garim --l1-backend examples/backends/l1_name_list.py:b
 ```bash
 uv sync --extra train --extra dev
 uv run python -m pytest
-uv run ruff check garim bench tests tools train
+uv run ruff check garim bench tests tools train examples
 uv run python train/validate_sources.py && uv run python train/validate_models.py
 ```
 
