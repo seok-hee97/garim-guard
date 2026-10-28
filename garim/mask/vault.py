@@ -70,6 +70,10 @@ class Vault:
         if existing is not None:
             return existing
         sequence = self.counters.get(label, 0) + 1
+        # ★ 재검토 — 상한 위의 입력 글자(`<PHONE_100000001>`)는 번호를 끌어올리지 않으므로, 세다가
+        #   그 번호에 닿으면 입력 글자와 같은 토큰을 냈다. 입력에 있던 토큰은 건너뛴다.
+        while f"<{label}_{sequence}>" in self._literals:
+            sequence += 1
         self.counters[label] = sequence
         token = f"<{label}_{sequence}>"
         self.entries[token] = value

@@ -48,7 +48,16 @@ def load_backend(spec: str, *, layer: Literal["L1", "L2"]) -> L1Backend | L2Back
         raise RuntimeError(
             f"{layer} backend {spec!r} failed to start: {type(exc).__name__}: {exc}"
         ) from exc
-    if not isinstance(backend, contract):
+    try:
+        # 계약 확인도 사용자 코드를 부른다(`name` 이 property 일 수 있다) — 같은 경계 안에 둔다.
+        conforms = isinstance(backend, contract)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
+        raise RuntimeError(
+            f"{layer} backend {spec!r} failed its contract check: {type(exc).__name__}: {exc}"
+        ) from exc
+    if not conforms:
         raise TypeError(
             f"{layer} backend {spec!r} must return an object with 'name' and '{method}()'"
         )

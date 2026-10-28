@@ -46,9 +46,23 @@ class L1BusyError(RuntimeError):
 
 # 백엔드마다 "예산을 넘겨 버려졌지만 아직 도는" 추론 수. id(백엔드) 로 센다 — 버려진 워커가
 # 백엔드를 붙잡고 있으므로 수가 0 이 될 때까지 id 가 바뀌지 않는다.
-_ABANDONED: dict[int, int] = {}
-_ABANDONED_LOCK = threading.Lock()
-_MAX_ABANDONED_PER_BACKEND = 2
+# 백엔드마다 돌고 있는 추론 수(예산을 넘겨 버려진 것 포함). id(백엔드) 로 센다 — 도는 워커가
+# 백엔드를 붙잡고 있으므로 수가 0 이 될 때까지 id 가 바뀌지 않는다. 상한은 프록시의 동시 요청을
+# 받을 만큼 두되, 끝나지 않는 백엔드가 스레드를 끝없이 쌓지 못하게 한다.
+_INFLIGHT: dict[int, int] = {}
+_INFLIGHT_LOCK = threading.Lock()
+MAX_INFLIGHT_PER_BACKEND = 8
+
+
+def _release_inflight(key: int | None) -> None:
+    if key is None:
+        return
+    with _INFLIGHT_LOCK:
+        remaining = _INFLIGHT.get(key, 1) - 1
+        if remaining > 0:
+            _INFLIGHT[key] = remaining
+        else:
+            _INFLIGHT.pop(key, None)
 
 
 def _call_with_deadline(
@@ -81,18 +95,20 @@ def _call_with_deadline(
 
     ★ 전수 검토(2026-10-28) — 프록시는 요청마다 Inspector(= 파이프라인 · gate)를 새로 만들고
       백엔드만 공유한다. 그래서 gate 의 상한이 요청 하나 안에서만 걸렸고, 느린 플러그인
-      백엔드에 동시 요청 12개를 보내면 버려진 추론 12개가 살아 있었다. `owner`(백엔드)마다
-      버려진 추론을 세어 상한을 넘으면 새 추론을 시작하지 않는다(`l1_busy`).
+      백엔드에 동시 요청 12개를 보내면 버려진 추론 12개가 살아 있었다. 처음 고친 판은 시간
+      초과 **뒤에** 세어서 한꺼번에 몰린 요청은 다 통과했다(재검토). 이제 `owner`(백엔드)마다
+      도는 추론을 **시작 전에** 세고 상한이면 시작하지 않는다(`l1_busy`).
     """
     key = None if owner is None else id(owner)
     if key is not None:
-        with _ABANDONED_LOCK:
-            if _ABANDONED.get(key, 0) >= _MAX_ABANDONED_PER_BACKEND:
-                raise L1BusyError("too many abandoned L1 inferences on this backend")
+        with _INFLIGHT_LOCK:
+            if _INFLIGHT.get(key, 0) >= MAX_INFLIGHT_PER_BACKEND:
+                raise L1BusyError("too many L1 inferences in flight on this backend")
+            _INFLIGHT[key] = _INFLIGHT.get(key, 0) + 1
     if not gate.acquire(blocking=False):
+        _release_inflight(key)
         raise L1BusyError("previous L1 inference is still running")
     box: dict[str, object] = {}
-    state = {"done": False, "abandoned": False}
 
     def runner() -> None:
         try:
@@ -101,24 +117,17 @@ def _call_with_deadline(
             box["error"] = exc
         finally:
             gate.release()
-            with _ABANDONED_LOCK:
-                state["done"] = True
-                if state["abandoned"] and key is not None:
-                    remaining = _ABANDONED.get(key, 1) - 1
-                    if remaining > 0:
-                        _ABANDONED[key] = remaining
-                    else:
-                        _ABANDONED.pop(key, None)
+            _release_inflight(key)
 
     worker = threading.Thread(target=runner, daemon=True, name="garim-l1")
-    worker.start()
+    try:
+        worker.start()
+    except BaseException:
+        gate.release()
+        _release_inflight(key)
+        raise
     worker.join(budget_seconds)
     if worker.is_alive():
-        if key is not None:
-            with _ABANDONED_LOCK:
-                if not state["done"]:  # 막 끝났으면 버려진 것이 아니다
-                    state["abandoned"] = True
-                    _ABANDONED[key] = _ABANDONED.get(key, 0) + 1
         if on_timeout is not None:
             try:
                 # 워커 id 를 넘긴다 — 백엔드를 공유하는 다른 요청의 추론을 끊지 않는다.
@@ -261,6 +270,10 @@ class DetectionPipeline:
             if stream in {"nospace", "detensified"}:
                 # 손실 스트림이다 — 체크섬 없이 형태만 맞은 식별자는 채택하지 않고,
                 # 나머지는 신뢰도를 깎는다(§2.3).
+                if finding.rule in ("secret_assignment", "korean_password_phrase"):
+                    # ★ 재검토 — 공백을 지우면 `Password: at least 8 characters` 가 값 하나가 되어
+                    #   block 됐다. 대입 꼴은 원문 · 정규화 스트림에서만 받는다.
+                    continue
                 if finding.code == "L-KR-08":
                     # ★ 공백을 지우면 날짜 · 시각 · 금액이 붙어 계좌 모양이 된다
                     #   (`입금 확인: 2025 01 15 1200` → 12자리). 계좌는 원문 · 정규화
@@ -430,9 +443,12 @@ class DetectionPipeline:
             except L1BusyError:
                 degraded = True
                 degraded_reasons.append("l1_busy")
-            except (Exception, SystemExit) as exc:
+            except KeyboardInterrupt:
+                raise
+            except BaseException as exc:
                 # ★ 전수 검토 — 백엔드가 `sys.exit()` 를 부르면 검사 전체가 끝나 CLI 가 0 으로
-                #   나갔다(주민번호가 든 입력에서도). 백엔드 경계에서는 SystemExit 도 실패다.
+                #   나갔다(주민번호가 든 입력에서도). 백엔드 경계에서는 SystemExit · 사용자
+                #   정의 BaseException 도 실패다(재검토).
                 degraded = True
                 degraded_reasons.append(f"l1_error:{type(exc).__name__}")
             l1_ms = (perf_counter() - l1_started) * 1000

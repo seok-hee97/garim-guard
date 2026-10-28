@@ -16,11 +16,12 @@ _RRN = re.compile(r"(?<!\d)\d{6}[- ]?[1-8]\d{6}(?!\d)")
 # 여권 — 구형 `M12345678` · 차세대 `M123A4567`. 둘 다 회원번호 · 모델명 · 해시와 모양이 겹치므로
 # (6차 · 전수 검토: `d123e4567`, `S100E2000`, `회원번호 M00012345`) 대문자만,
 # `여권` 앵커가 있을 때만 받는다.
-_PASSPORT = re.compile(r"(?<![A-Za-z0-9])[MSRO]\d{8}(?![A-Za-z0-9])")
+# 구형은 앵커가 있으면 소문자도 받는다(`여권 m12345678` — 재검토).
+_PASSPORT = re.compile(r"(?<![A-Za-z0-9])[MSROmsro]\d{8}(?![A-Za-z0-9])")
 _PASSPORT_NEW = re.compile(r"(?<![A-Za-z0-9])[MSRODG]\d{3}[A-Z]\d{4}(?![A-Za-z0-9])")
 _PASSPORT_ANCHORS = ("여권", "passport", "Passport", "PASSPORT")
 _DRIVER = re.compile(r"(?<!\d)(?:1[1-9]|2[0-8])[- ]\d{2}[- ]\d{6}[- ]\d{2}(?!\d)")
-_BUSINESS = re.compile(r"(?<!\d)\d{3}([- ]?)\d{2}\1\d{5}(?!\d)")
+_BUSINESS = re.compile(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{5}(?!\d)")
 _CORPORATION = re.compile(r"(?<!\d)\d{6}[- ]?\d{7}(?!\d)")
 _NHI = re.compile(r"(?<!\d)[12]\d{9}(?!\d)")
 # 계좌 — 하이픈으로 나눈 묶음(카카오뱅크 4-2-7 까지) 또는 앵커 옆의 붙여 쓴 10~14자리.
@@ -28,6 +29,12 @@ _NHI = re.compile(r"(?<!\d)[12]\d{9}(?!\d)")
 #   `<KR_ACCOUNT_1>만원`). 묶음 상한 6 은 카카오뱅크 7자리 묶음을 놓쳤다(전수 검토 2026-10-28).
 _ACCOUNT = re.compile(r"(?<![\d-])\d{2,7}(?:-\d{2,7}){1,4}(?![\d-])")
 _ACCOUNT_BARE = re.compile(r"(?<!\d)\d{10,14}(?!\d)")
+# 공백으로 나눈 계좌(`계좌 110 123 456789`)는 앵커가 있을 때만 받고, 뒤 묶음에 금액 · 시각 단위가
+# 붙으면 그 묶음은 뺀다 — ★ 재검토: 공백 구분을 통째로 빼서 이 꼴을 놓쳤다.
+_ACCOUNT_SPACED = re.compile(r"(?<![\d-])\d{2,7}(?:(?: ?- ?| )\d{2,7}){1,4}(?![\d-])")
+_AMOUNT_UNIT = re.compile(r"(?:원|만|천|억|시|분|초|일|월|년|개|건|명)")
+# 날짜 · 시각을 붙여 쓴 숫자(`20261029153012`)는 계좌가 아니다.
+_DATE_RUN = re.compile(r"(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")
 _ACCOUNT_ANCHORS = (
     "계좌", "입금", "은행", "이체", "송금", "예금주", "뱅크", "농협", "신한", "수협", "신협",
     "새마을", "우체국", "씨티", "SC제일",
@@ -95,8 +102,16 @@ def detect_kr_pii(text: str, *, rrn_anchor: bool = True) -> list[Finding]:
             continue
         corporation = _nearest(text, match.span(), _CORPORATION_ANCHORS)
         personal = _nearest(text, match.span(), _RRN_ANCHORS + _FRN_ANCHORS)
-        if corporation is not None and (personal is None or corporation <= personal):
-            continue  # `법인등록번호: 110111-…` — 같은 모양의 법인번호다(아래 법인 규칙이 받는다)
+        # `법인등록번호: 110111-…` 는 같은 모양의 법인번호다(아래 법인 규칙이 받는다). ★ 재검토 —
+        # 앵커만 보고 넘기면 `법인번호 900101-…`(주민 체크섬 유효)가 통째로 나갔다. 법인 체크섬이
+        # 맞고 주민 체크섬이 틀릴 때만 넘긴다.
+        if (
+            corporation is not None
+            and (personal is None or corporation <= personal)
+            and corporation_checksum_valid(value)
+            and not rrn_checksum_valid(value)
+        ):
+            continue
         gender = re.sub(r"\D", "", value)[6]
         if gender in "1234":
             if rrn_checksum_valid(value):
@@ -110,7 +125,7 @@ def detect_kr_pii(text: str, *, rrn_anchor: bool = True) -> list[Finding]:
     # ★ 붙여 쓴 숫자는 체크섬(1/10)만으로 받지 않는다 — 에포크 초 · 송장 · 바코드의 10~20%가
     #   사업자 · 법인번호로 가려졌다(전수 검토). 하이픈 형식이거나 앵커가 있어야 한다.
     for match in _BUSINESS.finditer(text):
-        hyphenated = match.group(1) == "-"
+        hyphenated = match.group(0).count("-") == 2
         if business_checksum_valid(match.group(0)) and (
             hyphenated or _near_anchor(text, match.span(), _BUSINESS_ANCHORS)
         ):
@@ -132,14 +147,24 @@ def detect_kr_pii(text: str, *, rrn_anchor: bool = True) -> list[Finding]:
     for match in _NHI.finditer(text):
         if _near_anchor(text, match.span(), ("건강보험", "보험증", "건보")):
             findings.append(_finding("L-KR-07", match, 0.8, "nhi_anchor"))
-    for pattern in (_ACCOUNT, _ACCOUNT_BARE):
+    for pattern in (_ACCOUNT, _ACCOUNT_BARE, _ACCOUNT_SPACED):
         for match in pattern.finditer(text):
-            number = re.sub(r"\D", "", match.group(0))
-            if not 10 <= len(number) <= 16 or _PHONE_SHAPED.fullmatch(match.group(0)):
+            start, end = match.span()
+            if pattern is _ACCOUNT_SPACED:
+                if " " not in match.group(0):
+                    continue  # 하이픈 · 붙여 쓴 꼴은 위 둘이 받는다
+                if _AMOUNT_UNIT.match(text, end):
+                    end = text.rfind(" ", start, end)  # `… 456789 10만원` 의 `10` 은 금액이다
+                    end = len(text[start:end].rstrip(" -")) + start
+            value = text[start:end]
+            number = re.sub(r"\D", "", value)
+            if not 10 <= len(number) <= 16 or _PHONE_SHAPED.fullmatch(value):
                 continue
-            bank_right_before = pattern is _ACCOUNT and bool(
-                _BANK_RIGHT_BEFORE.search(text[max(0, match.start() - 6) : match.start()])
+            if _DATE_RUN.match(number):
+                continue
+            bank_right_before = pattern is not _ACCOUNT_BARE and bool(
+                _BANK_RIGHT_BEFORE.search(text[max(0, start - 6) : start])
             )
-            if bank_right_before or _near_anchor(text, match.span(), _ACCOUNT_ANCHORS):
-                findings.append(_finding("L-KR-08", match, 0.8, "account_anchor"))
+            if bank_right_before or _near_anchor(text, (start, end), _ACCOUNT_ANCHORS):
+                findings.append(Finding("L-KR-08", (start, end), 0.8, "L0", "account_anchor"))
     return findings

@@ -380,8 +380,7 @@ def test_tool_call_arguments_are_inspected_after_unescaping_hangul() -> None:
 
     arguments = json.dumps({"memo": "[대외비] 구조조정 계획"})
     assert "대외비" not in arguments
-    working, _ = _working_copy(_tool_history(arguments))
-    leaves = _field_leaves(working)
+    leaves = _field_leaves(_working_copy(_tool_history(arguments)))
     assert any("대외비" in leaf.text for leaf in leaves)
 
 

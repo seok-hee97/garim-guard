@@ -107,6 +107,14 @@ _DASHES = {
 # 한글 모음 `ㅡ` 를 숫자 사이 구분자로 쓰는 표기(`010ㅡ1234ㅡ5678`). 숫자 사이에서만 바꾼다 —
 # 다른 자리의 `ㅡ` 는 자모 결합 단계가 읽어야 한다.
 _DIGIT_DASH = re.compile(r"(?<=\d)\u3161(?=\d)")
+# JSON 문자열 이스케이프 — `\uXXXX`(서로게이트 쌍 포함)와 `\n` · `\t` · `\"` 등. 겹친 이스케이프
+# (`\\uXXXX`, JSON 안의 JSON)도 역슬래시 개수와 상관없이 푼다.
+_JSON_ESCAPE = re.compile(
+    r"\\+u(?P<high>[dD][89abAB][0-9a-fA-F]{2})\\+u(?P<low>[dD][c-fC-F][0-9a-fA-F]{2})"
+    r"|\\+u(?P<code>[0-9a-fA-F]{4})"
+    r"|\\+(?P<simple>[ntr\"/])"
+)
+_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "/": "/"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +136,42 @@ class NormalizedBundle:
     detensified: NormalizedView
     decoded: list[NormalizedView] = field(default_factory=list)
     delta: dict[str, int] = field(default_factory=dict)
+
+
+def _unescape_json(text: str, source_map: IntervalMap) -> tuple[str, IntervalMap]:
+    """JSON 이스케이프를 푼다. 푼 글자는 이스케이프 전체의 원문 구간을 가리킨다.
+
+    ★ 전수 검토(2026-10-28) — 기본 `json.dumps` 는 한글을 `\\uXXXX` 로 낸다. 도구 결과 · 이중 인코딩
+      JSON · 문자열 리터럴에 실린 한글(`[\\ub300\\uc678\\ube44]`)을 규칙도 L1 도 읽지 못했다(strict
+      에서도 allow). 여기서 풀면 모든 스트림이 읽고, 마스킹은 원문의 이스케이프 구간을 통째로
+      바꾸므로 JSON 이 깨지지 않는다. 델타(L1 feature)에는 세지 않는다.
+    """
+    if "\\" not in text:
+        return text, source_map
+    output: list[str] = []
+    mapped: IntervalMap = []
+    index = 0
+    for match in _JSON_ESCAPE.finditer(text):
+        start, end = match.span()
+        if match.group("high"):
+            high, low = int(match.group("high"), 16), int(match.group("low"), 16)
+            character = chr(0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00))
+        elif match.group("code"):
+            code = int(match.group("code"), 16)
+            if 0xD800 <= code <= 0xDFFF:
+                continue  # 짝 없는 서로게이트 — 그대로 둔다
+            character = chr(code)
+        else:
+            character = _SIMPLE_ESCAPES[match.group("simple")]
+        output.append(text[index:start])
+        mapped.extend(source_map[index:start])
+        output.append(character)
+        covered = source_map[start:end]
+        mapped.append((min(item[0] for item in covered), max(item[1] for item in covered)))
+        index = end
+    output.append(text[index:])
+    mapped.extend(source_map[index:])
+    return "".join(output), mapped
 
 
 def _nfkc_charwise(text: str, source_map: IntervalMap) -> tuple[str, IntervalMap, int]:
@@ -242,7 +286,8 @@ def _conservative_spaces(text: str, source_map: IntervalMap) -> tuple[str, Inter
 def normalize(text: str) -> NormalizedBundle:
     delta = {key: 0 for key in DELTA_KEYS}
     raw_map = identity_map(len(text))
-    current, current_map, delta["nfkc"] = _nfkc_charwise(text, raw_map)
+    current, current_map = _unescape_json(text, raw_map)
+    current, current_map, delta["nfkc"] = _nfkc_charwise(current, current_map)
     current, current_map, delta["zero_width"], delta["tag_chars"] = _drop_controls(
         current, current_map
     )

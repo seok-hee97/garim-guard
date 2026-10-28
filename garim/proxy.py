@@ -159,12 +159,12 @@ def _with_text(content: Any, replacement: str) -> Any:
     return updated if injected else content
 
 
-def segments_from_messages(
-    messages: list[dict[str, Any]], *, structured: frozenset[int] = frozenset()
-) -> list[Segment]:
+def segments_from_messages(messages: list[dict[str, Any]]) -> list[Segment]:
     """`messages` 배열을 검사 단위로 옮긴다. 순서와 개수는 1:1 로 보존한다.
 
-    `structured` 에 든 메시지는 본문이 JSON 이다 — 필드 검사가 푼 값을 보므로 여기서는 비운다.
+    JSON 으로 된 본문(도구 결과)도 원문 그대로 검사한다 — `\\uXXXX` 이스케이프는 정규화가 푼다
+    (`garim/normalize/chain.py`). ★ 재검토: 본문을 파싱해 값 단위로 검사하던 판은 소수 표기 숫자를
+    놓쳤고, 필드 검사의 크기 예산을 `tools` 와 나눠 써서 큰 에이전트 요청을 막았다.
     """
     if not isinstance(messages, list) or not messages:
         raise ProxyError(400, "messages must be a non-empty array")
@@ -177,8 +177,7 @@ def segments_from_messages(
         if origin is None:
             # 모르는 역할을 `user` 로 접으면 신뢰 등급을 임의로 올리는 셈이다.
             raise ProxyError(400, f"messages[{index}] has an unsupported role: {role!r}")
-        text = "" if index in structured else _text_of(message.get("content"))
-        segments.append(Segment(text, origin=origin))
+        segments.append(Segment(_text_of(message.get("content")), origin=origin))
     return segments
 
 
@@ -196,23 +195,85 @@ _UNSCANNED_REQUEST_KEYS = frozenset({
 # 문자열과 `file_data` 키를 건너뛰었더니 도구 인자 `{"note": "data:;base64, 주민번호 …"}` 가
 # 그대로 나갔다.
 #   ★ 전수 검토(2026-10-28) — 글자 집합만 봐서 공백 섞인 영숫자 평문(`card 4111 1111 …`)도
-#   "base64" 였고, `data:text/plain;base64,…` 처럼 텍스트 파일도 이진으로 건너뛰었다. 이제 공백
-#   없는 base64 로 끝까지 풀리고, 텍스트 MIME 이 아니며, 풀린 바이트가 알려진 이진 형식(이미지 ·
-#   오디오 · PDF · 압축 문서)으로 시작할 때만 건너뛴다. 그 밖에는 문자열로 검사한다.
+#   "base64" 였고, `data:text/plain;base64,…` 처럼 텍스트 파일도 이진으로 건너뛰었다. 이제 base64
+#   로 풀어(줄바꿈 · URL-safe 허용) **텍스트로 읽히면** 푼 글을 검사하고, 가렸으면 다시 인코딩한다.
+#   텍스트가 아니면 이진으로 건너뛴다. 짧은 값은 원문도 검사한다 — base64 글자만으로 된 평문
+#   (`4111111111111111`)이 이진처럼 보일 수 있다. ★ 재검토: 파일 서명 목록으로 가르던 판은 `BM`
+#   으로 시작하는 텍스트를 건너뛰었고, 서명이 목록에 없는 큰 첨부(HWP · 줄바꿈 base64)를 막았다.
 _BINARY_PARTS = (("image_url", "url"), ("input_audio", "data"), ("file", "file_data"))
-_DATA_URL = re.compile(r"data:(?P<mime>[^,;]*);base64,(?P<body>.*)", re.DOTALL)
-_TEXT_MIME = re.compile(r"(?:text/|application/(?:json|xml|x-yaml|yaml|csv|javascript))", re.I)
-_BINARY_MAGIC = (
-    b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"%PDF", b"PK\x03\x04", b"OggS", b"fLaC", b"ID3",
-    b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\x1a\x45\xdf\xa3", b"BM", b"II*\x00", b"MM\x00*",
-)
+_DATA_URL = re.compile(r"(?P<prefix>data:(?P<mime>[^,]*?)(?:;[^,;]*)*?;base64,)(?P<body>.*)", re.S)
+_SHORT_PAYLOAD = 256
+
+
+@dataclass(slots=True)
+class _EncodedText:
+    """base64 로 감싼 텍스트 첨부 — 검사하는 동안 푼 글이 문자열 자리를 대신한다."""
+
+    original: str
+    prefix: str
+    text: str
+    encoding: str
+    urlsafe: bool
+    changed: bool = False
+
+    def render(self) -> str:
+        if not self.changed:
+            return self.original
+        raw = self.text.encode(self.encoding)
+        body = base64.urlsafe_b64encode(raw) if self.urlsafe else base64.b64encode(raw)
+        return self.prefix + body.decode("ascii")
+
+
+def _decoded_text(raw: bytes) -> tuple[str, str] | None:
+    """텍스트로 읽히는가 — UTF-8 · BOM 붙은 UTF-16 · CP949, NUL 없이 거의 다 인쇄 가능한 글자."""
+    has_bom = raw[:2] in (b"\xff\xfe", b"\xfe\xff")
+    candidates = ("utf-16",) if has_bom else ("utf-8", "cp949")
+    for encoding in candidates:
+        try:
+            text = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        printable = sum(c.isprintable() or c in "\r\n\t" for c in text)
+        if text and "\x00" not in text and printable >= 0.95 * len(text):
+            return text, encoding
+    return None
+
+
+def _classify_payload(value: str, *, require_data_url: bool) -> str | _EncodedText:
+    """`"plain"`(문자열로 검사) · `"binary"`(건너뜀) · `_EncodedText`(푼 글을 검사)."""
+    match = _DATA_URL.fullmatch(value)
+    if match is not None:
+        prefix, body = match.group("prefix"), match.group("body")
+    elif require_data_url:
+        return "plain"  # `image_url.url` 의 http(s) 주소
+    else:
+        prefix, body = "", value
+    compact = re.sub(r"\s+", "", body)
+    urlsafe = "-" in compact or "_" in compact
+    try:
+        raw = base64.b64decode(
+            compact + "=" * (-len(compact) % 4),
+            altchars=b"-_" if urlsafe else None,
+            validate=True,
+        )
+    except ValueError:
+        return "plain"
+    if not raw:
+        return "plain"
+    decoded = _decoded_text(raw)
+    if decoded is not None:
+        return _EncodedText(value, prefix, decoded[0], decoded[1], urlsafe)
+    return "plain" if len(value) <= _SHORT_PAYLOAD else "binary"
 # 메시지의 프로토콜 키 — 이 키 이름은 검사하지 않는다.
 _HANDLED_MESSAGE_KEYS = frozenset(
     {"role", "content", "tool_calls", "function_call", "tool_call_id"}
 )
 # 대화를 잇는 ID 는 이 모양의 문자열일 때만 건너뛴다 — dict · 긴 문자열이면 검사한다(전수 검토).
-_PROTOCOL_ID = re.compile(r"[\w\-:.]{1,128}")
-_SETTING_NAME = re.compile(r"[\w\-:./]{1,128}")
+# ★ 재검토 — `\w` 가 유니코드라 `홍길동` · `010-1234-5678` 도 ID 모양이었다. ASCII 로 묶고,
+# 숫자 · 구분자로만 된 값(번호)은 ID 가 아니다.
+_PROTOCOL_ID = re.compile(r"(?=.*[A-Za-z_])[A-Za-z0-9_\-:.]{1,128}", re.ASCII)
+_SETTING_NAME = re.compile(r"(?=.*[A-Za-z_])[A-Za-z0-9_\-:./]{1,128}", re.ASCII)
+_STREAM_OPTIONS = frozenset({"include_usage", "include_obfuscation"})
 
 
 def _expected_setting(key: str, value: Any) -> bool:
@@ -222,7 +283,9 @@ def _expected_setting(key: str, value: Any) -> bool:
     if isinstance(value, str):
         return bool(_SETTING_NAME.fullmatch(value))
     if key == "stream_options" and isinstance(value, dict):
-        return all(isinstance(item, bool) for item in value.values())
+        return all(
+            name in _STREAM_OPTIONS and isinstance(item, bool) for name, item in value.items()
+        )
     if key == "logit_bias" and isinstance(value, dict):
         return all(
             str(name).isdigit() and isinstance(item, int | float) for name, item in value.items()
@@ -233,6 +296,8 @@ def _expected_setting(key: str, value: Any) -> bool:
         def names(node: Any) -> bool:
             if isinstance(node, dict):
                 return all(_SETTING_NAME.fullmatch(str(k)) and names(v) for k, v in node.items())
+            if isinstance(node, list):
+                return all(names(item) for item in node)
             return not isinstance(node, str) or bool(_SETTING_NAME.fullmatch(node))
         return names(value)
     return False
@@ -297,36 +362,10 @@ def _parse_arguments(index: int, arguments: Any) -> Any:
     return _Arguments(arguments, parsed)
 
 
-def _structured_content(index: int, content: Any) -> _Arguments | None:
-    """JSON 객체 · 배열인 메시지 본문 — 도구 결과는 대개 `json.dumps` 로 만든다.
-
-    ★ 전수 검토(2026-10-28) — 도구 인자는 `\\uXXXX` 를 풀어 검사했지만 `role: "tool"` 본문은 그대로
-      검사해서, 한글이 이스케이프된 도구 결과(`"[\\ub300\\uc678\\ube44]…"`)의 표식 · 이름을 규칙이
-      읽지 못했다(strict 에서도 allow).
-    """
-    if not isinstance(content, str) or content.lstrip()[:1] not in ("{", "["):
-        return None
-    try:
-        parsed = json.loads(content, object_pairs_hook=_unique_object)
-    except _RepeatedKeyError as exc:
-        raise ProxyError(
-            400, f"messages[{index}] content repeats a JSON key; request was not forwarded"
-        ) from exc
-    except ValueError:
-        return None
-    return _Arguments(content, parsed) if isinstance(parsed, dict | list) else None
-
-
-def _working_copy(payload: dict[str, Any]) -> tuple[dict[str, Any], frozenset[int]]:
-    """상류로 보낼 사본과 본문이 JSON 인 메시지 번호. 도구 인자 · JSON 본문은 검사하는 동안
-    파싱된 값으로 둔다."""
+def _working_copy(payload: dict[str, Any]) -> dict[str, Any]:
+    """상류로 보낼 사본. 도구 인자는 검사하는 동안 파싱된 값으로 둔다."""
     working = copy.deepcopy(payload)
-    structured: set[int] = set()
     for index, message in enumerate(working["messages"]):
-        content = _structured_content(index, message.get("content"))
-        if content is not None:
-            message["content"] = content
-            structured.add(index)
         calls = message.get("tool_calls")
         if calls is not None and not isinstance(calls, list):
             raise ProxyError(400, f"messages[{index}].tool_calls must be an array")
@@ -335,39 +374,24 @@ def _working_copy(payload: dict[str, Any]) -> tuple[dict[str, Any], frozenset[in
         for function in functions:
             if isinstance(function, dict) and "arguments" in function:
                 function["arguments"] = _parse_arguments(index, function["arguments"])
-    return working, frozenset(structured)
+    return working
 
 
-def _binary_payload(value: str, *, require_data_url: bool) -> bool:
-    """정말 이진 본문인가 — 건너뛰어도 되는가."""
-    match = _DATA_URL.fullmatch(value)
-    if match is not None:
-        if _TEXT_MIME.match(match.group("mime")):
-            return False
-        body = match.group("body")
-    elif require_data_url:
-        return False  # `image_url.url` 의 http(s) 주소는 문자열로 검사한다
-    else:
-        body = value
-    try:
-        raw = base64.b64decode(body, validate=True)
-    except ValueError:  # binascii.Error 포함 — 공백 · 다른 글자가 섞였다
-        return False
-    head = raw[:16]
-    return head.startswith(_BINARY_MAGIC) or (
-        head[:4] == b"RIFF" and head[8:12] in (b"WAVE", b"WEBP", b"AVI ")
-    ) or head[4:8] == b"ftyp"
-
-
-def _without_binary(part: Any) -> Any:
-    """검사용 보기 — 내용 파트의 이진 본문만 뺀다. 경로는 원래 파트와 같다."""
+def _prepare_part(part: Any) -> Any:
+    """내용 파트의 첨부를 검사할 꼴로 바꾼다. 텍스트 첨부는 제자리에서 `_EncodedText` 가 되고,
+    돌려주는 보기에서는 이진 본문만 빠진다. 경로는 원래 파트와 같다."""
     if not isinstance(part, dict):
         return part
     view = dict(part)
     for outer, inner in _BINARY_PARTS:
-        holder = view.get(outer)
+        holder = part.get(outer)
         value = holder.get(inner) if isinstance(holder, dict) else None
-        if isinstance(value, str) and _binary_payload(value, require_data_url=inner == "url"):
+        if not isinstance(value, str):
+            continue
+        kind = _classify_payload(value, require_data_url=inner == "url")
+        if isinstance(kind, _EncodedText):
+            holder[inner] = kind
+        elif kind == "binary":
             view[outer] = {k: v for k, v in holder.items() if k != inner}
     return view
 
@@ -378,10 +402,9 @@ def _collect(node: Any, path: tuple[Any, ...], origin: Origin, out: list[_Leaf])
     elif isinstance(node, str):
         if node:
             out.append(_Leaf(path, node, origin))
-    elif isinstance(node, int) and not isinstance(node, bool) and abs(node) >= 10**9:
-        # ★ 숫자 리프는 검사하지 않아 `{"card": 4111111111111111}` 이 그대로 나갔다(전수 검토).
-        #   10자리 이상만 본다 — 가리면 그 자리는 토큰 문자열이 된다.
-        out.append(_Leaf(path, str(node), origin))
+    elif isinstance(node, _EncodedText):
+        if node.text:
+            out.append(_Leaf(path, node.text, origin))
     elif isinstance(node, dict):
         for key, value in node.items():
             # 키도 상류로 가는 문자열이다 — `{"contacts": {"010-…": "김철수"}}` 의 번호는
@@ -429,7 +452,7 @@ def _field_leaves(working: dict[str, Any]) -> list[_Leaf]:
                 for part_index, part in enumerate(value):
                     if _is_text_part(part):
                         part = {k: v for k, v in part.items() if k != "text"}
-                    _collect(_without_binary(part), (*path, part_index), origin, leaves)
+                    _collect(_prepare_part(part), (*path, part_index), origin, leaves)
             elif key == "tool_calls" and isinstance(value, list):
                 for call_index, call in enumerate(value):
                     call_id = call.get("id") if isinstance(call, dict) else None
@@ -465,21 +488,23 @@ def _assign(root: Any, path: tuple[Any, ...], value: str) -> None:
     if isinstance(target, _Arguments):  # 인자 전체가 JSON 문자열 하나였다
         target.value, target.changed = value, True
         return
+    if isinstance(target, _EncodedText):  # 텍스트 첨부 — 보낼 때 다시 인코딩한다
+        target.text, target.changed = value, True
+        return
     node[path[-1]] = value
     if owner is not None:
         owner.changed = True
 
 
 def _restore_argument_strings(working: dict[str, Any]) -> None:
-    """파싱해 둔 인자 · JSON 본문을 문자열로 되돌린다. 가린 것이 없으면 원래 바이트 그대로다."""
+    """파싱해 둔 인자 · 텍스트 첨부를 문자열로 되돌린다. 가린 것이 없으면 원래 바이트 그대로다."""
     for message in working["messages"]:
         content = message.get("content")
-        if isinstance(content, _Arguments):
-            message["content"] = (
-                json.dumps(content.value, ensure_ascii=False)
-                if content.changed
-                else content.original
-            )
+        for part in content if isinstance(content, list) else []:
+            for outer, inner in _BINARY_PARTS:
+                holder = part.get(outer) if isinstance(part, dict) else None
+                if isinstance(holder, dict) and isinstance(holder.get(inner), _EncodedText):
+                    holder[inner] = holder[inner].render()
         calls = message.get("tool_calls") or []
         functions = [call.get("function") for call in calls if isinstance(call, dict)]
         functions.append(message.get("function_call"))
@@ -622,13 +647,12 @@ class ProxyService:
             raise ProxyError(400, "streaming is not supported: masked tokens cannot be restored")
 
         messages = payload.get("messages")
-        segments_from_messages(messages)  # 모양 검사 — 실제 세그먼트는 JSON 본문을 가린 뒤 만든다
+        segments = segments_from_messages(messages)
         try:
-            working, structured = _working_copy(payload)
+            working = _working_copy(payload)
             groups = _field_groups(_field_leaves(working))
         except RecursionError as exc:
             raise ProxyError(400, "request is nested too deeply") from exc
-        segments = segments_from_messages(messages, structured=structured)
         inspector = self._inspector_factory()
         # 두 검사가 볼트를 나눠 쓴다 — 본문 · 필드에 있는 `<PHONE_1>` 같은 글자를 어느 검사보다
         # 먼저 피한다. ★ 전수 검토: 필드 쪽만 미리 피해서, 본문의 `<PHONE_1>` 과 필드 번호의
@@ -686,12 +710,8 @@ class ProxyService:
         _restore_argument_strings(outbound)
         if result.masked_segments is not None:
             outbound["messages"] = [
-                message
-                if index in structured
-                else {**message, "content": _with_text(message.get("content"), text)}
-                for index, (message, text) in enumerate(
-                    zip(outbound["messages"], result.masked_segments, strict=True)
-                )
+                {**message, "content": _with_text(message.get("content"), text)}
+                for message, text in zip(outbound["messages"], result.masked_segments, strict=True)
             ]
         masked = result.masked_segments is not None or (
             fields is not None and fields.masked_segments is not None

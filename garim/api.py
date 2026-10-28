@@ -281,7 +281,9 @@ class Inspector:
                     degraded = True
                     forced_warn = True
                     degraded_reasons.append("l2_parse_error")
-                except (Exception, SystemExit) as exc:  # 백엔드 경계 — pipeline.py 의 L1 과 같다
+                except KeyboardInterrupt:
+                    raise
+                except BaseException as exc:  # 백엔드 경계 — pipeline.py 의 L1 과 같다
                     degraded = True
                     forced_warn = True
                     degraded_reasons.append(f"l2_error:{type(exc).__name__}")

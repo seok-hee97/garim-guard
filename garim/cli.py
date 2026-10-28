@@ -189,8 +189,9 @@ def _print_result(
         if prefix is not None:
             payload["path"] = prefix
         if not show_masked:
-            payload.pop("masked_text", None)
-            payload.pop("masked_segments", None)
+            # 키는 남긴다 — 키를 기대하는 소비자가 깨지지 않게 값만 비운다(재검토).
+            payload["masked_text"] = None
+            payload["masked_segments"] = None
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return
     heading = f"{prefix}: " if prefix else ""
@@ -437,10 +438,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"garim: skipped (not inspected) {entry}", file=sys.stderr)
         if (seen or unreadable) and seen + len(unreadable) == len(skipped):
             # 파일은 있었는데 한 건도 검사하지 못했다 — 통과라고 말할 근거가 없다.
-            print(
-                f"garim: inspected 0 of {seen} files; refusing to report success",
-                file=sys.stderr,
-            )
+            what = f"0 of {seen} files" if seen else "0 files (directory not readable)"
+            print(f"garim: inspected {what}; refusing to report success", file=sys.stderr)
             return 4
         if skipped:
             # ★ 일부만 읽은 경우는 0 이 나왔다. CP949 한글 파일 하나가 검사되지 않아도
@@ -453,6 +452,11 @@ def main(argv: list[str] | None = None) -> int:
         # RuntimeError: L1 extra(onnxruntime·transformers) 미설치. 모델을 달라고 했는데
         # 못 올렸으면 L0 만으로 조용히 도는 대신 시작하지 않는다.
         print(f"garim: {exc}", file=sys.stderr)
+        return 4
+    except Exception as exc:
+        # ★ 재검토 — 예상하지 못한 예외는 트레이스백과 종료 코드 1(= warn)로 끝나, 2 에만 실패하는
+        #   게이트가 통과시켰다. 실행 오류(4)로 낸다.
+        print(f"garim: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 4
 
 

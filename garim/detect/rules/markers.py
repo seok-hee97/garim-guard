@@ -90,6 +90,20 @@ _OPENERS = {
     "[": "]", "(": ")", "（": "）", "【": "】", "「": "」", "『": "』", "<": ">", "《": "》",
 }
 _HEADER_SEPARATOR = re.compile(r"[ \t]*[-:|–—][ \t]")
+# 표식 바로 뒤의 부정 · 해당 없음(`대외비가 아닙니다`, `대외비: 해당 없음`, `confidential: false`),
+# 그리고 표식 자체를 설명하는 말(`(대외비) 표기를 붙이세요`, `<기밀> 태그 사용법`) — 재검토.
+_NEGATED_AFTER = re.compile(
+    r"[ \t]*(?:(?:가|이)?[ \t]*(?:아니|아닙|아님|아냐)"
+    r"|[^\n]{0,8}?(?:대상이[ \t]*(?:아니|아닙)|해당[ \t]*없|없음)"
+    r"|[)\]>」』】》]?[ \t]*[:：][ \t]*(?:false|no|none|n/a|없음|해당[ \t]*없)\b)",
+    re.IGNORECASE,
+)
+# 된소리 · 거센소리를 내린 스트림(`표기` → `뵤기`, `태그` → `대그`)에서도 맞게 그 꼴을 함께 둔다.
+_ABOUT_THE_MARK = re.compile(
+    r"[)\]>」』】》*]*[ \t]*(?:표기|뵤기|태그|대그|라벨|표시|뵤시|문구|마크|마그|도장)"
+)
+# 낱말 자체가 흔한 표식(`비밀 - 이건 우리끼리 얘기인데`)은 구분자 머리만으로 표식이라 하지 않는다.
+_WEAK_TERMS = frozenset({"비밀", "기밀", "秘"})
 # `본 문서는 대외비입니다` — 문서를 표시하는 문장이다. 조사 감점을 하지 않고 단독 표식처럼 센다.
 _DECLARATION_BEFORE = re.compile(
     r"(?:본|이|해당)[ \t]*(?:문서|자료|메일|파일|보고서)(?:는|은)[ \t]*$"
@@ -116,7 +130,7 @@ def _standalone(line: str, term: str) -> bool:
     return stripped.casefold() == term.casefold()
 
 
-def _header_like(line: str, start: int, end: int) -> bool:
+def _header_like(line: str, start: int, end: int, term: str = "") -> bool:
     """괄호 · 강조로 감쌌거나(`[대외비]`, `**대외비**`), 줄 머리에서 구분자가 뒤따른다
     (`대외비 - …`)."""
     before, after = line[max(0, start - 2) : start], line[end : end + 2]
@@ -124,6 +138,8 @@ def _header_like(line: str, start: int, end: int) -> bool:
         return True
     if before and after and _OPENERS.get(before[-1]) == after[0]:
         return True
+    if term in _WEAK_TERMS:
+        return False
     return not line[:start].strip(" \t#*>※-") and bool(_HEADER_SEPARATOR.match(line, end))
 
 
@@ -134,8 +150,12 @@ def score_marker(line: str, line_index: int, match: re.Match[str]) -> int:
     if line_index < FIRST_LINES:
         score += SCORE_FIRST_LINES
     before = line[max(0, match.start() - _LABEL_WINDOW) : match.start()]
-    declared = bool(_DECLARATION_BEFORE.search(before))
-    if _standalone(line, term) or _header_like(line, match.start(), match.end()) or declared:
+    # 표식으로 문장이 끝날 때만 표시 문장이다 — `이 메일은 기밀 유지 의무와 무관합니다` 는 아니다.
+    ending = line[match.end() :]
+    declared = bool(_DECLARATION_BEFORE.search(before)) and (
+        not ending.strip() or bool(_PARTICLE.match(ending)) or ending[:1] in ".。!)]"
+    )
+    if _standalone(line, term) or _header_like(line, match.start(), match.end(), term) or declared:
         score += SCORE_STANDALONE
     if _GRADE_LABEL.search(before):
         score += SCORE_GRADE_LABEL
@@ -158,6 +178,10 @@ def detect_markers(text: str, *, score_threshold: int = DEFAULT_SCORE_THRESHOLD)
                     and following
                     and 0xAC00 <= ord(following) <= 0xD7A3
                     and not _PARTICLE.match(line, match.end())
+                ):
+                    continue
+                if _NEGATED_AFTER.match(line, match.end()) or _ABOUT_THE_MARK.match(
+                    line, match.end()
                 ):
                     continue
                 label = line[max(0, match.start() - _LABEL_WINDOW) : match.start()]

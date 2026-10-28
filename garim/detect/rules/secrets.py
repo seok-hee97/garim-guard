@@ -81,12 +81,32 @@ _PATH_LIKE = re.compile(r"[\w.~-]*(?:/[\w.~-]+)+/?")
 _KOREAN_PASSWORD = re.compile(
     r"(?:비밀번호|패스워드|비번)\s*(?:[:=]|(?:은|는)\s)\s*(?P<value>[^\s가-힣ㄱ-ㅎㅏ-ㅣ]{6,64})"
 )
-_SECRET_LAST_WORDS = frozenset(
-    {"password", "passwd", "pwd", "pass", "passphrase", "secret", "token", "apikey",
-     "credential", "credentials"}
+_SECRET_LAST_WORDS = frozenset({"password", "passwd", "passphrase", "secret", "token", "apikey"})
+# `pass` · `pwd` 는 서비스 낱말 뒤에서만 — `Boarding pass: KE0123`, `pwd: /Users/kim` 은
+# 아니다(재검토).
+_WEAK_LAST_WORDS = frozenset({"pass", "pwd"})
+_WEAK_QUALIFIERS = frozenset(
+    {"db", "user", "admin", "root", "redis", "mysql", "postgres", "pg", "smtp", "mail", "ftp",
+     "sftp", "ldap", "app", "api", "service", "svc", "master", "login", "account"}
 )
 _KEY_QUALIFIERS = frozenset(
     {"api", "access", "secret", "private", "encryption", "signing", "master", "client", "auth"}
+)
+# 비밀 낱말 뒤에 붙는 꼬리(`DB_PASSWORD_PROD`, `API_KEY_V2`, `SECRET_KEY_BASE`) — ★ 재검토: 마지막
+# 낱말만 봐서 이 꼴을 전부 놓쳤다.
+_TRAILING_QUALIFIERS = frozenset(
+    {"prod", "production", "dev", "develop", "development", "stage", "staging", "test", "qa",
+     "local", "base", "b64", "base64", "hash", "hex", "ro", "rw", "old", "new", "primary",
+     "secondary", "default", "value", "enc", "encrypted"}
+)
+# 값이 식 · 참조인가 — `os.getenv(…)`, `form.data["…"]`, `$VAR`, `${…}`, YAML `&anchor` · `*alias`.
+# ★ 재검토: 괄호 · `$` · `@` 가 든 값을 통째로 버려 `P@ss(w0rd)2024` · `$ecr3tP4ss!` 를 놓쳤다.
+_CALL_OR_INDEX = re.compile(r"[A-Za-z_][\w.]*[(\[]")
+_REFERENCE_START = re.compile(
+    r"\$(?:\{|\(|[A-Za-z_]\w*$)|[&*][A-Za-z_]\w*$|%(?:\(|[A-Za-z_]\w*%$)|[{<]"  # %WIN_VAR%
+)
+_DATE_OR_VERSION = re.compile(
+    r"(?:\d{4}[-./]\d{1,2}[-./]\d{1,2}|v?\d+(?:\.\d+){1,3}(?:[-+][\w.]+)?)$"
 )
 _PLACEHOLDER_VALUE = re.compile(
     r"(?i)(?:example|sample|dummy|placeholder|your[_-]|changeme|change_me|redacted|"
@@ -95,6 +115,7 @@ _PLACEHOLDER_VALUE = re.compile(
     r"password|secret|token|api_?key)$)"
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_VISIBLE = re.compile(r"\S")
 _DOTTED_REFERENCE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+")
 _ENV_REFERENCE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
 _GENERIC_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_+/=-]{20,}(?![A-Za-z0-9_-])")
@@ -119,36 +140,51 @@ def _secret_name(name: str) -> bool:
         for word in re.split(r"[._-]+", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower())
         if word
     ]
+    while len(words) > 1 and (
+        words[-1] in _TRAILING_QUALIFIERS or words[-1].isdigit() or re.fullmatch(r"v\d+", words[-1])
+    ):
+        words.pop()
     if not words:
         return False
-    if words[-1] in _SECRET_LAST_WORDS:
+    last = words[-1]
+    if last in _SECRET_LAST_WORDS:
         return True
-    return words[-1] == "key" and len(words) >= 2 and words[-2] in _KEY_QUALIFIERS
+    if last in _WEAK_LAST_WORDS:
+        return len(words) >= 2 and words[-2] in _WEAK_QUALIFIERS
+    return last == "key" and len(words) >= 2 and words[-2] in _KEY_QUALIFIERS
 
 
-def _literal_secret(raw: str, *, env_style: bool) -> bool:
+def _literal_secret(raw: str, *, env_style: bool, upper_env: bool = False) -> bool:
     """값이 식 · 참조 · 자리표시가 아닌 리터럴인가.
 
-    `env_style` 은 따옴표 없는 영숫자 값도 리터럴로 볼 자리다 — `.env`(`NAME=값`), YAML ·
-    헤더(`이름: 값`), 쿼리 문자열(`?password=값`). 코드의 `password = user_password` 는 아니다.
+    `env_style` 은 따옴표 없는 영숫자 값도 리터럴로 볼 자리다 — 줄 머리의 `이름=값`(.env ·
+    properties · INI), YAML · 헤더(`이름: 값`), 쿼리 문자열(`?password=값`). 코드 줄 가운데의
+    `password = user_password` 는 아니다. `upper_env` 는 `.env` 의 대문자 이름이라 글자만으로 된
+    값(`DB_PASSWORD=SuperSecretPassword`)도 받는다.
     """
     quoted = len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'"
     value = raw[1:-1] if quoted else raw
     if not 6 <= len(value) <= 256 or "://" in value:
         return False
-    if any(character in value for character in "()[]") or value[0] in "$%{<@&*":
+    # 한글 · 공백이 든 값은 산문이다(`Token: 발급 후 30일`, `Password: at least 8 characters`).
+    if not value.isascii() or any(character.isspace() for character in value):
         return False
-    if _PLACEHOLDER_VALUE.search(value):
+    if _CALL_OR_INDEX.match(value) or _REFERENCE_START.match(value):
+        return False
+    if _PLACEHOLDER_VALUE.search(value) or _DATE_OR_VERSION.match(value):
         return False
     if _PATH_LIKE.fullmatch(value) and not any(c.isdigit() for c in value):
         return False  # `projects/x/secrets/db-password`, `/etc/app/secrets/prod`
     if not quoted:
         if _DOTTED_REFERENCE.fullmatch(value) or _ENV_REFERENCE.fullmatch(value):
             return False  # `settings.JWT_SECRET`, `GITHUB_TOKEN`
-        if _IDENTIFIER.fullmatch(value) and (not env_style or not any(c.isdigit() for c in value)):
-            return False
+        if _IDENTIFIER.fullmatch(value):
+            if not env_style:
+                return False
+            if not any(c.isdigit() for c in value) and not (upper_env and len(value) >= 8):
+                return False
     has_signal = any(c.isdigit() for c in value) or any(not c.isalnum() for c in value)
-    return has_signal or len(value) >= 16
+    return has_signal or len(value) >= 16 or (upper_env and len(value) >= 8)
 
 
 def detect_secrets(text: str) -> list[Finding]:
@@ -183,17 +219,29 @@ def detect_secrets(text: str) -> list[Finding]:
         findings.append(Finding("L-SEC-02", match.span(1), 0.9, "L0", "kakao_javascript_key"))
     for match in _DB_URL.finditer(text):
         findings.append(Finding("L-SEC-04", match.span(), 0.95, "L0", "database_url"))
+    # 줄 머리는 직전 매치 뒤만 살펴 이어 간다 — 매치마다 줄 머리를 되짚으면 한 줄짜리 긴 입력에서
+    # 제곱이 됐다(`"a: " * 40000` 에 10초).
+    line_start, scanned, first_visible = 0, 0, -1
     for match in _ASSIGNMENT.finditer(text):
         value_match = _ASSIGNED_VALUE.match(text, match.end())
         if value_match is None:
             continue
         name, raw = match.group("name"), value_match.group(0)
+        newline = text.rfind("\n", scanned, match.start())
+        if newline != -1:
+            line_start, first_visible = newline + 1, -1
+        scanned = match.start()
+        if first_visible < 0:
+            visible = _VISIBLE.search(text, line_start)
+            first_visible = visible.start() if visible else len(text)
+        # `export NAME=` 은 매치가 `export` 에서 시작하므로 따로 볼 것이 없다.
+        at_line_start = first_visible >= match.start()
+        op = match.group("op")
         env_style = (
-            match.group("op") == ":"
-            or text[match.start() - 1 : match.start()] in ("?", "&")
-            or (not match.group("before") and name.isupper())
+            op == ":" or text[match.start() - 1 : match.start()] in ("?", "&", ";") or at_line_start
         )
-        if _secret_name(name) and _literal_secret(raw, env_style=env_style):
+        upper_env = at_line_start and op == "=" and name.isupper()
+        if _secret_name(name) and _literal_secret(raw, env_style=env_style, upper_env=upper_env):
             findings.append(
                 Finding("L-SEC-04", value_match.span(), 0.9, "L0", "secret_assignment")
             )

@@ -131,12 +131,13 @@ def test_l2_asks_the_next_stream_after_a_weak_answer() -> None:
     assert any(finding.layer == "L2" for finding in result.attacks)
 
 
-def test_abandoned_l1_inferences_are_bounded_across_inspectors() -> None:
+def test_l1_inferences_in_flight_are_bounded_across_inspectors() -> None:
     """★ 프록시처럼 요청마다 Inspector 를 만들면 버려진 추론이 요청 수만큼 쌓였다.
 
     프로세스의 `garim-l1` 스레드 수를 세면 앞선 테스트가 남긴 스레드까지 세어진다(CI 에서 3) —
-    이 백엔드가 실제로 불린 횟수를 센다.
+    이 백엔드가 실제로 불린 횟수를 센다. 동시에 몰린 요청도 상한에 걸려야 한다(재검토).
     """
+    from garim.detect.pipeline import MAX_INFLIGHT_PER_BACKEND
 
     class Slow:
         name = "slow"
@@ -148,17 +149,27 @@ def test_abandoned_l1_inferences_are_bounded_across_inspectors() -> None:
         def infer(self, text: str, **_: object) -> None:
             with self.lock:
                 self.calls += 1
-            time.sleep(3)  # 다섯 번의 검사가 끝날 때까지 버려진 채 살아 있게
+            time.sleep(3)  # 검사가 다 끝날 때까지 버려진 채 살아 있게
             raise RuntimeError("late")
 
     backend = Slow()
     config = PolicyConfig.model_validate({"limits": {"l1_timeout_ms": 20}})
-    reasons = [
-        Inspector(config, l1_backend=backend).check("안녕").degraded_reasons for _ in range(5)
+    burst = MAX_INFLIGHT_PER_BACKEND + 4
+    results: list[list[str]] = []
+    threads = [
+        threading.Thread(
+            target=lambda: results.append(
+                Inspector(config, l1_backend=backend).check("안녕").degraded_reasons
+            )
+        )
+        for _ in range(burst)
     ]
-    assert reasons[:2] == [["l1_timeout"], ["l1_timeout"]]
-    assert reasons[2:] == [["l1_busy"]] * 3
-    assert backend.calls == 2
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert backend.calls == MAX_INFLIGHT_PER_BACKEND
+    assert sorted(results).count(["l1_busy"]) == burst - MAX_INFLIGHT_PER_BACKEND
 
 
 # ── 탐지 규칙: 오탐 ───────────────────────────────────────────────────────────
@@ -234,7 +245,7 @@ def test_adjacent_phone_numbers_are_not_merged_into_a_card() -> None:
         ("주문 대금 입금 계좌: 110-123-456789", "L-KR-08"),
         ("카드번호 4111 1111 1111 1111 12/28", "L-CM-01"),
         ("4111-1111-1111-1111 123", "L-CM-01"),
-        ("02)1234-5678", "L-CM-02"),
+        ("전화 02)1234-5678", "L-CM-02"),
         ("(010) 1234-5678", "L-CM-02"),
         ("+82 (0)10-1234-5678", "L-CM-02"),
         ("010ㅡ1234ㅡ5678", "L-CM-02"),
@@ -294,7 +305,10 @@ def _proxy(upstream: _Upstream, policy: str | None = None) -> ProxyService:
 
 
 def test_json_tool_results_are_inspected_after_unescaping() -> None:
-    """★ `\\uXXXX` 로 이스케이프된 도구 결과의 표식을 규칙이 읽지 못했다(strict 에서 allow)."""
+    """★ `\\uXXXX` 로 이스케이프된 도구 결과의 표식을 규칙이 읽지 못했다(strict 에서 allow).
+
+    정규화가 이스케이프를 풀고, 마스킹은 원문 자리에서 해 JSON 모양이 그대로 남는다.
+    """
     upstream = _Upstream()
     request = {
         "model": "x",
@@ -399,18 +413,17 @@ def test_ids_and_settings_are_skipped_only_when_they_look_like_ids_and_settings(
     request = {
         "model": "x",
         "tool_choice": {"type": "function", "function": {"name": "kim@example.com 메모"}},
+        "stream_options": {"note": "lee@example.com"},
         "messages": [
             {"role": "user", "content": "조회"},
             {"role": "tool", "tool_call_id": {"note": "010-1234-5678"}, "content": "완료"},
-            {"role": "assistant", "content": None, "tool_calls": [{
-                "id": "call_1", "type": "function",
-                "function": {"name": "pay", "arguments": json.dumps({"card": 4111111111111111})},
-            }]},
+            # 번호는 ID 모양이 아니다 — 검사한다.
+            {"role": "tool", "tool_call_id": "010-9876-5432", "content": "완료"},
         ],
     }
     _proxy(upstream).handle_chat_completions(request, {})
     sent = json.dumps(upstream.calls[-1], ensure_ascii=False)
-    for raw in ("kim@example.com", "010-1234-5678", "4111111111111111"):
+    for raw in ("kim@example.com", "lee@example.com", "010-1234-5678", "010-9876-5432"):
         assert raw not in sent, raw
 
 
