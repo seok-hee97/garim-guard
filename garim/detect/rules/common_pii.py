@@ -53,12 +53,16 @@ _CARD_GROUPED = re.compile(
     r"(?<!\d)(?<!\d-)[1-9]\d{3}[ -]"
     r"(?:\d{4}[ -]\d{4}[ -]\d{4}(?P<tail>[ -]\d{1,3})?|\d{6}[ -]\d{4,5})(?!\d)"
 )
-_CARD_BARE = re.compile(r"(?<!\d)(?<!\d-)[1-9]\d{12,18}(?!\d)")
+# 소수점 뒤 · 앞의 숫자는 카드가 아니다(★ 재검토: 스프레드시트의 소수 셀을 카드로 가렸다).
+_CARD_BARE = re.compile(r"(?<![\d.])(?<!\d-)[1-9]\d{12,18}(?!\d|\.\d)")
 _CARD_ANCHOR = re.compile(r"(?:카드|신용|체크|결제|[Cc]ard|CARD)[^\n]{0,12}$")
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 # 버전 · 조항 번호(`버전 1.0.0.0`, `제3.1.2.1항`)와 루프백 · 미지정 주소는 가릴 주소가 아니다.
 # 낱말 경계를 둔다 — `srv 10.0.0.5` · `dev 10.1.2.3` 의 끝 `v` 는 버전 표기가 아니다(재검토).
 _VERSION_BEFORE = re.compile(r"(?:(?<![A-Za-z])(?:[Vv]er(?:sion)?|[Vv])|버전|제)\s?$")
+# `LibreOffice/24.8.4.2` · `Mozilla/5.0.0.1` 처럼 제품 이름 뒤의 버전. ★ 재검토: LibreOffice 로
+# 저장한 모든 문서의 `meta.xml` 생성기 줄이 IP 주소로 잡혀 문서 첨부가 막혔다.
+_PRODUCT_VERSION_BEFORE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*/$")
 _MAC = re.compile(r"(?<![0-9A-F])(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}(?![0-9A-F])", re.IGNORECASE)
 
 
@@ -109,7 +113,11 @@ def detect_common_pii(text: str) -> list[Finding]:
             continue
         before = text[max(0, match.start() - 8) : match.start()]
         after = text[match.end() : match.end() + 1]
-        version = _VERSION_BEFORE.search(before) or after in ("항", "조", "절")
+        version = (
+            _VERSION_BEFORE.search(before)
+            or _PRODUCT_VERSION_BEFORE.search(before)
+            or after in ("항", "조", "절")
+        )
         if address.is_loopback or address.is_unspecified or version:
             continue
         findings.append(Finding("L-CM-04", match.span(), 0.8, "L0", "ipv4_format"))

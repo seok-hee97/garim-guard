@@ -145,13 +145,16 @@ macOS 의 python.org 빌드에서 L0 만 설치(`pip install garim-guard`)했다
   - 빼는 것은 모양이 맞는 모델 설정 값과 모양이 맞는 대화 ID(`tool_call_id` 등)다.
   - 첨부는 base64 로 풀어 본다.
     - 텍스트(UTF-8 · CP949 · UTF-16)면 푼 글을 검사하고, 가렸으면 다시 인코딩해 보낸다.
-    - 문서(PDF · DOCX · XLSX · PPTX · HWPX · ODF)면 글을 꺼내 검사한다. 본문 · 표 · 메모 · 차트 · 문서 속성 ·
-      대체 텍스트 · PDF 양식 필드와 주석까지 읽는다. 문서 안은 가릴 수 없으므로, 가려야 할 값이 나오면 정책
+    - 문서(PDF · DOCX · XLSX · PPTX · HWPX · ODF)면 글을 꺼내 검사한다. 본문 · 표 · 수식 · 메모 · 차트 · 문서
+      속성 · 대체 텍스트 · PDF 양식 필드와 주석까지 읽고, 파트 이름이 아니라 내용으로 XML 을 고른다. PDF 는
+      PDF 리더처럼 머리(`%PDF-`)가 앞 1KB 안에 있을 때 PDF 로 본다. 두 형식으로 읽히는 파일은 둘 다 읽는다.
+      SVG 그림은 보이는 글만 읽고 다시 쓰지 않는다. 문서 안은 가릴 수 없으므로, 가려야 할 값이 나오면 정책
       `attachments.unmaskable`(기본 `block`)을 따른다. PDF 는 `garim-guard[docs]` 가 있을 때만 별도
       프로세스에서 시간 제한을 두고 읽는다.
-    - 문서인데 읽지 못하면(너무 큼 · 깨짐 · 암호 · 시간 초과 · `[docs]` 없는 PDF) 정책
-      `attachments.unreadable`(기본 `block`)을 따른다. 일부러 크게 · 깨지게 만든 문서로 검사를 비껴가지 못하게
-      기본값을 막음으로 둔다.
+    - 문서인데 읽지 못하면(너무 큼 · 깨짐 · 암호 · 시간 초과 · `[docs]` 없는 PDF · 본문이 이진인 `.xlsb` · 요청
+      하나에 문서 16개 초과)
+      정책 `attachments.unreadable`(기본 `block`)을 따른다. 일부러 크게 · 깨지게 만든 문서로 검사를 비껴가지
+      못하게 기본값을 막음으로 둔다.
     - 글을 꺼낼 수 없는 첨부(이미지 · 오디오 · 레거시 HWP/DOC · 글이 없는 문서 · `file_id` 만 있는 파일 · 원격
       이미지 주소)는 정책 `attachments.uninspected`(기본 `allow`, 엄격 프로필 `warn`)를 따른다. 이미지 안의
       글자(OCR)는 읽지 않는다.
@@ -159,7 +162,7 @@ macOS 의 python.org 빌드에서 L0 만 설치(`pip install garim-guard`)했다
     때문이다.
   - 응답에서는 `content` · `refusal` · 추론 본문 · 도구 인자의 토큰을 원문으로 복원한다.
   - 상류의 리다이렉트는 따라가지 않는다. 따라가면 사용자의 키가 다른 호스트로 간다.
-  - 받는 경로는 `POST /v1/chat/completions` 하나다.
+  - 받는 경로는 `POST /v1/chat/completions` 하나다(`/v1` 없는 `/chat/completions` 도 같은 경로로 받는다).
 - 스트리밍(`stream: true`)은 상류에 스트리밍 없이 요청해 전문을 복원한 뒤 SSE 로 돌려준다 — 조각째
   복원하면 `<PHONE_1>` 이 청크 경계에서 깨진다. 거부가 필요하면 `--refuse-streaming`.
 - 공격 · 기밀 표식 · 형식을 모르는 고엔트로피 시크릿(`L-SEC-05`)은 기본 정책에서 `warn`(전달하고
@@ -190,7 +193,7 @@ outbound = result.masked_segments        # 외부 API 로 보낼 것
 
 정책(`allow / mask / warn / block`)과 임계는 YAML 로 넘길 때만 바뀐다 — CLI 는 `--policy`, 라이브러리는
 `Inspector(경로)`. 넘기지 않으면 내장 기본값으로 돌며, 그 판정은 [`config/policy.yaml`](https://github.com/seok-hee97/garim-guard/blob/main/config/policy.yaml) 과
-같다(파일에만 사용자 패턴 예시 `EMP-\d{6}` 가 있다). 바꿀 때는 이 파일을 복사해 고친 뒤 넘긴다. 엄격 프로필은
+같다(파일과 엄격 프로필에만 사용자 패턴 예시 `EMP-\d{6}` 가 있다). 바꿀 때는 이 파일을 복사해 고친 뒤 넘긴다. 엄격 프로필은
 패키지에 들어 있어 이름(`strict`)으로 넘긴다. 이 이름은 늘 내장 프로필이다. 같은 이름의 파일을 쓰려면 `./strict`
 처럼 경로로 준다.
 
@@ -226,14 +229,17 @@ GARIM_NAME_LIST=names.txt garim --l1-backend examples/backends/l1_name_list.py:b
 - **처음 보는 정상 문장에서 공격 오탐이 높다**(자작 홀드아웃 0.426). 기본 정책이 공격을 `warn` 으로 두는
   이유다. 운영 트래픽에서 오탐을 먼저 재고 `block` 을 켠다.
 - 띄어쓰기 깨기 · 초성 · 된소리처럼 정규화가 되돌리지 않는 변이에서 L1 탐지율이 0.12 ~ 0.26 으로 떨어진다.
-- 시스템 프롬프트 유출(A2) 탐지가 약하다(0.146) — 학습 데이터가 적다.
+- 시스템 프롬프트 유출(A2) 탐지가 약하다(0.158) — 학습 데이터가 적다.
 - `입금` · `계좌` 같은 앵커 바로 옆의 운송장 · 주문번호는 계좌번호로 가릴 수 있다.
 - 기밀 표식은 문서 머리의 단독 줄 · 괄호 · 강조(`[대외비]`, `**대외비**`) · 구분자 머리(`대외비 - …`) · 등급
   표기 · `본 문서는 대외비입니다` 를 잡는다. 문장 속 언급(`대외비 처리 절차가 궁금합니다`)은 일부러 잡지 않는다
   (위치 가중치, DESIGN §2.5).
 - L0 공격 규칙은 흔한 문구(이전 지시 무시 · 시스템 프롬프트 요구 · 탈옥 표지)만 잡는다. 공격 탐지는 L1 · L2 몫이다.
 - 프록시는 이미지 안의 글자(OCR) · 오디오 · 레거시 HWP/DOC 첨부와, 도구 인자 · 설정 필드의 숫자 값은 검사하지
-  않는다. 검사하지 못한 첨부는 정책 `attachments.uninspected` 로 막거나 경고할 수 있다.
+  않는다. 글을 압축하거나 NUL 바이트 · BOM 없는 UTF-16 으로 일부러 이진처럼 만든 첨부도 글로 읽지 않는다.
+  이런 첨부는 모두 `attachments.uninspected` 에 들고, 기본값 `allow` 를 `warn` · `block` 으로 바꿔 막을 수 있다.
+- L1 이 사람 이름의 일부를 다른 종류(주소 등)로 표시할 때가 있다(`홍길동` → `홍` 주소 + `길동` 이름). 가리기는
+  하지만 토큰 이름이 틀린다.
 - 영어 텍스트의 문맥 개체는 거의 못 본다(TAB DIRECT 0.036).
 - 노트북 CPU 지연은 아직 재지 않았다.
 
@@ -249,9 +255,10 @@ GARIM_NAME_LIST=names.txt garim --l1-backend examples/backends/l1_name_list.py:b
 ## 개발
 
 ```bash
-uv sync --extra train --extra dev
+uv sync --extra train --extra dev --extra l1 --extra docs
 uv run python -m pytest
 uv run ruff check garim bench tests tools train examples
+uv run ruff format --check garim bench tests tools train examples
 uv run python train/validate_sources.py && uv run python train/validate_models.py
 ```
 
@@ -265,7 +272,7 @@ probe 와 함께 **검사 경로가 소켓을 열지 않는지**(`tools/no_exter
 |---|---|
 | 코드 | [Apache-2.0](https://github.com/seok-hee97/garim-guard/blob/main/LICENSE) |
 | L1 가중치 | **CC-BY-SA-4.0** — 학습 데이터 KLUE-NER(CC-BY-SA-4.0)의 ShareAlike 를 따른 보수적 선택 |
-| L2 GGUF | 원 모델 `google/gemma-4-E2B-it` 의 라이선스 |
+| L2 GGUF | **Apache-2.0** — 원 모델 `google/gemma-4-E2B-it` 의 라이선스 |
 | 데이터 | 원천별 라이선스(CC-BY-4.0 · CC-BY-SA-4.0 · MIT · Apache-2.0) — dataset 카드 |
 
 이전 프로젝트 SafeAgent-KR 은 `legacy-safeagent` 브랜치에 있다 — [NOTICE](https://github.com/seok-hee97/garim-guard/blob/main/NOTICE).

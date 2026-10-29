@@ -12,7 +12,7 @@ from typing import NoReturn
 
 from garim._version import __version__
 from garim.api import Inspector
-from garim.attachments import DOCUMENT_SUFFIXES, TEXT_FALLBACK_REASONS, extract_document
+from garim.attachments import DOCUMENT_SUFFIXES, extract_document
 from garim.detect.l1 import L1Backend
 from garim.detect.l2 import L2Backend
 from garim.models import CheckResult
@@ -81,7 +81,7 @@ def _port(value: str) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="garim", description="로컬 프롬프트 사전 검사기")
     parser.add_argument("--version", action="version", version=f"garim-guard {__version__}")
-    parser.add_argument("--policy", help="정책 YAML 경로")
+    parser.add_argument("--policy", help="정책 YAML 경로 또는 내장 프로필 이름(strict)")
     parser.add_argument("--mode", choices=("interactive", "thorough"), default="interactive")
     l1_source = parser.add_mutually_exclusive_group()
     l1_source.add_argument(
@@ -268,8 +268,11 @@ def _windows(text: str, limit: int) -> list[tuple[int, str]]:
         start = max(start + 1, end - overlap)
 
 
-def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
+def _check_file(inspector: Inspector, source: str, mode: str) -> tuple[CheckResult, bool]:
     """파일 하나를 검사한다. 입력 상한보다 길면 창으로 나눠 **끝까지** 본다.
+
+    결과와 함께 가려야 할 값이 있었는지를 돌려준다 — 창으로 나눈 결과는 마스킹본이 없어서
+    ★ 최종 검토: 13만 자 문서 속 전화번호가 `attachments.unmaskable` 을 비껴가 0 으로 끝났다.
 
     ★ 5차 검토 — 상한(기본 10만 자)을 넘는 파일은 잘린 입력이라 block · degraded 만 내고
       탐지 목록은 비어 있었다. 10만 500번째 글자의 AWS 키는 끝내 보고되지 않았다. 스캔은
@@ -277,7 +280,8 @@ def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
     """
     limit = inspector.policy.config.limits.max_input_chars
     if len(source) <= limit:
-        return inspector.check(source, mode=mode)
+        result = inspector.check(source, mode=mode)
+        return result, result.masked_text is not None
     results = []
     seen: set[tuple[str, tuple[int, int]]] = set()
     leaks, attacks = [], []
@@ -291,7 +295,8 @@ def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
                     seen.add((finding.code, span))
                     bucket.append(replace(finding, span=span))
     first = results[0]
-    return replace(
+    maskable = any(result.masked_text is not None for result in results)
+    merged = replace(
         first,
         verdict=max((result.verdict for result in results), key=SEVERITY.__getitem__),
         leaks=leaks,
@@ -301,6 +306,7 @@ def _check_file(inspector: Inspector, source: str, mode: str) -> CheckResult:
         degraded=any(result.degraded for result in results),
         degraded_reasons=sorted({r for result in results for r in result.degraded_reasons}),
     )
+    return merged, maskable
 
 
 def _l1_backend(args: argparse.Namespace) -> L1Backend | None:
@@ -406,8 +412,8 @@ def main(argv: list[str] | None = None) -> int:
         skipped: list[str] = [f"{entry} (directory)" for entry in unreadable]
         if excluded:
             print(
-                f"garim: {excluded} files not inspected — not a text type garim scans "
-                "(see README for the list)",
+                f"garim: {excluded} files not inspected — not a type garim scans "
+                f"({' '.join(sorted(_TEXT_SUFFIXES | DOCUMENT_SUFFIXES))})",
                 file=sys.stderr,
             )
         for path in targets:
@@ -424,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
                 document = path.suffix.lower() in DOCUMENT_SUFFIXES
                 if document:
                     # 문서는 글을 꺼내 검사한다 — 꺼내지 못하면(글이 없는 문서 포함) 검사하지 못한
-                    # 파일이다. 문서처럼 보이지만 텍스트인 파일은 그 텍스트를 본다(프록시와 같다).
+                    # 파일이다. 문서가 아닌 바이트(확장자만 문서)가 텍스트면 그 텍스트를 본다.
                     raw = path.read_bytes()
                     extraction = extract_document(raw)
                     if extraction is not None and extraction.text is not None:
@@ -432,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
                     else:
                         reason = extraction.reason if extraction is not None else "not a document"
                         fallback = None
-                        if extraction is None or reason in TEXT_FALLBACK_REASONS:
+                        if extraction is None:
                             try:
                                 fallback = raw.decode("utf-8")
                             except UnicodeDecodeError:
@@ -450,12 +456,12 @@ def main(argv: list[str] | None = None) -> int:
                 #   출력하지 않고 0 을 냈다.
                 skipped.append(f"{path}: {type(exc).__name__}")
                 continue
-            result = _check_file(inspector, source, args.mode)
+            result, maskable = _check_file(inspector, source, args.mode)
             _print_result(
                 result, as_json=args.as_json, prefix=str(path), show_masked=args.show_masked
             )
             code = _exit_code(result)
-            if document and result.masked_text is not None:
+            if document and maskable:
                 # 문서 안은 가릴 수 없다 — 프록시와 같이 `attachments.unmaskable` 을 따른다.
                 setting = inspector.policy.config.attachments.unmaskable
                 print(f"garim: {path}: unmaskable document → {setting}", file=sys.stderr)

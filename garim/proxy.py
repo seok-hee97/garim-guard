@@ -41,9 +41,10 @@ from typing import Any
 
 from garim.api import Inspector
 from garim.attachments import (
-    TEXT_FALLBACK_REASONS,
+    MAX_DOCUMENTS_PER_REQUEST,
     UNREADABLE_REASONS,
     Extraction,
+    document_kind,
     extract_document,
 )
 from garim.detect.l1 import L1Backend
@@ -227,7 +228,7 @@ _UNSCANNED_REQUEST_KEYS = frozenset(
 _BINARY_PARTS = (("image_url", "url"), ("input_audio", "data"), ("file", "file_data"))
 # 대소문자를 가리지 않는다 — `DATA:` · `;BASE64,` 도 data URL 이다(재검토).
 _DATA_URL = re.compile(
-    r"(?P<prefix>data:(?P<mime>[^,]*?)(?:;[^,;]*)*?;base64,)(?P<body>.*)", re.S | re.I
+    r"(?P<prefix>data:(?P<mime>[^,]*?)(?:;[^,;]*)*?;\s*base64,)(?P<body>.*)", re.S | re.I
 )
 _SHORT_PAYLOAD = 256
 
@@ -266,6 +267,36 @@ def _decoded_text(raw: bytes) -> tuple[str, str] | None:
     return None
 
 
+_BASE64_ALPHABET = re.compile(r"[^A-Za-z0-9+/=_-]")
+
+
+def _base64_like(value: str) -> bool:
+    """맨 base64 자리의 값이 base64 처럼 보이는가 — 공백이 없고 거의 다 base64 글자."""
+    compact = re.sub(r"\s+", "", value)
+    return " " not in value.strip() and len(_BASE64_ALPHABET.sub("", compact)) >= 0.95 * max(
+        len(compact), 1
+    )
+
+
+def _lenient_b64decode(compact: str, *, data_url: bool) -> bytes | None:
+    """관대한 해석기(Python `b64decode` · Node `Buffer.from`)처럼 푼다.
+
+    base64 글자가 아닌 것은 버리고, 첫 패딩(`=`)에서 멈춘다 — ★ 재검토: 패딩을 지우고 이어 풀던 판은
+    조각을 이어 붙인 base64(`b64(c1)+b64(c2)`)에서 해석기가 보는 c1 을 놓쳤다. 맨 base64
+    자리(`file_data` 등)의 짧은 값은 평문으로 검사한다.
+    """
+    if not data_url and len(compact) <= _SHORT_PAYLOAD:
+        return None
+    filtered = _BASE64_ALPHABET.sub("", compact).replace("-", "+").replace("_", "/")
+    body = filtered.split("=", 1)[0]
+    if len(body) % 4 == 1:
+        body = body[:-1]
+    try:
+        return base64.b64decode(body + "=" * (-len(body) % 4))
+    except ValueError:
+        return None
+
+
 def _classify_payload(
     value: str, *, require_data_url: bool, budget: list[int] | None = None
 ) -> str | _EncodedText | Extraction:
@@ -273,11 +304,15 @@ def _classify_payload(
     가린다) · `Extraction`(문서에서 꺼낸 글 — 탐지에만 쓴다).
 
     문서를 텍스트보다 먼저 본다 — ASCII 로만 된 PDF 를 텍스트로 보고 다시 인코딩하면 파일이 깨진다.
-    문서처럼 보이지만 읽지 못했고 바이트가 텍스트로 읽히면, 그 텍스트를 탐지용으로 검사한다
-    (★ 재검토: `%PDF` 로 시작하는 메모 · `[docs]` 없이 받은 ASCII PDF 가 검사 없이 나갔다).
-    `budget` 은 요청 하나에서 문서로부터 꺼낼 남은 글자 수다.
+    간접 객체가 없는 `%PDF-` 바이트는 문서가 아니라 텍스트다(`garim.attachments._container`).
+    `budget` 은 요청 하나에서 문서로부터 꺼낼 남은 [글자 수, 문서 수] 다.
+
+    ★ 최종 검토 — 읽지 못한 PDF 의 바이트가 텍스트로 읽히면 그 텍스트를 대신 검사했는데, `[docs]`
+      없이 받은 ASCII85 · Flate PDF 는 순수 ASCII 라 "검사함 → 허용" 으로 나갔다. 이제 진짜 PDF 는
+      읽지 못하면 `attachments.unreadable` 을 따른다. 또 엄격한 base64 해석에 실패하면 평문으로
+      봐서, 문자 하나를 끼운 data URL(관대한 해석기는 원본을 푼다)이 첨부로 세지지 않았다.
     """
-    match = _DATA_URL.fullmatch(value)
+    match = _DATA_URL.fullmatch(value.strip())
     if match is not None:
         prefix, body = match.group("prefix"), match.group("body")
     elif require_data_url:
@@ -293,26 +328,41 @@ def _classify_payload(
             validate=True,
         )
     except ValueError:
-        return "plain"
+        raw = _lenient_b64decode(compact, data_url=match is not None)
+        if raw is None:
+            return "plain"
+        lenient = True
+    else:
+        lenient = False
     if not raw:
         return "plain"
-    remaining = budget[0] if budget is not None else None
-    document = (
-        extract_document(raw, max_chars=max(remaining, 0) + 1)
-        if remaining is not None
-        else extract_document(raw)
-    )
+    if budget is not None and budget[1] <= 0:
+        kind = document_kind(raw)
+        if kind is not None:
+            return Extraction(kind, None, "too_many")
+        document = None
+    elif budget is not None:
+        document = extract_document(raw, max_chars=max(budget[0], 0) + 1)
+    else:
+        document = extract_document(raw)
     if document is not None:
-        if document.text is None and document.reason in TEXT_FALLBACK_REASONS:
-            fallback = _decoded_text(raw)
-            if fallback is not None:
-                document = Extraction(document.kind, fallback[0], "raw_text")
-        if document.text is not None and budget is not None:
-            budget[0] -= len(document.text)
+        if budget is not None:
+            budget[1] -= 1
+            if document.text is not None:
+                budget[0] -= len(document.text)
         return document
+    if lenient and not _base64_like(body):
+        # 공백이 있거나 base64 글자가 적은 값은 문서가 아니면 평문이다 — ★ 재검토: base64 가 아닌
+        # 평문 본문의 data URL 이 이진 첨부로 세져 검사 없이 나갔다.
+        return "plain"
     decoded = _decoded_text(raw)
     if decoded is not None:
         return _EncodedText(value, prefix, decoded[0], decoded[1], urlsafe)
+    if not _base64_like(body):
+        # base64 본문에는 공백이 없다(줄바꿈만). ★ 재검토: 공백을 지우면 글자 · 숫자 · `-` 만 남는
+        # 영어 문장이 URL-safe base64 로 풀려 이진이 되고, 전화번호가 그대로 나갔다. 공백으로 나눈
+        # base64 문서는 위에서 이미 문서로 읽었다.
+        return "plain"
     return "binary"
 
 
@@ -563,11 +613,13 @@ def _field_leaves(
                 continue
             if key == "content" and isinstance(value, list):
                 for part_index, part in enumerate(value):
-                    if _is_text_part(part):
-                        part = {k: v for k, v in part.items() if k != "text"}
                     prepared = _prepare_part(
                         part, attachments if attachments is not None else [], index, origin, budget
                     )
+                    if _is_text_part(part):
+                        # 본문은 메시지 세그먼트가 검사한다. ★ 최종 검토: 사본을 넘겨서, 같은 파트의
+                        #   텍스트 첨부가 사본에서만 풀려 가린 평문이 data URL 자리에 그대로 쓰였다.
+                        prepared = {k: v for k, v in prepared.items() if k != "text"}
                     _collect(prepared, (*path, part_index), origin, leaves)
             elif key == "tool_calls" and isinstance(value, list):
                 for call_index, call in enumerate(value):
@@ -783,9 +835,9 @@ class ProxyService:
         segments = segments_from_messages(messages)
         inspector = self._inspector_factory()
         attachments: list[_Attachment] = []
-        # 요청 하나에서 문서로부터 꺼낼 글자 수 — 검사 상한을 넘기면 어차피 막는다(재검토: 작은
-        # 첨부 여러 개가 수 GB 의 글을 메모리에 쌓을 수 있었다).
-        budget = [inspector.policy.config.limits.max_input_chars + 1]
+        # 요청 하나에서 문서로부터 꺼낼 [글자 수, 문서 수] — 검사 상한을 넘기면 어차피 막는다
+        # (재검토: 작은 첨부 여러 개가 수 GB 의 글을 메모리에 쌓을 수 있었다).
+        budget = [inspector.policy.config.limits.max_input_chars + 1, MAX_DOCUMENTS_PER_REQUEST]
         try:
             working = _working_copy(payload)
             groups = _field_groups(_field_leaves(working, attachments, budget))
