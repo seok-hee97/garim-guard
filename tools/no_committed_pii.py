@@ -1,4 +1,4 @@
-"""Fail when a Git-visible file contains a checksum-valid resident-number candidate.
+"""Fail when a Git-visible file or a commit message contains a checksum-valid resident number.
 
 Matched values are never printed. This guard is deliberately standalone so CI can run it before
 installing Garim and so importing a design probe cannot leak its verbose sample output.
@@ -88,15 +88,40 @@ def scan(root: Path) -> list[tuple[Path, int]]:
     return hits
 
 
+def scan_messages(root: Path) -> list[str]:
+    """체크아웃에 있는 커밋 메시지(CI 의 얕은 체크아웃이면 HEAD 하나)에서 후보가 든 커밋.
+
+    ★ 2026-10-29 — 파일만 봐서, 커밋 메시지 두 곳에 적은 합성 주민번호가 공개 이력에 남았다.
+      지우려면 이력을 다시 쓰고 저장소를 다시 만들어야 했다.
+    """
+    output = subprocess.run(
+        ["git", "log", "--format=%H%x00%B%x01"], cwd=root, capture_output=True, text=True
+    )
+    if output.returncode != 0:
+        return []
+    hits = []
+    for record in output.stdout.split("\x01"):
+        sha, _, body = record.strip("\n").partition("\x00")
+        if sha and resident_candidates(body):
+            hits.append(sha[:12])
+    return hits
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     hits = scan(root)
-    if hits:
+    messages = scan_messages(root)
+    if hits or messages:
         print("checksum-valid resident-number candidate found; values are redacted")
         for path, line in hits[:20]:
             print(f"{path}:{line}")
+        for sha in messages[:20]:
+            print(f"commit {sha}: message")
         return 1
-    print(f"OK: no checksum-valid resident-number candidate in {len(visible_files(root))} files")
+    print(
+        f"OK: no checksum-valid resident-number candidate in {len(visible_files(root))} files "
+        "and the checked-out commit messages"
+    )
     return 0
 
 

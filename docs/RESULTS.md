@@ -479,7 +479,7 @@ TAB 주석자 둘의 `identifier_type` 일치도가 **0.609**(멘션 7,434)다. 
 ## 8. 공개 후 L0 규칙 변경의 영향 — 2026-10-28, L0 만 재측정
 
 공개 뒤 검토에서 L0 를 고쳤다(유선전화 · 점 구분 휴대폰 · 차세대 여권 · 키 접두 · 개인키 머리, 보이지 않는
-문자 제거, 이메일 끝 경계 — `9516566` · `eea1659`). 바뀌기 전(`a0906cd`)과 뒤(`eea1659`)를 **같은 기계 ·
+문자 제거, 이메일 끝 경계 — `d16e4ad` · `7559172`). 바뀌기 전(`2f30c55`)과 뒤(`7559172`)를 **같은 기계 ·
 같은 데이터**로 L1 없이 쟀다. L1 을 포함한 제품 경로(README 성능 표)는 다시 재지 않았다.
 
 | 셋 | 지표 | 전 | 후 |
@@ -498,7 +498,7 @@ TAB 주석자 둘의 `identifier_type` 일치도가 **0.609**(멘션 7,434)다. 
   바뀌지 않는다(그래도 L1 을 포함한 값은 재지 않았다).
 
 ```bash
-git archive a0906cd garim bench config | tar -x -C <전>   # 후는 eea1659
+git archive 2f30c55 garim bench config | tar -x -C <전>   # 후는 7559172
 cd <전 또는 후> && python -m bench.run_axis_b --benchmark <KoreanGuardrail>/benchmark.jsonl --judge garim-l0
 cd <전 또는 후> && python -m bench.secret_baselines
 # PII: bench/l1_product_path.py 의 product_path 셈을 L1 없는 Inspector() 로 — kdpii-test · bc 음성
@@ -553,7 +553,7 @@ python -m bench.secret_baselines
 
 §8 · §9 는 L0 만 다시 쟀다. 0.1.3 규칙에 배포 L1 을 붙여 README 의 L0 + L1 표를 다시 쟀다.
 
-- 코드: d6528b3 를 `git archive` 로 따로 풀어 그 디렉터리에서 돌았다. 다음 커밋 69e9e5f 는 첨부 · 프록시 ·
+- 코드: 5cb763d 를 `git archive` 로 따로 풀어 그 디렉터리에서 돌았다. 다음 커밋 a0e7383 는 첨부 · 프록시 ·
   CLI 만 바꿨다. 검출 코드는 지금과 같다.
 - 모델: `garim_l1.int8.onnx`(`reduce_range` 판). sha256 `906f73ec…` 로 배포 파일과 같다.
 - 기계: Apple M1(arm64), `GARIM_L1_THREADS=2`, `nice -n 15`. 기준선은 x86 pod 에서 잰 R1 이다
@@ -589,7 +589,7 @@ python -m bench.secret_baselines
   128토큰 p50 / p95(`bench.latency`, pod)와는 다른 측정이라 그 행을 바꾸지 않았다.
 
 ```bash
-# d6528b3 를 풀어 둔 디렉터리에서, measure.yaml = 기본 정책 + l1_timeout_ms: 30000
+# 5cb763d 를 풀어 둔 디렉터리에서, measure.yaml = 기본 정책 + l1_timeout_ms: 30000
 export GARIM_L1_THREADS=2
 python -m bench.r2_eval --l1-model-dir <l1-onnx> --policy measure.yaml \
   --t4 data/corpus/t4-r2-test.jsonl --pii-negative data/corpus/pii-negative-r2-test.jsonl \

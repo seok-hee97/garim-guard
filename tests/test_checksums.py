@@ -100,3 +100,26 @@ def test_guard_tool_checksum_agrees_with_garim() -> None:
                 if rrn_checksum_valid(value) != resident_candidate_valid(value):
                     disagreements.append(value)
     assert not disagreements, f"가드와 garim 의 체크섬이 {len(disagreements)}건 어긋난다"
+
+
+def test_guard_tool_scans_commit_messages(tmp_path) -> None:  # noqa: ANN001
+    """★ 파일만 봐서 커밋 메시지의 합성 주민번호가 공개 이력에 남았다."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from no_committed_pii import scan_messages
+
+    front = "900101123456"
+    weights = (2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5)
+    check = (11 - sum(int(d) * w for d, w in zip(front, weights, strict=True)) % 11) % 10
+    value = f"{front[:6]}-{front[6:]}{check}"
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "clean"], check=True)
+    assert scan_messages(tmp_path) == []
+    subprocess.run(
+        [*git, "commit", "-q", "--allow-empty", "-m", f"fix: {value} 을 막는다"], check=True
+    )
+    assert len(scan_messages(tmp_path)) == 1
